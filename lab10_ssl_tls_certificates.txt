@@ -1,5 +1,5 @@
 RHCE RH254 HANDS-ON LAB: SSL/TLS CERTIFICATE IMPLEMENTATION
-
+==========================================================
 
 LAB OBJECTIVE:
 Configure SSL/TLS certificates for Apache HTTPS connections with self-signed and CA-signed certificates
