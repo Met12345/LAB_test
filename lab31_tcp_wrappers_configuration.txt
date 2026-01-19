@@ -1,0 +1,593 @@
+RHCE RH254 HANDS-ON LAB: TCP WRAPPERS CONFIGURATION
+====================================================
+
+LAB OBJECTIVE:
+Configure TCP Wrappers for network service access control and security monitoring
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- Network services installed (SSH, FTP, etc.)
+- Understanding of TCP Wrappers concepts
+
+LAB SCENARIO:
+Configure TCP Wrappers to control access to network services based on client IP addresses and hostnames.
+
+EQUIPMENT NEEDED:
+- RHEL system with network services
+- Client systems from different networks
+- Services compiled with libwrap support
+
+LAB TASKS:
+
+PART A: UNDERSTAND TCP WRAPPERS BASICS
+---------------------------------------
+
+1. Check if services support TCP Wrappers:
+   # ldd /usr/sbin/sshd | grep libwrap
+   # ldd /usr/sbin/vsftpd | grep libwrap
+   # strings /usr/sbin/sshd | grep hosts_access
+
+2. Verify TCP Wrappers files exist:
+   # ls -la /etc/hosts.allow
+   # ls -la /etc/hosts.deny
+
+3. Check current TCP Wrappers configuration:
+   # cat /etc/hosts.allow
+   # cat /etc/hosts.deny
+
+4. Test TCP Wrappers functionality:
+   # tcpdchk
+   # tcpdmatch sshd 192.168.1.100
+
+PART B: CONFIGURE BASIC ACCESS CONTROL
+---------------------------------------
+
+1. Create basic allow rules:
+   # vim /etc/hosts.allow
+   
+   # Allow SSH from local network
+   sshd: 192.168.1.0/255.255.255.0
+   
+   # Allow SSH from specific hosts
+   sshd: 192.168.1.100, 192.168.1.101
+   
+   # Allow FTP from trusted hosts
+   vsftpd: .example.com
+   
+   # Allow all services from localhost
+   ALL: 127.0.0.1
+   
+   # Allow specific services from anywhere (be careful)
+   httpd: ALL
+
+2. Create basic deny rules:
+   # vim /etc/hosts.deny
+   
+   # Deny all services from specific bad networks
+   ALL: 203.0.113.0/255.255.255.0
+   
+   # Deny SSH from unknown hosts
+   sshd: ALL EXCEPT 192.168.1.0/255.255.255.0
+   
+   # Deny FTP from paranoid hosts
+   vsftpd: .suspicious.com
+   
+   # Default deny for all other services
+   ALL: ALL
+
+3. Test configuration syntax:
+   # tcpdchk -v
+
+PART C: CONFIGURE ADVANCED ACCESS RULES
+----------------------------------------
+
+1. Configure hostname-based access:
+   # vim /etc/hosts.allow
+   
+   # Allow SSH from specific hostnames
+   sshd: workstation.example.com, server.example.com
+   
+   # Allow services from domain
+   ALL: .trusted.com
+   
+   # Allow with wildcard patterns
+   sshd: *.internal.local
+
+2. Configure service-specific rules:
+   # vim /etc/hosts.allow
+   
+   # Different rules for different services
+   sshd: 192.168.1.0/24
+   vsftpd: 192.168.1.0/24, 10.0.0.0/8
+   telnet: 192.168.1.100
+   
+   # Multiple services with same rule
+   sshd,vsftpd,httpd: 192.168.1.0/24
+
+3. Configure user-based access (where supported):
+   # vim /etc/hosts.allow
+   
+   # Allow SSH for specific users from specific hosts
+   sshd: 192.168.1.100 : allow
+   sshd: ALL : spawn /usr/local/bin/log-access %c %s
+
+PART D: IMPLEMENT LOGGING AND MONITORING
+-----------------------------------------
+
+1. Configure TCP Wrappers logging:
+   # vim /etc/hosts.allow
+   
+   # Log successful connections
+   sshd: 192.168.1.0/24 : spawn /bin/echo "$(date) SSH connection from %c to %s" >> /var/log/tcp_wrappers.log
+   
+   # Log and allow
+   vsftpd: ALL : spawn /usr/local/bin/log-connection %c %s %d : allow
+
+2. Configure denial logging:
+   # vim /etc/hosts.deny
+   
+   # Log denied connections
+   ALL: ALL : spawn /bin/echo "$(date) DENIED connection from %c to %s" >> /var/log/tcp_wrappers_denied.log
+
+3. Create connection logging script:
+   # vim /usr/local/bin/log-connection
+   
+   #!/bin/bash
+   # TCP Wrappers connection logger
+   
+   CLIENT="$1"
+   SERVICE="$2"
+   DAEMON="$3"
+   
+   LOG_FILE="/var/log/tcp_wrappers.log"
+   
+   {
+       echo "$(date): Connection to $SERVICE from $CLIENT (daemon: $DAEMON)"
+       echo "  Client hostname: $(host $CLIENT 2>/dev/null | awk '{print $NF}' | sed 's/\.$//')"
+       echo "  Server: $(hostname)"
+       echo "  PID: $$"
+       echo "---"
+   } >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/log-connection
+
+4. Create log rotation for TCP Wrappers:
+   # vim /etc/logrotate.d/tcp_wrappers
+   
+   /var/log/tcp_wrappers.log /var/log/tcp_wrappers_denied.log {
+       daily
+       missingok
+       rotate 30
+       compress
+       delaycompress
+       notifempty
+       create 644 root root
+   }
+
+PART E: CONFIGURE SECURITY RESPONSES
+-------------------------------------
+
+1. Configure automatic blocking:
+   # vim /usr/local/bin/block-attacker
+   
+   #!/bin/bash
+   # Block attacking IP addresses
+   
+   ATTACKER_IP="$1"
+   SERVICE="$2"
+   
+   # Log the attack
+   echo "$(date): Blocking $ATTACKER_IP for attacking $SERVICE" >> /var/log/security_blocks.log
+   
+   # Add to hosts.deny temporarily
+   echo "ALL: $ATTACKER_IP # Auto-blocked $(date)" >> /etc/hosts.deny
+   
+   # Add firewall rule
+   iptables -I INPUT -s $ATTACKER_IP -j DROP
+   
+   # Send alert email
+   echo "Attacker $ATTACKER_IP blocked for attacking $SERVICE" | \
+   mail -s "Security Alert: IP Blocked" admin@example.com
+   
+   # chmod +x /usr/local/bin/block-attacker
+
+2. Configure attack detection:
+   # vim /etc/hosts.deny
+   
+   # Block and alert on suspicious activity
+   sshd: ALL : spawn /usr/local/bin/block-attacker %c sshd : deny
+
+3. Create security monitoring script:
+   # vim /usr/local/bin/monitor-tcp-wrappers
+   
+   #!/bin/bash
+   # Monitor TCP Wrappers activity
+   
+   LOG_FILE="/var/log/tcp_wrappers_denied.log"
+   ALERT_THRESHOLD=10
+   
+   if [ -f "$LOG_FILE" ]; then
+       # Count denials in last hour
+       RECENT_DENIALS=$(grep "$(date '+%Y-%m-%d %H')" "$LOG_FILE" | wc -l)
+       
+       if [ $RECENT_DENIALS -gt $ALERT_THRESHOLD ]; then
+           {
+               echo "High number of TCP Wrappers denials: $RECENT_DENIALS in last hour"
+               echo "Recent denied connections:"
+               tail -20 "$LOG_FILE"
+           } | mail -s "TCP Wrappers Security Alert" admin@example.com
+       fi
+   fi
+   
+   # chmod +x /usr/local/bin/monitor-tcp-wrappers
+
+PART F: CONFIGURE SERVICE-SPECIFIC RULES
+-----------------------------------------
+
+1. Configure SSH access control:
+   # vim /etc/hosts.allow
+   
+   # SSH access rules
+   sshd: 192.168.1.0/24 : allow
+   sshd: admin.example.com : allow
+   sshd: .trusted.com : allow
+
+   # vim /etc/hosts.deny
+   sshd: ALL
+
+2. Configure FTP access control:
+   # vim /etc/hosts.allow
+   
+   # FTP access rules
+   vsftpd: 192.168.1.0/24, 10.0.0.0/8 : allow
+   vsftpd: ftp.partner.com : allow
+
+   # vim /etc/hosts.deny
+   vsftpd: ALL
+
+3. Configure Telnet access (if needed):
+   # vim /etc/hosts.allow
+   
+   # Telnet access (very restricted)
+   in.telnetd: 192.168.1.100 : allow
+
+   # vim /etc/hosts.deny
+   in.telnetd: ALL
+
+4. Configure database access:
+   # vim /etc/hosts.allow
+   
+   # MySQL access
+   mysqld: 192.168.1.0/24 : allow
+   mysqld: db-client.example.com : allow
+
+PART G: IMPLEMENT CONDITIONAL ACCESS
+------------------------------------
+
+1. Configure time-based access:
+   # vim /usr/local/bin/time-check
+   
+   #!/bin/bash
+   # Time-based access control
+   
+   HOUR=$(date +%H)
+   DAY=$(date +%u)  # 1=Monday, 7=Sunday
+   
+   # Allow SSH only during business hours (9-17, Mon-Fri)
+   if [ $DAY -le 5 ] && [ $HOUR -ge 9 ] && [ $HOUR -le 17 ]; then
+       exit 0  # Allow
+   else
+       exit 1  # Deny
+   fi
+   
+   # chmod +x /usr/local/bin/time-check
+
+2. Configure conditional rules:
+   # vim /etc/hosts.allow
+   
+   # Time-based SSH access
+   sshd: ALL : aclexec /usr/local/bin/time-check
+
+3. Configure load-based access:
+   # vim /usr/local/bin/load-check
+   
+   #!/bin/bash
+   # Load-based access control
+   
+   LOAD=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}' | tr -d ' ')
+   THRESHOLD=2.0
+   
+   # Deny new connections if load is too high
+   if (( $(echo "$LOAD > $THRESHOLD" | bc -l) )); then
+       exit 1  # Deny
+   else
+       exit 0  # Allow
+   fi
+   
+   # chmod +x /usr/local/bin/load-check
+
+PART H: CONFIGURE BANNER MESSAGES
+----------------------------------
+
+1. Create warning banners:
+   # vim /usr/local/bin/show-banner
+   
+   #!/bin/bash
+   # Display warning banner
+   
+   CLIENT="$1"
+   SERVICE="$2"
+   
+   cat << EOF
+   
+   ******************** WARNING ********************
+   This system is for authorized users only.
+   All activities are monitored and logged.
+   Unauthorized access is prohibited.
+   Connection from: $CLIENT to $SERVICE
+   Time: $(date)
+   ************************************************
+   
+   EOF
+   
+   # chmod +x /usr/local/bin/show-banner
+
+2. Configure banner display:
+   # vim /etc/hosts.allow
+   
+   # Show banner for all connections
+   ALL: ALL : spawn /usr/local/bin/show-banner %c %s : allow
+
+PART I: TEST TCP WRAPPERS CONFIGURATION
+----------------------------------------
+
+1. Test SSH access from allowed network:
+   # ssh user@192.168.1.10  # Should work
+
+2. Test SSH access from denied network:
+   # ssh -o ConnectTimeout=10 user@192.168.1.10  # Should be blocked
+
+3. Test configuration with tcpdmatch:
+   # tcpdmatch sshd 192.168.1.100
+   # tcpdmatch sshd 203.0.113.100
+   # tcpdmatch vsftpd 192.168.1.50
+
+4. Monitor logs:
+   # tail -f /var/log/tcp_wrappers.log
+   # tail -f /var/log/tcp_wrappers_denied.log
+
+5. Test from different clients:
+   # telnet 192.168.1.10 22  # Test SSH port
+   # ftp 192.168.1.10        # Test FTP
+
+PART J: CREATE MANAGEMENT SCRIPTS
+----------------------------------
+
+1. Create TCP Wrappers status script:
+   # vim /usr/local/bin/tcpwrappers-status
+   
+   #!/bin/bash
+   # TCP Wrappers status checker
+   
+   echo "=== TCP Wrappers Status ==="
+   echo "Date: $(date)"
+   echo
+   
+   echo "Configuration files:"
+   echo "hosts.allow:"
+   cat /etc/hosts.allow | grep -v "^#" | grep -v "^$"
+   echo
+   echo "hosts.deny:"
+   cat /etc/hosts.deny | grep -v "^#" | grep -v "^$"
+   echo
+   
+   echo "Services with libwrap support:"
+   for service in sshd vsftpd telnetd; do
+       if ldd /usr/sbin/$service 2>/dev/null | grep -q libwrap; then
+           echo "  $service: YES"
+       else
+           echo "  $service: NO"
+       fi
+   done
+   echo
+   
+   echo "Recent connections (last 10):"
+   if [ -f /var/log/tcp_wrappers.log ]; then
+       tail -10 /var/log/tcp_wrappers.log
+   else
+       echo "  No connection log found"
+   fi
+   
+   echo
+   echo "Recent denials (last 10):"
+   if [ -f /var/log/tcp_wrappers_denied.log ]; then
+       tail -10 /var/log/tcp_wrappers_denied.log
+   else
+       echo "  No denial log found"
+   fi
+   
+   # chmod +x /usr/local/bin/tcpwrappers-status
+
+2. Create backup script:
+   # vim /usr/local/bin/backup-tcpwrappers
+   
+   #!/bin/bash
+   # Backup TCP Wrappers configuration
+   
+   BACKUP_DIR="/var/backups/tcpwrappers"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   mkdir -p $BACKUP_DIR
+   
+   # Backup configuration files
+   cp /etc/hosts.allow $BACKUP_DIR/hosts.allow.$DATE
+   cp /etc/hosts.deny $BACKUP_DIR/hosts.deny.$DATE
+   
+   # Backup custom scripts
+   if [ -d /usr/local/bin ]; then
+       tar -czf $BACKUP_DIR/tcpwrappers_scripts_$DATE.tar.gz \
+           /usr/local/bin/log-connection \
+           /usr/local/bin/block-attacker \
+           /usr/local/bin/time-check \
+           /usr/local/bin/load-check \
+           /usr/local/bin/show-banner 2>/dev/null
+   fi
+   
+   echo "TCP Wrappers backup completed: $BACKUP_DIR"
+   
+   # Remove old backups (keep 30 days)
+   find $BACKUP_DIR -name "*.$DATE" -mtime +30 -delete
+   
+   # chmod +x /usr/local/bin/backup-tcpwrappers
+
+3. Create test script:
+   # vim /usr/local/bin/test-tcpwrappers
+   
+   #!/bin/bash
+   # Test TCP Wrappers configuration
+   
+   echo "=== TCP Wrappers Configuration Test ==="
+   echo
+   
+   # Test configuration syntax
+   echo "Testing configuration syntax:"
+   if tcpdchk 2>/dev/null; then
+       echo "  Configuration syntax: OK"
+   else
+       echo "  Configuration syntax: ERROR"
+       tcpdchk
+   fi
+   echo
+   
+   # Test specific scenarios
+   echo "Testing access scenarios:"
+   
+   # Test allowed access
+   echo "  SSH from 192.168.1.100:"
+   tcpdmatch sshd 192.168.1.100
+   
+   # Test denied access
+   echo "  SSH from 203.0.113.100:"
+   tcpdmatch sshd 203.0.113.100
+   
+   # Test FTP access
+   echo "  FTP from 192.168.1.50:"
+   tcpdmatch vsftpd 192.168.1.50
+   
+   echo
+   echo "Test completed"
+   
+   # chmod +x /usr/local/bin/test-tcpwrappers
+
+PART K: SCHEDULE MONITORING AND MAINTENANCE
+--------------------------------------------
+
+1. Schedule monitoring:
+   # crontab -e
+   # Add: */15 * * * * /usr/local/bin/monitor-tcp-wrappers
+   # Add: 0 2 * * * /usr/local/bin/backup-tcpwrappers
+
+2. Create daily report:
+   # vim /usr/local/bin/tcpwrappers-daily-report
+   
+   #!/bin/bash
+   # Daily TCP Wrappers report
+   
+   REPORT_FILE="/var/log/tcpwrappers_daily_$(date +%Y%m%d).txt"
+   
+   {
+       echo "=== TCP Wrappers Daily Report ==="
+       echo "Date: $(date)"
+       echo "================================"
+       echo
+       
+       /usr/local/bin/tcpwrappers-status
+       
+       echo
+       echo "=== Connection Statistics ==="
+       if [ -f /var/log/tcp_wrappers.log ]; then
+           echo "Total connections today: $(grep "$(date '+%Y-%m-%d')" /var/log/tcp_wrappers.log | wc -l)"
+           echo "Top connecting IPs:"
+           grep "$(date '+%Y-%m-%d')" /var/log/tcp_wrappers.log | \
+           grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | \
+           awk '{print $2}' | sort | uniq -c | sort -nr | head -10
+       fi
+       
+       echo
+       echo "=== Denial Statistics ==="
+       if [ -f /var/log/tcp_wrappers_denied.log ]; then
+           echo "Total denials today: $(grep "$(date '+%Y-%m-%d')" /var/log/tcp_wrappers_denied.log | wc -l)"
+           echo "Top denied IPs:"
+           grep "$(date '+%Y-%m-%d')" /var/log/tcp_wrappers_denied.log | \
+           grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | \
+           awk '{print $2}' | sort | uniq -c | sort -nr | head -10
+       fi
+       
+   } > $REPORT_FILE
+   
+   echo "Daily report generated: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/tcpwrappers-daily-report
+
+PART L: TESTING AND VALIDATION
+-------------------------------
+
+1. Test configuration:
+   # /usr/local/bin/test-tcpwrappers
+
+2. Check status:
+   # /usr/local/bin/tcpwrappers-status
+
+3. Test from different networks:
+   # ssh -o ConnectTimeout=5 user@server  # From allowed network
+   # ssh -o ConnectTimeout=5 user@server  # From denied network
+
+4. Monitor activity:
+   # tail -f /var/log/tcp_wrappers.log
+   # tail -f /var/log/tcp_wrappers_denied.log
+
+5. Generate reports:
+   # /usr/local/bin/tcpwrappers-daily-report
+
+6. Backup configuration:
+   # /usr/local/bin/backup-tcpwrappers
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# tcpdchk -v
+# tcpdmatch service client_ip
+# ldd /usr/sbin/sshd | grep libwrap
+# tail -f /var/log/messages
+# netstat -tulpn | grep :22
+
+EXPECTED RESULTS:
+-----------------
+- TCP Wrappers controlling service access
+- Allowed clients can connect
+- Denied clients are blocked
+- Connection attempts logged
+- Security monitoring operational
+- Automated responses working
+
+VALIDATION CHECKLIST:
+---------------------
+□ TCP Wrappers configuration syntax valid
+□ Service access control working
+□ Logging capturing connections and denials
+□ Security monitoring active
+□ Automated blocking functional
+□ Backup procedures operational
+□ Daily reporting working
+
+CLEANUP:
+--------
+# rm /usr/local/bin/log-connection
+# rm /usr/local/bin/block-attacker
+# rm /usr/local/bin/time-check
+# rm /usr/local/bin/load-check
+# rm /usr/local/bin/show-banner
+# rm /usr/local/bin/tcpwrappers-*
+# rm /usr/local/bin/test-tcpwrappers
+# rm /usr/local/bin/monitor-tcp-wrappers
+# rm /usr/local/bin/backup-tcpwrappers
+# crontab -e  # Remove monitoring entries

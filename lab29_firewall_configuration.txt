@@ -1,0 +1,507 @@
+RHCE RH254 HANDS-ON LAB: FIREWALL CONFIGURATION (IPTABLES/FIREWALLD)
+===================================================================
+
+LAB OBJECTIVE:
+Configure and manage firewall rules using both iptables and firewalld for network security and access control
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- Network connectivity
+- Understanding of network protocols and ports
+
+LAB SCENARIO:
+Configure comprehensive firewall rules to secure server services while allowing legitimate traffic for web, SSH, and database services.
+
+EQUIPMENT NEEDED:
+- RHEL system (server1: 192.168.1.10)
+- Client systems for testing connectivity
+- Various services running (HTTP, SSH, MySQL)
+
+LAB TASKS:
+
+PART A: UNDERSTAND CURRENT FIREWALL STATUS
+-------------------------------------------
+
+1. Check current firewall status:
+   # systemctl status firewalld
+   # systemctl status iptables
+   # firewall-cmd --state
+
+2. View current firewall configuration:
+   # firewall-cmd --list-all
+   # firewall-cmd --get-zones
+   # firewall-cmd --get-default-zone
+
+3. Check iptables rules (if using iptables):
+   # iptables -L -n -v
+   # iptables -t nat -L -n -v
+   # iptables -t mangle -L -n -v
+
+PART B: CONFIGURE FIREWALLD BASIC SETTINGS
+-------------------------------------------
+
+1. Ensure firewalld is running:
+   # systemctl enable firewalld
+   # systemctl start firewalld
+   # systemctl status firewalld
+
+2. Configure default zone:
+   # firewall-cmd --set-default-zone=public
+   # firewall-cmd --get-default-zone
+
+3. List available zones:
+   # firewall-cmd --get-zones
+   # firewall-cmd --list-all-zones
+
+4. Configure zone for specific interface:
+   # firewall-cmd --zone=public --change-interface=eth0
+   # firewall-cmd --get-active-zones
+
+PART C: CONFIGURE SERVICE-BASED RULES
+--------------------------------------
+
+1. Allow common services:
+   # firewall-cmd --permanent --add-service=ssh
+   # firewall-cmd --permanent --add-service=http
+   # firewall-cmd --permanent --add-service=https
+   # firewall-cmd --permanent --add-service=mysql
+
+2. List available services:
+   # firewall-cmd --get-services | tr ' ' '\n' | head -20
+
+3. Create custom service definition:
+   # vim /etc/firewalld/services/webapp.xml
+   
+   <?xml version="1.0" encoding="utf-8"?>
+   <service>
+     <short>WebApp</short>
+     <description>Custom web application service</description>
+     <port protocol="tcp" port="8080"/>
+     <port protocol="tcp" port="8443"/>
+   </service>
+
+4. Add custom service:
+   # firewall-cmd --permanent --add-service=webapp
+   # firewall-cmd --reload
+
+PART D: CONFIGURE PORT-BASED RULES
+-----------------------------------
+
+1. Allow specific ports:
+   # firewall-cmd --permanent --add-port=3306/tcp
+   # firewall-cmd --permanent --add-port=5432/tcp
+   # firewall-cmd --permanent --add-port=8080/tcp
+   # firewall-cmd --permanent --add-port=53/udp
+
+2. Allow port ranges:
+   # firewall-cmd --permanent --add-port=8000-8010/tcp
+   # firewall-cmd --permanent --add-port=60000-61000/udp
+
+3. Remove ports:
+   # firewall-cmd --permanent --remove-port=8010/tcp
+
+4. List current ports:
+   # firewall-cmd --list-ports
+
+PART E: CONFIGURE SOURCE-BASED RULES
+-------------------------------------
+
+1. Allow traffic from specific IP:
+   # firewall-cmd --permanent --add-source=192.168.1.100
+   # firewall-cmd --permanent --zone=trusted --add-source=192.168.1.100
+
+2. Allow traffic from network range:
+   # firewall-cmd --permanent --add-source=192.168.1.0/24
+   # firewall-cmd --permanent --add-source=10.0.0.0/8
+
+3. Create rich rules for complex scenarios:
+   # firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" service name="ssh" accept'
+   # firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.2.0/24" port protocol="tcp" port="3306" accept'
+
+4. Block specific IP addresses:
+   # firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="203.0.113.100" reject'
+
+PART F: CONFIGURE ADVANCED FIREWALLD RULES
+-------------------------------------------
+
+1. Configure port forwarding:
+   # firewall-cmd --permanent --add-forward-port=port=80:proto=tcp:toport=8080
+   # firewall-cmd --permanent --add-forward-port=port=443:proto=tcp:toport=8443:toaddr=192.168.1.20
+
+2. Configure masquerading (NAT):
+   # firewall-cmd --permanent --add-masquerade
+   # firewall-cmd --permanent --zone=external --add-masquerade
+
+3. Configure ICMP blocking:
+   # firewall-cmd --permanent --add-icmp-block=echo-request
+   # firewall-cmd --permanent --add-icmp-block=echo-reply
+
+4. Create time-based rules:
+   # firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" service name="http" log prefix="HTTP Access" level="info" limit value="10/m" accept'
+
+PART G: CONFIGURE IPTABLES RULES (ALTERNATIVE)
+-----------------------------------------------
+
+1. Stop firewalld and start iptables:
+   # systemctl stop firewalld
+   # systemctl disable firewalld
+   # yum install iptables-services -y
+   # systemctl enable iptables
+   # systemctl start iptables
+
+2. Basic iptables configuration:
+   # iptables -F  # Flush existing rules
+   # iptables -P INPUT DROP
+   # iptables -P FORWARD DROP
+   # iptables -P OUTPUT ACCEPT
+
+3. Allow loopback traffic:
+   # iptables -A INPUT -i lo -j ACCEPT
+   # iptables -A OUTPUT -o lo -j ACCEPT
+
+4. Allow established connections:
+   # iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+5. Allow specific services:
+   # iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+   # iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+   # iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+   # iptables -A INPUT -p tcp --dport 3306 -s 192.168.1.0/24 -j ACCEPT
+
+6. Save iptables rules:
+   # service iptables save
+   # iptables-save > /etc/sysconfig/iptables
+
+PART H: CREATE FIREWALL MANAGEMENT SCRIPTS
+-------------------------------------------
+
+1. Create firewall status script:
+   # vim /usr/local/bin/firewall-status.sh
+   
+   #!/bin/bash
+   # Firewall status checker
+   
+   echo "=== Firewall Status Report ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Check which firewall is active
+   if systemctl is-active firewalld >/dev/null 2>&1; then
+       echo "Active Firewall: firewalld"
+       echo
+       echo "Default Zone: $(firewall-cmd --get-default-zone)"
+       echo "Active Zones:"
+       firewall-cmd --get-active-zones
+       echo
+       echo "Allowed Services:"
+       firewall-cmd --list-services
+       echo
+       echo "Allowed Ports:"
+       firewall-cmd --list-ports
+       echo
+       echo "Rich Rules:"
+       firewall-cmd --list-rich-rules
+       
+   elif systemctl is-active iptables >/dev/null 2>&1; then
+       echo "Active Firewall: iptables"
+       echo
+       echo "INPUT Chain Rules:"
+       iptables -L INPUT -n --line-numbers
+       echo
+       echo "FORWARD Chain Rules:"
+       iptables -L FORWARD -n --line-numbers
+       echo
+       echo "OUTPUT Chain Rules:"
+       iptables -L OUTPUT -n --line-numbers
+       
+   else
+       echo "No firewall service is active!"
+   fi
+   
+   # chmod +x /usr/local/bin/firewall-status.sh
+
+2. Create firewall backup script:
+   # vim /usr/local/bin/backup-firewall.sh
+   
+   #!/bin/bash
+   # Backup firewall configuration
+   
+   BACKUP_DIR="/var/backups/firewall"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   mkdir -p $BACKUP_DIR
+   
+   if systemctl is-active firewalld >/dev/null 2>&1; then
+       echo "Backing up firewalld configuration..."
+       
+       # Backup firewalld configuration
+       tar -czf $BACKUP_DIR/firewalld_backup_$DATE.tar.gz \
+           /etc/firewalld/ \
+           /usr/lib/firewalld/
+       
+       # Export current configuration
+       firewall-cmd --list-all-zones > $BACKUP_DIR/firewalld_zones_$DATE.txt
+       firewall-cmd --list-all > $BACKUP_DIR/firewalld_default_$DATE.txt
+       
+   elif systemctl is-active iptables >/dev/null 2>&1; then
+       echo "Backing up iptables configuration..."
+       
+       # Backup iptables rules
+       iptables-save > $BACKUP_DIR/iptables_rules_$DATE.txt
+       cp /etc/sysconfig/iptables $BACKUP_DIR/iptables_config_$DATE.txt
+       
+   fi
+   
+   echo "Firewall backup completed: $BACKUP_DIR"
+   
+   # Remove old backups (keep 30 days)
+   find $BACKUP_DIR -name "*backup*" -mtime +30 -delete
+   
+   # chmod +x /usr/local/bin/backup-firewall.sh
+
+3. Create firewall testing script:
+   # vim /usr/local/bin/test-firewall.sh
+   
+   #!/bin/bash
+   # Test firewall rules
+   
+   TARGET_HOST="${1:-192.168.1.10}"
+   
+   echo "=== Firewall Rule Testing ==="
+   echo "Target: $TARGET_HOST"
+   echo "Date: $(date)"
+   echo
+   
+   # Test common ports
+   PORTS=(22 80 443 3306 5432 8080)
+   
+   for port in "${PORTS[@]}"; do
+       echo -n "Testing port $port: "
+       if timeout 3 bash -c "</dev/tcp/$TARGET_HOST/$port" 2>/dev/null; then
+           echo "OPEN"
+       else
+           echo "CLOSED/FILTERED"
+       fi
+   done
+   
+   echo
+   echo "Testing ICMP (ping):"
+   if ping -c 1 -W 3 $TARGET_HOST >/dev/null 2>&1; then
+       echo "ICMP: ALLOWED"
+   else
+       echo "ICMP: BLOCKED"
+   fi
+   
+   # chmod +x /usr/local/bin/test-firewall.sh
+
+PART I: CONFIGURE LOGGING AND MONITORING
+-----------------------------------------
+
+1. Enable firewall logging:
+   # firewall-cmd --set-log-denied=all
+   # firewall-cmd --get-log-denied
+
+2. Configure rich rule with logging:
+   # firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="0.0.0.0/0" service name="ssh" log prefix="SSH-ACCESS" level="info" limit value="3/m" accept'
+
+3. Create log monitoring script:
+   # vim /usr/local/bin/monitor-firewall-logs.sh
+   
+   #!/bin/bash
+   # Monitor firewall logs
+   
+   LOG_FILE="/var/log/messages"
+   
+   echo "=== Firewall Log Monitor ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Recent firewall denials
+   echo "Recent denied connections (last 50):"
+   grep "$(date '+%b %d')" $LOG_FILE | grep -i "reject\|drop\|deny" | tail -50
+   
+   echo
+   echo "Top 10 blocked source IPs:"
+   grep "$(date '+%b %d')" $LOG_FILE | grep -i "reject\|drop" | \
+   grep -oE "SRC=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | \
+   cut -d= -f2 | sort | uniq -c | sort -nr | head -10
+   
+   echo
+   echo "Top 10 blocked destination ports:"
+   grep "$(date '+%b %d')" $LOG_FILE | grep -i "reject\|drop" | \
+   grep -oE "DPT=[0-9]+" | cut -d= -f2 | sort | uniq -c | sort -nr | head -10
+   
+   # chmod +x /usr/local/bin/monitor-firewall-logs.sh
+
+4. Create security alert script:
+   # vim /usr/local/bin/firewall-security-alert.sh
+   
+   #!/bin/bash
+   # Firewall security alerting
+   
+   LOG_FILE="/var/log/messages"
+   ALERT_EMAIL="security@example.com"
+   THRESHOLD=100
+   
+   # Count recent denied connections
+   DENIED_COUNT=$(grep "$(date '+%b %d')" $LOG_FILE | grep -c -i "reject\|drop")
+   
+   if [ $DENIED_COUNT -gt $THRESHOLD ]; then
+       {
+           echo "High number of firewall denials detected: $DENIED_COUNT"
+           echo "Date: $(date)"
+           echo
+           echo "Top blocked IPs:"
+           grep "$(date '+%b %d')" $LOG_FILE | grep -i "reject\|drop" | \
+           grep -oE "SRC=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | \
+           cut -d= -f2 | sort | uniq -c | sort -nr | head -5
+       } | mail -s "Firewall Security Alert" $ALERT_EMAIL
+   fi
+   
+   # chmod +x /usr/local/bin/firewall-security-alert.sh
+
+PART J: APPLY AND TEST FIREWALL RULES
+--------------------------------------
+
+1. Apply firewall configuration:
+   # firewall-cmd --reload
+   # firewall-cmd --list-all
+
+2. Test firewall rules from client:
+   # /usr/local/bin/test-firewall.sh 192.168.1.10
+
+3. Test SSH access:
+   # ssh user@192.168.1.10
+
+4. Test HTTP access:
+   # curl http://192.168.1.10
+   # curl https://192.168.1.10
+
+5. Test blocked services:
+   # telnet 192.168.1.10 23  # Should be blocked
+   # nmap -p 1-1000 192.168.1.10
+
+PART K: CONFIGURE ZONE-BASED SECURITY
+--------------------------------------
+
+1. Create custom security zones:
+   # firewall-cmd --permanent --new-zone=dmz-web
+   # firewall-cmd --permanent --new-zone=internal-db
+
+2. Configure DMZ zone for web servers:
+   # firewall-cmd --permanent --zone=dmz-web --add-service=http
+   # firewall-cmd --permanent --zone=dmz-web --add-service=https
+   # firewall-cmd --permanent --zone=dmz-web --add-service=ssh
+   # firewall-cmd --permanent --zone=dmz-web --add-source=0.0.0.0/0
+
+3. Configure internal zone for database:
+   # firewall-cmd --permanent --zone=internal-db --add-service=mysql
+   # firewall-cmd --permanent --zone=internal-db --add-service=ssh
+   # firewall-cmd --permanent --zone=internal-db --add-source=192.168.1.0/24
+
+4. Assign interfaces to zones:
+   # firewall-cmd --permanent --zone=dmz-web --change-interface=eth0
+   # firewall-cmd --permanent --zone=internal-db --change-interface=eth1
+
+PART L: PERFORMANCE AND OPTIMIZATION
+-------------------------------------
+
+1. Optimize firewall performance:
+   # firewall-cmd --permanent --set-target=DROP --zone=public
+   # firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" accept'
+
+2. Create firewall performance monitoring:
+   # vim /usr/local/bin/firewall-performance.sh
+   
+   #!/bin/bash
+   # Monitor firewall performance
+   
+   echo "=== Firewall Performance Monitor ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Check firewall rule count
+   if systemctl is-active firewalld >/dev/null 2>&1; then
+       RULE_COUNT=$(firewall-cmd --list-all | wc -l)
+       echo "Firewalld rules: $RULE_COUNT"
+       
+   elif systemctl is-active iptables >/dev/null 2>&1; then
+       RULE_COUNT=$(iptables -L | grep -c "^Chain\|^target")
+       echo "Iptables rules: $RULE_COUNT"
+   fi
+   
+   # Check system load
+   echo "System load: $(uptime | awk -F'load average:' '{print $2}')"
+   
+   # Check network connections
+   echo "Active connections: $(netstat -an | grep ESTABLISHED | wc -l)"
+   
+   # Check dropped packets
+   echo "Dropped packets: $(cat /proc/net/dev | awk '{sum+=$5} END {print sum}')"
+   
+   # chmod +x /usr/local/bin/firewall-performance.sh
+
+3. Schedule monitoring:
+   # crontab -e
+   # Add: */15 * * * * /usr/local/bin/firewall-security-alert.sh
+   # Add: 0 */6 * * * /usr/local/bin/backup-firewall.sh
+
+PART M: TESTING AND VALIDATION
+-------------------------------
+
+1. Comprehensive firewall testing:
+   # /usr/local/bin/firewall-status.sh
+   # /usr/local/bin/test-firewall.sh
+
+2. Test from different source IPs:
+   # ssh -o ConnectTimeout=5 user@192.168.1.10  # Should work
+   # ssh -o ConnectTimeout=5 user@192.168.1.10 -p 23  # Should fail
+
+3. Monitor firewall logs:
+   # /usr/local/bin/monitor-firewall-logs.sh
+   # tail -f /var/log/messages | grep -i firewall
+
+4. Performance testing:
+   # /usr/local/bin/firewall-performance.sh
+
+5. Backup configuration:
+   # /usr/local/bin/backup-firewall.sh
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# firewall-cmd --state
+# firewall-cmd --list-all
+# systemctl status firewalld
+# journalctl -u firewalld -f
+# iptables -L -n -v
+# tail -f /var/log/messages | grep kernel
+
+EXPECTED RESULTS:
+-----------------
+- Firewall service running and configured
+- Appropriate services and ports allowed
+- Unauthorized access blocked
+- Logging capturing security events
+- Zone-based security implemented
+- Performance monitoring operational
+
+VALIDATION CHECKLIST:
+---------------------
+□ Firewall service active
+□ Default deny policy configured
+□ Required services allowed
+□ Source-based rules working
+□ Port-based rules functional
+□ Rich rules configured
+□ Logging enabled
+□ Monitoring scripts operational
+
+CLEANUP:
+--------
+# firewall-cmd --permanent --remove-service=webapp
+# firewall-cmd --permanent --remove-zone=dmz-web
+# firewall-cmd --permanent --remove-zone=internal-db
+# rm /usr/local/bin/firewall-*.sh
+# rm /usr/local/bin/test-firewall.sh
+# rm /usr/local/bin/monitor-firewall-logs.sh
+# crontab -e  # Remove monitoring entries

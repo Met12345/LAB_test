@@ -1,0 +1,728 @@
+RHCE RH254 HANDS-ON LAB: DATABASE PERFORMANCE TUNING BASICS
+============================================================
+
+LAB OBJECTIVE:
+Implement basic performance tuning techniques for MariaDB/MySQL database server to optimize query performance and resource utilization
+
+PREREQUISITES:
+- MariaDB/MySQL server installed and configured
+- Root access to RHEL system
+- Understanding of database performance concepts
+
+LAB SCENARIO:
+Analyze database performance, identify bottlenecks, and implement tuning strategies to improve overall database performance.
+
+EQUIPMENT NEEDED:
+- RHEL system with MariaDB installed
+- Sample databases with sufficient data for testing
+- Performance monitoring tools
+
+LAB TASKS:
+
+PART A: BASELINE PERFORMANCE ASSESSMENT
+----------------------------------------
+
+1. Enable performance monitoring:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Performance monitoring
+   performance_schema = ON
+   performance_schema_max_table_instances = 400
+   performance_schema_max_table_handles = 4000
+   
+   # Slow query logging
+   slow_query_log = 1
+   slow_query_log_file = /var/log/mariadb/slow.log
+   long_query_time = 2
+   log_queries_not_using_indexes = 1
+   
+   # General query logging (for analysis only)
+   general_log = 0
+   general_log_file = /var/log/mariadb/general.log
+
+2. Create performance monitoring user:
+   # mysql -u root -p
+   
+   MariaDB> CREATE USER 'perf_monitor'@'localhost' 
+   IDENTIFIED BY 'PerfMonitor123!';
+   
+   MariaDB> GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'perf_monitor'@'localhost';
+   MariaDB> GRANT SELECT ON performance_schema.* TO 'perf_monitor'@'localhost';
+   MariaDB> GRANT SELECT ON information_schema.* TO 'perf_monitor'@'localhost';
+   MariaDB> FLUSH PRIVILEGES;
+   MariaDB> EXIT;
+
+3. Create performance baseline script:
+   # vim /usr/local/bin/mysql-performance-baseline.sh
+   
+   #!/bin/bash
+   # MySQL performance baseline assessment
+   
+   DB_USER="perf_monitor"
+   DB_PASS="PerfMonitor123!"
+   
+   echo "=== MySQL Performance Baseline Assessment ==="
+   echo "Date: $(date)"
+   echo "Server: $(hostname)"
+   echo
+   
+   # System information
+   echo "=== System Information ==="
+   echo "CPU cores: $(nproc)"
+   echo "Total RAM: $(free -h | grep Mem | awk '{print $2}')"
+   echo "Available RAM: $(free -h | grep Mem | awk '{print $7}')"
+   echo
+   
+   # MySQL version and uptime
+   echo "=== MySQL Information ==="
+   mysql -u$DB_USER -p$DB_PASS -e "SELECT VERSION() as 'MySQL Version';"
+   mysql -u$DB_USER -p$DB_PASS -e "SHOW STATUS LIKE 'Uptime';"
+   echo
+   
+   # Connection statistics
+   echo "=== Connection Statistics ==="
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       VARIABLE_NAME as 'Metric',
+       VARIABLE_VALUE as 'Value'
+   FROM information_schema.GLOBAL_STATUS 
+   WHERE VARIABLE_NAME IN (
+       'Connections',
+       'Max_used_connections',
+       'Threads_connected',
+       'Threads_running'
+   );"
+   echo
+   
+   # Query statistics
+   echo "=== Query Statistics ==="
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       VARIABLE_NAME as 'Metric',
+       VARIABLE_VALUE as 'Value'
+   FROM information_schema.GLOBAL_STATUS 
+   WHERE VARIABLE_NAME IN (
+       'Questions',
+       'Queries',
+       'Slow_queries',
+       'Com_select',
+       'Com_insert',
+       'Com_update',
+       'Com_delete'
+   );"
+   echo
+   
+   # InnoDB statistics
+   echo "=== InnoDB Statistics ==="
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       VARIABLE_NAME as 'Metric',
+       VARIABLE_VALUE as 'Value'
+   FROM information_schema.GLOBAL_STATUS 
+   WHERE VARIABLE_NAME LIKE 'Innodb_buffer_pool%'
+   OR VARIABLE_NAME LIKE 'Innodb_rows%';"
+   
+   # chmod +x /usr/local/bin/mysql-performance-baseline.sh
+
+PART B: CREATE PERFORMANCE TEST DATA
+-------------------------------------
+
+1. Create performance test database:
+   # mysql -u root -p
+   
+   MariaDB> CREATE DATABASE performance_test;
+   MariaDB> USE performance_test;
+   
+   MariaDB> CREATE TABLE large_table (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       user_id INT NOT NULL,
+       category_id INT NOT NULL,
+       title VARCHAR(255) NOT NULL,
+       description TEXT,
+       price DECIMAL(10,2),
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       status ENUM('active', 'inactive', 'deleted') DEFAULT 'active'
+   );
+   
+   MariaDB> CREATE TABLE user_profiles (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       username VARCHAR(50) UNIQUE NOT NULL,
+       email VARCHAR(100) UNIQUE NOT NULL,
+       first_name VARCHAR(50),
+       last_name VARCHAR(50),
+       age INT,
+       city VARCHAR(100),
+       country VARCHAR(100),
+       registration_date DATE,
+       last_login TIMESTAMP
+   );
+
+2. Generate test data:
+   # vim /usr/local/bin/generate-test-data.sh
+   
+   #!/bin/bash
+   # Generate test data for performance testing
+   
+   echo "Generating test data..."
+   
+   mysql -u root -p performance_test << 'EOF'
+   
+   -- Insert user profiles
+   INSERT INTO user_profiles (username, email, first_name, last_name, age, city, country, registration_date) 
+   SELECT 
+       CONCAT('user', n) as username,
+       CONCAT('user', n, '@example.com') as email,
+       CONCAT('FirstName', n) as first_name,
+       CONCAT('LastName', n) as last_name,
+       18 + (n % 50) as age,
+       CONCAT('City', (n % 100)) as city,
+       CONCAT('Country', (n % 20)) as country,
+       DATE_SUB(CURDATE(), INTERVAL (n % 365) DAY) as registration_date
+   FROM (
+       SELECT a.N + b.N * 10 + c.N * 100 + d.N * 1000 + 1 n
+       FROM 
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) a,
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) b,
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) c,
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4) d
+   ) t
+   WHERE n <= 50000;
+   
+   -- Insert large table data
+   INSERT INTO large_table (user_id, category_id, title, description, price, status)
+   SELECT 
+       1 + (n % 50000) as user_id,
+       1 + (n % 10) as category_id,
+       CONCAT('Product Title ', n) as title,
+       CONCAT('Product description for item number ', n, '. This is a longer description to simulate real data.') as description,
+       ROUND(10 + (RAND() * 1000), 2) as price,
+       CASE (n % 10) 
+           WHEN 0 THEN 'inactive'
+           WHEN 1 THEN 'deleted'
+           ELSE 'active'
+       END as status
+   FROM (
+       SELECT a.N + b.N * 10 + c.N * 100 + d.N * 1000 + e.N * 10000 + 1 n
+       FROM 
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) a,
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) b,
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) c,
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) d,
+       (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) e
+   ) t
+   WHERE n <= 100000;
+   
+   EOF
+   
+   echo "Test data generation completed"
+   
+   # chmod +x /usr/local/bin/generate-test-data.sh
+
+PART C: ANALYZE CURRENT PERFORMANCE
+------------------------------------
+
+1. Create performance analysis script:
+   # vim /usr/local/bin/analyze-performance.sh
+   
+   #!/bin/bash
+   # MySQL performance analysis script
+   
+   DB_USER="perf_monitor"
+   DB_PASS="PerfMonitor123!"
+   
+   echo "=== MySQL Performance Analysis ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Buffer pool analysis
+   echo "=== InnoDB Buffer Pool Analysis ==="
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       ROUND((PagesData*16)/1024, 2) as 'Buffer Pool Data (MB)',
+       ROUND((PagesFree*16)/1024, 2) as 'Buffer Pool Free (MB)',
+       ROUND((PagesData*16)/(PagesTotal*16)*100, 2) as 'Buffer Pool Usage %'
+   FROM (
+       SELECT 
+           variable_value as PagesData
+       FROM information_schema.global_status 
+       WHERE variable_name = 'Innodb_buffer_pool_pages_data'
+   ) A,
+   (
+       SELECT 
+           variable_value as PagesFree
+       FROM information_schema.global_status 
+       WHERE variable_name = 'Innodb_buffer_pool_pages_free'
+   ) B,
+   (
+       SELECT 
+           variable_value as PagesTotal
+       FROM information_schema.global_status 
+       WHERE variable_name = 'Innodb_buffer_pool_pages_total'
+   ) C;"
+   echo
+   
+   # Query cache analysis
+   echo "=== Query Cache Analysis ==="
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       VARIABLE_NAME as 'Metric',
+       VARIABLE_VALUE as 'Value'
+   FROM information_schema.GLOBAL_STATUS 
+   WHERE VARIABLE_NAME LIKE 'Qcache%';"
+   echo
+   
+   # Table analysis
+   echo "=== Table Size Analysis ==="
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       table_schema as 'Database',
+       table_name as 'Table',
+       ROUND(((data_length + index_length) / 1024 / 1024), 2) as 'Size (MB)',
+       table_rows as 'Rows'
+   FROM information_schema.TABLES 
+   WHERE table_schema NOT IN ('information_schema', 'mysql', 'performance_schema')
+   ORDER BY (data_length + index_length) DESC
+   LIMIT 10;"
+   echo
+   
+   # Index usage analysis
+   echo "=== Index Usage Analysis ==="
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       t.table_schema as 'Database',
+       t.table_name as 'Table',
+       s.index_name as 'Index',
+       s.cardinality as 'Cardinality'
+   FROM information_schema.tables t
+   LEFT JOIN information_schema.statistics s ON t.table_schema = s.table_schema 
+   AND t.table_name = s.table_name
+   WHERE t.table_schema NOT IN ('information_schema', 'mysql', 'performance_schema')
+   AND s.index_name IS NOT NULL
+   ORDER BY t.table_schema, t.table_name, s.seq_in_index;"
+   
+   # chmod +x /usr/local/bin/analyze-performance.sh
+
+2. Create slow query analysis script:
+   # vim /usr/local/bin/analyze-slow-queries.sh
+   
+   #!/bin/bash
+   # Analyze slow query log
+   
+   SLOW_LOG="/var/log/mariadb/slow.log"
+   
+   echo "=== Slow Query Analysis ==="
+   echo "Date: $(date)"
+   echo
+   
+   if [ -f "$SLOW_LOG" ]; then
+       echo "Slow query log file: $SLOW_LOG"
+       echo "Total slow queries: $(grep -c "Query_time" $SLOW_LOG)"
+       echo
+       
+       if command -v mysqldumpslow >/dev/null 2>&1; then
+           echo "Top 10 slowest queries by execution time:"
+           mysqldumpslow -s t -t 10 $SLOW_LOG
+           echo
+           
+           echo "Top 10 most frequent slow queries:"
+           mysqldumpslow -s c -t 10 $SLOW_LOG
+       else
+           echo "mysqldumpslow not available, showing raw slow query data:"
+           tail -20 $SLOW_LOG
+       fi
+   else
+       echo "Slow query log not found or empty"
+       echo "Enable slow query logging in /etc/my.cnf:"
+       echo "slow_query_log = 1"
+       echo "slow_query_log_file = /var/log/mariadb/slow.log"
+       echo "long_query_time = 2"
+   fi
+   
+   # chmod +x /usr/local/bin/analyze-slow-queries.sh
+
+PART D: OPTIMIZE INNODB CONFIGURATION
+--------------------------------------
+
+1. Calculate optimal InnoDB settings:
+   # vim /usr/local/bin/calculate-innodb-settings.sh
+   
+   #!/bin/bash
+   # Calculate optimal InnoDB settings
+   
+   echo "=== InnoDB Configuration Recommendations ==="
+   
+   # Get system memory
+   TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+   TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024))
+   
+   echo "Total system RAM: ${TOTAL_RAM_MB} MB"
+   
+   # Calculate buffer pool size (70% of RAM for dedicated DB server)
+   BUFFER_POOL_SIZE=$((TOTAL_RAM_MB * 70 / 100))
+   echo "Recommended InnoDB buffer pool size: ${BUFFER_POOL_SIZE}M"
+   
+   # Calculate log file size (25% of buffer pool)
+   LOG_FILE_SIZE=$((BUFFER_POOL_SIZE / 4))
+   echo "Recommended InnoDB log file size: ${LOG_FILE_SIZE}M"
+   
+   # Calculate other settings
+   echo
+   echo "Recommended InnoDB settings for /etc/my.cnf:"
+   echo "[mysqld]"
+   echo "innodb_buffer_pool_size = ${BUFFER_POOL_SIZE}M"
+   echo "innodb_log_file_size = ${LOG_FILE_SIZE}M"
+   echo "innodb_log_buffer_size = 16M"
+   echo "innodb_flush_log_at_trx_commit = 2"
+   echo "innodb_file_per_table = 1"
+   echo "innodb_buffer_pool_instances = $((BUFFER_POOL_SIZE / 128))"
+   
+   # chmod +x /usr/local/bin/calculate-innodb-settings.sh
+
+2. Apply InnoDB optimizations:
+   # /usr/local/bin/calculate-innodb-settings.sh
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # InnoDB optimizations
+   innodb_buffer_pool_size = 512M  # Adjust based on system RAM
+   innodb_log_file_size = 128M
+   innodb_log_buffer_size = 16M
+   innodb_flush_log_at_trx_commit = 2
+   innodb_file_per_table = 1
+   innodb_buffer_pool_instances = 4
+   
+   # Additional InnoDB settings
+   innodb_read_io_threads = 4
+   innodb_write_io_threads = 4
+   innodb_thread_concurrency = 0
+   innodb_flush_method = O_DIRECT
+
+PART E: OPTIMIZE QUERY CACHE AND CONNECTIONS
+---------------------------------------------
+
+1. Configure query cache:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Query cache settings
+   query_cache_type = 1
+   query_cache_size = 64M
+   query_cache_limit = 2M
+   query_cache_min_res_unit = 4k
+
+2. Configure connection settings:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Connection settings
+   max_connections = 200
+   max_user_connections = 50
+   max_connect_errors = 10
+   connect_timeout = 10
+   wait_timeout = 600
+   interactive_timeout = 600
+   
+   # Thread cache
+   thread_cache_size = 50
+   thread_stack = 256K
+
+3. Configure table cache:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Table cache settings
+   table_open_cache = 2000
+   table_definition_cache = 1400
+
+PART F: CREATE AND OPTIMIZE INDEXES
+------------------------------------
+
+1. Analyze missing indexes:
+   # mysql -u root -p performance_test
+   
+   MariaDB> EXPLAIN SELECT * FROM large_table WHERE user_id = 1000;
+   MariaDB> EXPLAIN SELECT * FROM large_table WHERE category_id = 5 AND status = 'active';
+   MariaDB> EXPLAIN SELECT * FROM user_profiles WHERE city = 'City50';
+
+2. Create performance indexes:
+   MariaDB> CREATE INDEX idx_user_id ON large_table(user_id);
+   MariaDB> CREATE INDEX idx_category_status ON large_table(category_id, status);
+   MariaDB> CREATE INDEX idx_city ON user_profiles(city);
+   MariaDB> CREATE INDEX idx_registration_date ON user_profiles(registration_date);
+
+3. Create composite indexes for common queries:
+   MariaDB> CREATE INDEX idx_user_category_status ON large_table(user_id, category_id, status);
+   MariaDB> CREATE INDEX idx_created_at_status ON large_table(created_at, status);
+
+4. Analyze index effectiveness:
+   MariaDB> EXPLAIN SELECT * FROM large_table WHERE user_id = 1000;
+   MariaDB> EXPLAIN SELECT * FROM large_table WHERE category_id = 5 AND status = 'active';
+   MariaDB> SHOW INDEX FROM large_table;
+   MariaDB> EXIT;
+
+PART G: IMPLEMENT QUERY OPTIMIZATION
+-------------------------------------
+
+1. Create query optimization test script:
+   # vim /usr/local/bin/test-query-performance.sh
+   
+   #!/bin/bash
+   # Test query performance before and after optimization
+   
+   DB_NAME="performance_test"
+   
+   echo "=== Query Performance Testing ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Test queries with timing
+   echo "Testing query performance..."
+   
+   echo "Query 1: Simple SELECT with WHERE clause"
+   time mysql -u root -p $DB_NAME -e "
+   SELECT COUNT(*) FROM large_table WHERE user_id = 1000;"
+   
+   echo
+   echo "Query 2: JOIN with aggregation"
+   time mysql -u root -p $DB_NAME -e "
+   SELECT u.city, COUNT(l.id) as product_count 
+   FROM user_profiles u 
+   JOIN large_table l ON u.id = l.user_id 
+   WHERE l.status = 'active' 
+   GROUP BY u.city 
+   ORDER BY product_count DESC 
+   LIMIT 10;"
+   
+   echo
+   echo "Query 3: Complex WHERE with multiple conditions"
+   time mysql -u root -p $DB_NAME -e "
+   SELECT * FROM large_table 
+   WHERE category_id IN (1,2,3) 
+   AND status = 'active' 
+   AND price BETWEEN 100 AND 500 
+   ORDER BY created_at DESC 
+   LIMIT 20;"
+   
+   echo
+   echo "Query 4: Subquery performance"
+   time mysql -u root -p $DB_NAME -e "
+   SELECT * FROM user_profiles 
+   WHERE id IN (
+       SELECT DISTINCT user_id FROM large_table 
+       WHERE status = 'active' AND price > 500
+   );"
+   
+   # chmod +x /usr/local/bin/test-query-performance.sh
+
+2. Create query optimization recommendations:
+   # vim /usr/local/bin/query-optimization-tips.sh
+   
+   #!/bin/bash
+   # Query optimization recommendations
+   
+   echo "=== Query Optimization Recommendations ==="
+   echo
+   
+   echo "1. Use EXPLAIN to analyze query execution plans"
+   echo "2. Create indexes on frequently queried columns"
+   echo "3. Use composite indexes for multi-column WHERE clauses"
+   echo "4. Avoid SELECT * - specify only needed columns"
+   echo "5. Use LIMIT to restrict result sets"
+   echo "6. Optimize JOIN operations with proper indexes"
+   echo "7. Use EXISTS instead of IN for subqueries when appropriate"
+   echo "8. Consider partitioning for very large tables"
+   echo
+   
+   echo "Common anti-patterns to avoid:"
+   echo "- Functions in WHERE clauses (WHERE YEAR(date_col) = 2024)"
+   echo "- Leading wildcards in LIKE (WHERE col LIKE '%value')"
+   echo "- OR conditions that can't use indexes effectively"
+   echo "- Unnecessary GROUP BY and ORDER BY operations"
+   
+   # chmod +x /usr/local/bin/query-optimization-tips.sh
+
+PART H: RESTART AND VALIDATE OPTIMIZATIONS
+-------------------------------------------
+
+1. Restart MariaDB with new configuration:
+   # systemctl restart mariadb
+   # systemctl status mariadb
+
+2. Validate configuration changes:
+   # mysql -u root -p -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size';"
+   # mysql -u root -p -e "SHOW VARIABLES LIKE 'query_cache%';"
+   # mysql -u root -p -e "SHOW VARIABLES LIKE 'max_connections';"
+
+3. Run performance tests:
+   # /usr/local/bin/mysql-performance-baseline.sh
+   # /usr/local/bin/test-query-performance.sh
+
+4. Compare before and after performance:
+   # /usr/local/bin/analyze-performance.sh
+
+PART I: CONTINUOUS PERFORMANCE MONITORING
+------------------------------------------
+
+1. Create performance monitoring script:
+   # vim /usr/local/bin/monitor-mysql-performance.sh
+   
+   #!/bin/bash
+   # Continuous MySQL performance monitoring
+   
+   DB_USER="perf_monitor"
+   DB_PASS="PerfMonitor123!"
+   LOG_FILE="/var/log/mysql-performance.log"
+   
+   {
+       echo "=== MySQL Performance Monitor - $(date) ==="
+       
+       # Current connections
+       CONNECTIONS=$(mysql -u$DB_USER -p$DB_PASS -e "SHOW STATUS LIKE 'Threads_connected';" | tail -1 | awk '{print $2}')
+       echo "Current connections: $CONNECTIONS"
+       
+       # Buffer pool hit ratio
+       mysql -u$DB_USER -p$DB_PASS -e "
+       SELECT 
+           ROUND(
+               (1 - (Innodb_buffer_pool_reads / Innodb_buffer_pool_read_requests)) * 100, 2
+           ) as 'Buffer Pool Hit Ratio %'
+       FROM (
+           SELECT 
+               VARIABLE_VALUE as Innodb_buffer_pool_reads
+           FROM information_schema.GLOBAL_STATUS 
+           WHERE VARIABLE_NAME = 'Innodb_buffer_pool_reads'
+       ) A,
+       (
+           SELECT 
+               VARIABLE_VALUE as Innodb_buffer_pool_read_requests
+           FROM information_schema.GLOBAL_STATUS 
+           WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests'
+       ) B;"
+       
+       # Slow queries
+       SLOW_QUERIES=$(mysql -u$DB_USER -p$DB_PASS -e "SHOW STATUS LIKE 'Slow_queries';" | tail -1 | awk '{print $2}')
+       echo "Slow queries: $SLOW_QUERIES"
+       
+       # Query cache hit ratio
+       mysql -u$DB_USER -p$DB_PASS -e "
+       SELECT 
+           ROUND(
+               (Qcache_hits / (Qcache_hits + Qcache_inserts)) * 100, 2
+           ) as 'Query Cache Hit Ratio %'
+       FROM (
+           SELECT 
+               VARIABLE_VALUE as Qcache_hits
+           FROM information_schema.GLOBAL_STATUS 
+           WHERE VARIABLE_NAME = 'Qcache_hits'
+       ) A,
+       (
+           SELECT 
+               VARIABLE_VALUE as Qcache_inserts
+           FROM information_schema.GLOBAL_STATUS 
+           WHERE VARIABLE_NAME = 'Qcache_inserts'
+       ) B;"
+       
+       echo "----------------------------------------"
+       
+   } >> $LOG_FILE
+   
+   # Alert if performance degrades
+   if [ $CONNECTIONS -gt 150 ]; then
+       echo "HIGH CONNECTION ALERT: $CONNECTIONS connections" | \
+       mail -s "MySQL Performance Alert" admin@example.com
+   fi
+   
+   # chmod +x /usr/local/bin/monitor-mysql-performance.sh
+
+2. Schedule performance monitoring:
+   # crontab -e
+   # Add: */10 * * * * /usr/local/bin/monitor-mysql-performance.sh
+
+3. Create performance report:
+   # vim /usr/local/bin/generate-performance-report.sh
+   
+   #!/bin/bash
+   # Generate MySQL performance report
+   
+   REPORT_FILE="/var/log/mysql-performance-report-$(date +%Y%m%d).txt"
+   
+   {
+       echo "=== MySQL Performance Report ==="
+       echo "Generated: $(date)"
+       echo "==============================="
+       echo
+       
+       /usr/local/bin/mysql-performance-baseline.sh
+       echo
+       /usr/local/bin/analyze-performance.sh
+       echo
+       /usr/local/bin/analyze-slow-queries.sh
+       
+   } > $REPORT_FILE
+   
+   echo "Performance report generated: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/generate-performance-report.sh
+
+PART J: PERFORMANCE TESTING AND VALIDATION
+-------------------------------------------
+
+1. Generate test data:
+   # /usr/local/bin/generate-test-data.sh
+
+2. Run performance baseline:
+   # /usr/local/bin/mysql-performance-baseline.sh
+
+3. Test query performance:
+   # /usr/local/bin/test-query-performance.sh
+
+4. Analyze slow queries:
+   # /usr/local/bin/analyze-slow-queries.sh
+
+5. Generate performance report:
+   # /usr/local/bin/generate-performance-report.sh
+
+6. Monitor ongoing performance:
+   # tail -f /var/log/mysql-performance.log
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# mysql -u root -p -e "SHOW ENGINE INNODB STATUS\G"
+# mysql -u root -p -e "SHOW PROCESSLIST;"
+# mysql -u root -p -e "SHOW STATUS LIKE 'Innodb%';"
+# mysql -u root -p -e "SHOW STATUS LIKE 'Qcache%';"
+# tail -f /var/log/mariadb/slow.log
+# top -p $(pgrep mysqld)
+
+EXPECTED RESULTS:
+-----------------
+- Improved query response times
+- Better buffer pool utilization
+- Reduced slow query count
+- Optimized index usage
+- Enhanced connection handling
+- Continuous performance monitoring
+
+VALIDATION CHECKLIST:
+---------------------
+□ InnoDB buffer pool optimized
+□ Query cache configured
+□ Connection limits set appropriately
+□ Indexes created for common queries
+□ Slow query logging enabled
+□ Performance monitoring active
+□ Query optimization implemented
+□ Performance reports generated
+
+CLEANUP:
+--------
+# mysql -u root -p -e "DROP DATABASE performance_test;"
+# rm /usr/local/bin/mysql-performance-*.sh
+# rm /usr/local/bin/analyze-*.sh
+# rm /usr/local/bin/generate-*.sh
+# rm /usr/local/bin/test-*.sh
+# rm /usr/local/bin/calculate-*.sh
+# rm /usr/local/bin/monitor-*.sh
+# crontab -e  # Remove performance monitoring entries

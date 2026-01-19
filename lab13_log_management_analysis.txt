@@ -1,0 +1,406 @@
+RHCE RH254 HANDS-ON LAB: LOG FILE MANAGEMENT AND ANALYSIS
+========================================================
+
+LAB OBJECTIVE:
+Configure Apache log file management, implement log rotation, and perform log analysis for web server monitoring
+
+PREREQUISITES:
+- Apache HTTP Server installed and configured
+- Root access to RHEL system
+- Understanding of log file formats and analysis
+
+LAB SCENARIO:
+Configure comprehensive logging for Apache web server, implement log rotation, and set up log analysis tools for monitoring and troubleshooting.
+
+EQUIPMENT NEEDED:
+- RHEL system with Apache installed
+- Log analysis tools
+- Sufficient disk space for log files
+
+LAB TASKS:
+
+PART A: CONFIGURE APACHE LOGGING
+---------------------------------
+
+1. Configure main Apache logging:
+   # Install Apache 
+   # yum install httpd -y
+   # systemctl start httpd
+   # systemctl enable httpd
+
+   # Install Vim 
+   # yum install vim -y
+   
+   # vim /etc/httpd/conf/httpd.conf
+   
+   # Error log configuration
+   ErrorLog logs/error_log
+   LogLevel warn
+   
+   # Access log configuration
+   LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\"" combined
+   LogFormat "%h %l %u %t \"%r\" %>s %O" common
+   LogFormat "%{Referer}i -> %U" referer
+   LogFormat "%{User-agent}i" agent
+   
+   CustomLog logs/access_log combined
+
+2. Configure custom log formats:
+   # vim /etc/httpd/conf.d/custom-logs.conf
+   
+   # Detailed log format with response time
+   LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %D" combined_with_time
+   
+   # Security-focused log format
+   LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" \"%{X-Forwarded-For}i\"" security
+   
+   # JSON format for structured logging
+   LogFormat "{ \"timestamp\": \"%t\", \"client_ip\": \"%h\", \"method\": \"%m\", \"uri\": \"%U\", \"status\": \"%>s\", \"bytes\": \"%O\", \"referer\": \"%{Referer}i\", \"user_agent\": \"%{User-Agent}i\", \"response_time\": \"%D\" }" json
+
+3. Configure separate logs for virtual hosts:
+   # vim /etc/httpd/conf.d/vhost-logs.conf
+   
+<VirtualHost *:80>
+   ServerName site1.example.com
+   DocumentRoot /var/www/site1.example.com/html
+   ErrorLog logs/site1_error.log
+   CustomLog logs/site1_access.log combined_with_time
+</VirtualHost>
+   
+<VirtualHost *:80>
+   ServerName site2.example.com
+   DocumentRoot /var/www/site2.example.com/html
+   ErrorLog logs/site2_error.log
+   CustomLog logs/site2_access.log security
+</VirtualHost>
+
+PART B: CONFIGURE ADVANCED LOGGING FEATURES
+--------------------------------------------
+
+1. Configure conditional logging:
+   # vim /etc/httpd/conf.d/conditional-logs.conf
+   
+   # Don't log requests for images
+   SetEnvIf Request_URI "\.(gif|jpe?g|png|css|js)$" dontlog
+   CustomLog logs/access_log combined env=!dontlog
+   
+   # Log only errors and warnings
+   SetEnvIf Request_URI "^/admin/" admin_area
+   CustomLog logs/admin_access.log combined env=admin_area
+   
+   # Log based on response status
+   SetEnvIf Response "^[45]" error_response
+   CustomLog logs/error_requests.log combined env=error_response
+
+2. Configure SSL-specific logging:
+   # vim /etc/httpd/conf.d/ssl-logs.conf
+   
+<VirtualHost *:443>
+   ServerName secure.example.com
+   SSLEngine on
+   SSLCertificateFile /etc/ssl/certs/server.crt
+   SSLCertificateKeyFile /etc/ssl/private/server.key
+       
+   # SSL-specific log format
+   LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" \"%{SSL_PROTOCOL}x\" \"%{SSL_CIPHER}x\"" ssl_combined
+       
+   ErrorLog logs/ssl_error.log
+   CustomLog logs/ssl_access.log ssl_combined
+</VirtualHost>
+
+3. Configure forensic logging:
+   # vim /etc/httpd/conf.d/forensic.conf
+   
+   LoadModule log_forensic_module modules/mod_log_forensic.so
+   
+   ForensicLog logs/forensic_log
+   
+   # Custom forensic format
+<IfModule mod_log_forensic.c>
+   ForensicLog "|/usr/bin/rotatelogs /var/log/httpd/forensic_%Y%m%d 86400"
+</IfModule>
+
+PART C: CONFIGURE LOG ROTATION
+-------------------------------
+
+1. Configure logrotate for Apache:
+   # vim /etc/logrotate.d/httpd
+   
+/var/log/httpd/*log {
+   daily
+   missingok
+   rotate 52
+   compress
+   delaycompress
+   notifempty
+   create 640 apache apache
+   sharedscripts
+   postrotate
+      /bin/systemctl reload httpd.service > /dev/null 2>/dev/null || true
+   endscript
+}
+
+2. Configure custom log rotation:
+   # vim /etc/logrotate.d/httpd-custom
+   
+/var/log/httpd/site1_*.log {
+   weekly
+   rotate 12
+   compress
+   delaycompress
+   missingok
+   notifempty
+   create 640 apache apache
+   postrotate
+      /bin/systemctl reload httpd.service > /dev/null 2>/dev/null || true
+   endscript
+}
+   
+/var/log/httpd/ssl_*.log {
+   daily
+   rotate 30
+   compress
+   delaycompress
+   missingok
+   notifempty
+   create 640 apache apache
+   postrotate
+      /bin/systemctl reload httpd.service > /dev/null 2>/dev/null || true
+   endscript
+}
+
+3. Test log rotation:
+   # logrotate -d /etc/logrotate.d/httpd
+   # logrotate -f /etc/logrotate.d/httpd
+
+PART D: CONFIGURE REAL-TIME LOG MONITORING
+-------------------------------------------
+
+1. Install and configure rsyslog for Apache:
+   # vim /etc/rsyslog.d/49-apache.conf
+   
+   # Apache error logs to syslog
+$ModLoad imfile
+$InputFileName /var/log/httpd/error_log
+$InputFileTag apache-error:
+$InputFileStateFile stat-apache-error
+$InputFileSeverity error
+$InputFileFacility local6
+$InputRunFileMonitor
+   
+# Send to remote syslog server (optional)
+local6.* @@logserver.example.com:514
+
+2. Configure log monitoring with tail:
+   # vim /usr/local/bin/apache-monitor.sh
+   
+#!/bin/bash
+# Apache log monitoring script
+   
+LOG_FILE="/var/log/httpd/access_log"
+ERROR_LOG="/var/log/httpd/error_log"
+   
+   # Monitor for specific patterns
+   tail -F $LOG_FILE | while read line; do
+       # Check for 404 errors
+       if echo "$line" | grep -q " 404 "; then
+           echo "$(date): 404 Error detected: $line" >> /var/log/apache-alerts.log
+       fi
+       
+       # Check for potential attacks
+       if echo "$line" | grep -qE "(sql|script|union|select)"; then
+           echo "$(date): Potential attack detected: $line" >> /var/log/apache-security.log
+       fi
+   done &
+   
+   # chmod +x /usr/local/bin/apache-monitor.sh
+
+3. Create systemd service for log monitoring:
+   # vim /etc/systemd/system/apache-monitor.service
+   
+[Unit]
+Description=Apache Log Monitor
+After=httpd.service
+   
+[Service]
+Type=forking
+ExecStart=/usr/local/bin/apache-monitor.sh
+Restart=always
+User=apache
+   
+[Install]
+WantedBy=multi-user.target
+   
+   # systemctl enable apache-monitor.service
+   # systemctl start apache-monitor.service
+
+PART E: LOG ANALYSIS TOOLS AND TECHNIQUES
+------------------------------------------
+
+1. Install log analysis tools:
+   # yum install goaccess -y
+
+
+2. Configure GoAccess for real-time analysis:
+   # vim /etc/goaccess/goaccess.conf
+   
+   time-format %H:%M:%S
+   date-format %d/%b/%Y
+   log-format %h %^[%d:%t %^] "%r" %s %b "%R" "%u"
+   
+   # Generate real-time HTML report
+   # goaccess /var/log/httpd/access_log -o /var/www/html/report.html --real-time-html
+
+3. Configure AWStats:
+   # mkdir -p /etc/awstats
+   
+   # vim /etc/awstats/awstats.localhost.conf
+   
+LogFile="/var/log/httpd/access_log"
+LogFormat=1
+SiteDomain="localhost"
+HostAliases="localhost 127.0.0.1"
+DirData="/var/lib/awstats"
+DirCgi="/awstats"
+DirIcons="/awstats-icon"
+
+4. Create custom log analysis scripts:
+   # vim /usr/local/bin/apache-stats.sh
+   
+#!/bin/bash
+# Apache log statistics script
+   
+LOG_FILE="/var/log/httpd/access_log"
+   
+echo "=== Apache Log Statistics ==="
+echo "Date: $(date)"
+echo
+   
+echo "Top 10 IP addresses:"
+awk '{print $1}' $LOG_FILE | sort | uniq -c | sort -nr | head -10
+echo
+   
+echo "Top 10 requested pages:"
+awk '{print $7}' $LOG_FILE | sort | uniq -c | sort -nr | head -10
+echo
+   
+echo "HTTP status codes:"
+awk '{print $9}' $LOG_FILE | sort | uniq -c | sort -nr
+echo
+   
+echo "Top 10 user agents:"
+awk -F'"' '{print $6}' $LOG_FILE | sort | uniq -c | sort -nr | head -10
+   
+   # chmod +x /usr/local/bin/apache-stats.sh
+
+PART F: LOG ANALYSIS AND REPORTING
+-----------------------------------
+
+1. Generate daily log reports:
+   # vim /usr/local/bin/daily-report.sh
+   
+#!/bin/bash
+# Daily Apache log report
+   
+DATE=$(date -d "yesterday" +%Y%m%d)
+LOG_FILE="/var/log/httpd/access_log"
+REPORT_FILE="/var/log/httpd/reports/daily_report_$DATE.txt"
+   
+mkdir -p /var/log/httpd/reports
+   
+   {
+       echo "Daily Apache Report for $(date -d "yesterday" +%Y-%m-%d)"
+       echo "=================================================="
+       echo
+       
+       echo "Total requests: $(wc -l < $LOG_FILE)"
+       echo "Unique visitors: $(awk '{print $1}' $LOG_FILE | sort -u | wc -l)"
+       echo
+       
+       echo "Top 5 pages:"
+       awk '{print $7}' $LOG_FILE | sort | uniq -c | sort -nr | head -5
+       echo
+       
+       echo "Error summary:"
+       awk '$9 >= 400 {print $9}' $LOG_FILE | sort | uniq -c
+       
+   } > $REPORT_FILE
+   
+   # chmod +x /usr/local/bin/daily-report.sh
+
+2. Set up automated reporting:
+   # crontab -e
+   # Add line:
+   0 1 * * * /usr/local/bin/daily-report.sh
+
+3. Configure log alerting:
+   # vim /usr/local/bin/log-alerts.sh
+   
+#!/bin/bash
+# Apache log alerting script
+   
+ERROR_LOG="/var/log/httpd/error_log"
+THRESHOLD=10
+   
+# Check for high error rate
+ERROR_COUNT=$(grep "$(date '+%a %b %d')" $ERROR_LOG | wc -l)
+   
+if [ $ERROR_COUNT -gt $THRESHOLD ]; then
+   echo "High error rate detected: $ERROR_COUNT errors today" | \
+   mail -s "Apache Alert: High Error Rate" admin@example.com
+fi
+   
+   # chmod +x /usr/local/bin/log-alerts.sh
+
+PART G: TESTING AND VERIFICATION
+---------------------------------
+
+1. Generate test traffic:
+   # for i in {1..100}; do curl http://localhost/; done
+   # curl http://localhost/nonexistent-page
+   # curl -A "TestBot/1.0" http://localhost/
+
+2. Verify log entries:
+   # tail -20 /var/log/httpd/access_log
+   # tail -10 /var/log/httpd/error_log
+
+3. Test log rotation:
+   # logrotate -f /etc/logrotate.d/httpd
+   # ls -la /var/log/httpd/
+
+4. Test analysis tools:
+   # /usr/local/bin/apache-stats.sh
+   # goaccess /var/log/httpd/access_log
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status httpd
+# tail -f /var/log/httpd/error_log
+# httpd -t
+# ls -la /var/log/httpd/
+# logrotate -d /etc/logrotate.d/httpd
+
+EXPECTED RESULTS:
+-----------------
+- Comprehensive logging configured
+- Log rotation working properly
+- Real-time monitoring functional
+- Log analysis tools generating reports
+- Automated alerting operational
+
+VALIDATION CHECKLIST:
+---------------------
+□ Apache logging configured properly       Done
+□ Custom log formats working               Done
+□ Log rotation configured and tested       Done
+□ Real-time monitoring active              Done
+□ Analysis tools generating reports        Done
+□ Automated reporting scheduled            Done
+
+CLEANUP:
+--------
+# rm /etc/httpd/conf.d/custom-logs.conf
+# rm /etc/httpd/conf.d/conditional-logs.conf
+# rm /usr/local/bin/apache-*.sh
+# systemctl stop apache-monitor.service
+# systemctl disable apache-monitor.service

@@ -1,0 +1,134 @@
+RED HAT CERTIFIED ENGINEER (RHCE) - RH254/SYSTEM ADMIN 3
+COURSE TOPIC LIST
+========================================================
+
+1. NETWORK SERVICES CONFIGURATION
+----------------------------------
+• Network Time Protocol (NTP) configuration
+• Network File System (NFS) server and client setup
+• Samba/CIFS file sharing configuration
+• FTP server configuration (vsftpd)
+• SSH server hardening and key-based authentication
+• Network interface bonding and teaming
+• IPv6 configuration and dual-stack networking
+
+2. WEB SERVICES
+---------------
+• Apache HTTP Server installation and configuration
+• Virtual hosts configuration
+• SSL/TLS certificate implementation
+• Web server security and access controls
+• CGI and dynamic content configuration
+• Log file management and analysis
+
+3. EMAIL SERVICES
+-----------------
+• Postfix mail server configuration
+• Mail relay and smart host setup
+• Local mail delivery configuration
+• Mail aliases and forwarding
+• Basic spam and security controls
+
+4. DNS SERVICES
+---------------
+• BIND DNS server installation
+• Forward and reverse DNS zones
+• DNS caching and forwarding
+• DNS security basics
+• Troubleshooting DNS resolution
+
+5. DATABASE SERVICES
+--------------------
+• MariaDB/MySQL installation and configuration
+• Database security hardening
+• User account management
+• Basic backup and restore procedures
+• Performance tuning basics
+
+6. SECURITY SERVICES
+--------------------
+• Firewall configuration (iptables/firewalld)
+• SELinux policy management
+• TCP Wrappers configuration
+• System logging and monitoring
+• Intrusion detection basics
+• Certificate management
+
+7. FILE AND PRINT SERVICES
+---------------------------
+• Advanced NFS configuration
+• AutoFS automounting
+• CUPS print server setup
+• Samba domain integration
+• iSCSI target and initiator configuration
+
+8. SYSTEM MONITORING AND PERFORMANCE
+------------------------------------
+• System performance monitoring tools
+• Log file analysis and management
+• Process monitoring and control
+• Resource usage tracking
+• Automated monitoring scripts
+
+9. BACKUP AND RECOVERY
+----------------------
+• System backup strategies
+• tar, rsync, and dump utilities
+• Network-based backup solutions
+• Disaster recovery planning
+• System restoration procedures
+
+10. VIRTUALIZATION BASICS
+--------------------------
+• KVM hypervisor setup
+• Virtual machine creation and management
+• Virtual networking configuration
+• Storage management for VMs
+• VM migration basics
+
+11. CLUSTERING AND HIGH AVAILABILITY
+------------------------------------
+• Basic cluster concepts
+• Shared storage configuration
+• Failover services setup
+• Load balancing basics
+• Cluster monitoring
+
+12. AUTOMATION AND SCRIPTING
+-----------------------------
+• Advanced shell scripting
+• System automation with cron
+• Configuration management basics
+• Kickstart installation automation
+• System deployment strategies
+
+13. TROUBLESHOOTING AND DIAGNOSTICS
+-----------------------------------
+• System boot troubleshooting
+• Network connectivity issues
+• Service failure diagnosis
+• Performance bottleneck identification
+• Log analysis techniques
+
+14. EXAM PREPARATION TOPICS
+---------------------------
+• Hands-on lab exercises
+• Time management strategies
+• Common exam scenarios
+• Troubleshooting methodology
+• Documentation and verification
+
+PRACTICAL SKILLS EMPHASIS:
+--------------------------
+• Command-line proficiency
+• Configuration file editing
+• Service management (systemd)
+• Package management (yum/dnf)
+• User and group administration
+• File system management
+• Network configuration
+• Security implementation
+
+Note: This curriculum was designed for RHEL 6/7 era. Modern RHCE 
+focuses more on Ansible automation. Check current Red Hat training 
+catalog for updated course content.

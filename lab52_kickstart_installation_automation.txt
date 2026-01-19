@@ -1,0 +1,759 @@
+RHCE RH254 HANDS-ON LAB: KICKSTART INSTALLATION AUTOMATION
+=========================================================
+
+LAB OBJECTIVE:
+Implement Kickstart installation automation for unattended Linux system deployment, including network-based installations, custom configurations, and automated provisioning workflows
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Network infrastructure for PXE boot
+- Understanding of system installation process
+- Basic knowledge of DHCP and TFTP services
+
+LAB SCENARIO:
+Deploy automated installation system using Kickstart to provision multiple systems with consistent configurations, reducing manual installation time and ensuring standardized deployments.
+
+EQUIPMENT NEEDED:
+- RHEL server (192.168.1.20) - Kickstart server
+- Target systems for installation
+- Network switch with PXE boot support
+- Installation media and repositories
+
+LAB TASKS:
+
+PART A: KICKSTART SERVER SETUP
+-------------------------------
+
+1. Install required packages:
+   # dnf install -y httpd tftp-server dhcp-server syslinux xinetd
+   # dnf install -y system-config-kickstart createrepo
+
+2. Create directory structure:
+   # mkdir -p /var/www/html/kickstart/{configs,images,repos}
+   # mkdir -p /var/lib/tftpboot/{pxelinux.cfg,images}
+   # mkdir -p /opt/kickstart/{templates,scripts,logs}
+
+3. Configure HTTP server for Kickstart files:
+   # systemctl enable --now httpd
+   # firewall-cmd --permanent --add-service=http
+   # firewall-cmd --reload
+   
+   # vim /etc/httpd/conf.d/kickstart.conf
+   <Directory "/var/www/html/kickstart">
+       Options Indexes FollowSymLinks
+       AllowOverride None
+       Require all granted
+   </Directory>
+   
+   # systemctl restart httpd
+
+4. Configure TFTP server:
+   # vim /etc/xinetd.d/tftp
+   service tftp
+   {
+       socket_type = dgram
+       protocol = udp
+       wait = yes
+       user = root
+       server = /usr/sbin/in.tftpd
+       server_args = -s /var/lib/tftpboot
+       disable = no
+       per_source = 11
+       cps = 100 2
+       flags = IPv4
+   }
+   
+   # systemctl enable --now xinetd
+   # firewall-cmd --permanent --add-service=tftp
+   # firewall-cmd --reload
+
+5. Setup PXE boot files:
+   # cp /usr/share/syslinux/pxelinux.0 /var/lib/tftpboot/
+   # cp /usr/share/syslinux/menu.c32 /var/lib/tftpboot/
+   # cp /usr/share/syslinux/ldlinux.c32 /var/lib/tftpboot/
+   # cp /usr/share/syslinux/libutil.c32 /var/lib/tftpboot/
+
+PART B: DHCP CONFIGURATION FOR PXE
+-----------------------------------
+
+1. Configure DHCP server:
+   # vim /etc/dhcp/dhcpd.conf
+   
+   # DHCP Server Configuration for PXE Boot
+   
+   default-lease-time 600;
+   max-lease-time 7200;
+   
+   authoritative;
+   
+   subnet 192.168.1.0 netmask 255.255.255.0 {
+       range 192.168.1.100 192.168.1.200;
+       option routers 192.168.1.1;
+       option domain-name-servers 192.168.1.1;
+       option domain-name "example.com";
+       
+       # PXE Boot Configuration
+       next-server 192.168.1.20;
+       filename "pxelinux.0";
+       
+       # Host-specific configurations
+       host workstation01 {
+           hardware ethernet 00:11:22:33:44:55;
+           fixed-address 192.168.1.101;
+           option host-name "workstation01";
+       }
+       
+       host server01 {
+           hardware ethernet 00:11:22:33:44:66;
+           fixed-address 192.168.1.102;
+           option host-name "server01";
+       }
+   }
+
+2. Start DHCP service:
+   # systemctl enable --now dhcpd
+   # firewall-cmd --permanent --add-service=dhcp
+   # firewall-cmd --reload
+
+PART C: KICKSTART CONFIGURATION FILES
+--------------------------------------
+
+1. Create basic Kickstart template:
+   # vim /var/www/html/kickstart/configs/basic-server.ks
+   
+   #version=RHEL8
+   # Basic Server Kickstart Configuration
+   
+   # System authorization information
+   auth --enableshadow --passalgo=sha512
+   
+   # Use network installation
+   url --url="http://192.168.1.20/kickstart/repos/rhel8"
+   
+   # Use text mode install
+   text
+   
+   # Run the Setup Agent on first boot
+   firstboot --enable
+   
+   # Keyboard layouts
+   keyboard --vckeymap=us --xlayouts='us'
+   
+   # System language
+   lang en_US.UTF-8
+   
+   # Network information
+   network --bootproto=dhcp --device=eth0 --onboot=on --ipv6=auto --activate
+   network --hostname=server.example.com
+   
+   # Root password (encrypted)
+   rootpw --iscrypted $6$rounds=4096$salt$hashedpassword
+   
+   # System services
+   services --enabled="chronyd,sshd"
+   
+   # System timezone
+   timezone America/New_York --isUtc
+   
+   # User creation
+   user --groups=wheel --name=admin --password=$6$rounds=4096$salt$hashedpassword --iscrypted --gecos="System Administrator"
+   
+   # System bootloader configuration
+   bootloader --append=" crashkernel=auto" --location=mbr --boot-drive=sda
+   
+   # Partition clearing information
+   clearpart --none --initlabel
+   
+   # Disk partitioning information
+   part /boot --fstype="xfs" --ondisk=sda --size=1024
+   part pv.01 --fstype="lvmpv" --ondisk=sda --size=1 --grow
+   volgroup rhel --pesize=4096 pv.01
+   logvol / --fstype="xfs" --size=20480 --name=root --vgname=rhel
+   logvol /var --fstype="xfs" --size=10240 --name=var --vgname=rhel
+   logvol /home --fstype="xfs" --size=5120 --name=home --vgname=rhel
+   logvol swap --fstype="swap" --size=4096 --name=swap --vgname=rhel
+   
+   # Package selection
+   %packages
+   @^server-product-environment
+   @standard
+   chrony
+   vim
+   wget
+   curl
+   git
+   -postfix
+   %end
+   
+   # Post-installation script
+   %post --log=/root/ks-post.log
+   
+   # Update system
+   dnf update -y
+   
+   # Configure SSH
+   sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+   systemctl restart sshd
+   
+   # Install additional packages
+   dnf install -y epel-release
+   dnf install -y htop iotop
+   
+   # Configure firewall
+   firewall-cmd --permanent --add-service=ssh
+   firewall-cmd --reload
+   
+   # Create custom configuration
+   cat > /etc/motd << 'EOF'
+   ========================================
+   Welcome to Automated RHEL Installation
+   Deployed via Kickstart
+   ========================================
+   EOF
+   
+   %end
+   
+   # Reboot after installation
+   reboot
+
+2. Create workstation Kickstart configuration:
+   # vim /var/www/html/kickstart/configs/workstation.ks
+   
+   #version=RHEL8
+   # Workstation Kickstart Configuration
+   
+   auth --enableshadow --passalgo=sha512
+   url --url="http://192.168.1.20/kickstart/repos/rhel8"
+   
+   # Use graphical install
+   graphical
+   
+   firstboot --enable
+   keyboard --vckeymap=us --xlayouts='us'
+   lang en_US.UTF-8
+   
+   network --bootproto=dhcp --device=eth0 --onboot=on --ipv6=auto --activate
+   network --hostname=workstation.example.com
+   
+   rootpw --iscrypted $6$rounds=4096$salt$hashedpassword
+   services --enabled="chronyd,NetworkManager"
+   timezone America/New_York --isUtc
+   
+   user --groups=wheel --name=user --password=$6$rounds=4096$salt$hashedpassword --iscrypted --gecos="Desktop User"
+   
+   bootloader --append=" crashkernel=auto rhgb quiet" --location=mbr --boot-drive=sda
+   
+   clearpart --none --initlabel
+   
+   part /boot --fstype="xfs" --ondisk=sda --size=1024
+   part pv.01 --fstype="lvmpv" --ondisk=sda --size=1 --grow
+   volgroup rhel --pesize=4096 pv.01
+   logvol / --fstype="xfs" --size=30720 --name=root --vgname=rhel
+   logvol /home --fstype="xfs" --size=20480 --name=home --vgname=rhel
+   logvol swap --fstype="swap" --size=4096 --name=swap --vgname=rhel
+   
+   %packages
+   @^workstation-product-environment
+   @standard
+   @development-tools
+   firefox
+   libreoffice
+   gimp
+   %end
+   
+   %post --log=/root/ks-post.log
+   dnf update -y
+   
+   # Configure desktop environment
+   systemctl set-default graphical.target
+   
+   # Install additional software
+   dnf install -y epel-release
+   dnf install -y code vlc
+   
+   %end
+   
+   reboot
+3. Create minimal Kickstart configuration:
+   # vim /var/www/html/kickstart/configs/minimal.ks
+   
+   #version=RHEL8
+   # Minimal Installation Kickstart
+   
+   auth --enableshadow --passalgo=sha512
+   url --url="http://192.168.1.20/kickstart/repos/rhel8"
+   text
+   
+   keyboard --vckeymap=us --xlayouts='us'
+   lang en_US.UTF-8
+   
+   network --bootproto=dhcp --device=eth0 --onboot=on --activate
+   
+   rootpw --plaintext redhat123
+   
+   timezone America/New_York --isUtc
+   
+   bootloader --location=mbr --boot-drive=sda
+   
+   clearpart --all --initlabel
+   autopart --type=lvm
+   
+   %packages --nobase
+   @core
+   %end
+   
+   %post
+   systemctl enable sshd
+   %end
+   
+   reboot
+
+PART D: PXE BOOT MENU CONFIGURATION
+------------------------------------
+
+1. Create PXE boot menu:
+   # vim /var/lib/tftpboot/pxelinux.cfg/default
+   
+   default menu.c32
+   prompt 0
+   timeout 300
+   
+   menu title PXE Boot Menu - Kickstart Installation
+   menu background splash.png
+   
+   label local
+       menu label Boot from ^Local Drive
+       menu default
+       localboot 0
+   
+   label rhel8-server
+       menu label Install RHEL 8 ^Server
+       kernel images/rhel8/vmlinuz
+       append initrd=images/rhel8/initrd.img inst.ks=http://192.168.1.20/kickstart/configs/basic-server.ks
+   
+   label rhel8-workstation
+       menu label Install RHEL 8 ^Workstation
+       kernel images/rhel8/vmlinuz
+       append initrd=images/rhel8/initrd.img inst.ks=http://192.168.1.20/kickstart/configs/workstation.ks
+   
+   label rhel8-minimal
+       menu label Install RHEL 8 ^Minimal
+       kernel images/rhel8/vmlinuz
+       append initrd=images/rhel8/initrd.img inst.ks=http://192.168.1.20/kickstart/configs/minimal.ks
+   
+   label rescue
+       menu label ^Rescue Mode
+       kernel images/rhel8/vmlinuz
+       append initrd=images/rhel8/initrd.img rescue
+   
+   label memtest
+       menu label ^Memory Test
+       kernel memtest86+
+
+2. Create host-specific configurations:
+   # vim /var/lib/tftpboot/pxelinux.cfg/01-00-11-22-33-44-55
+   
+   default menu.c32
+   prompt 0
+   timeout 30
+   
+   menu title Workstation01 - Automated Installation
+   
+   label auto-install
+       menu label ^Automatic Workstation Installation
+       menu default
+       kernel images/rhel8/vmlinuz
+       append initrd=images/rhel8/initrd.img inst.ks=http://192.168.1.20/kickstart/configs/workstation.ks
+   
+   # vim /var/lib/tftpboot/pxelinux.cfg/01-00-11-22-33-44-66
+   
+   default menu.c32
+   prompt 0
+   timeout 30
+   
+   menu title Server01 - Automated Installation
+   
+   label auto-install
+       menu label ^Automatic Server Installation
+       menu default
+       kernel images/rhel8/vmlinuz
+       append initrd=images/rhel8/initrd.img inst.ks=http://192.168.1.20/kickstart/configs/basic-server.ks
+
+PART E: INSTALLATION MEDIA SETUP
+---------------------------------
+
+1. Mount and copy installation media:
+   # mkdir -p /mnt/rhel8-dvd
+   # mount -o loop /path/to/rhel-8.x-x86_64-dvd.iso /mnt/rhel8-dvd
+   
+   # cp -r /mnt/rhel8-dvd/* /var/www/html/kickstart/repos/rhel8/
+   # chmod -R 755 /var/www/html/kickstart/repos/rhel8/
+
+2. Copy boot images:
+   # mkdir -p /var/lib/tftpboot/images/rhel8
+   # cp /mnt/rhel8-dvd/images/pxeboot/vmlinuz /var/lib/tftpboot/images/rhel8/
+   # cp /mnt/rhel8-dvd/images/pxeboot/initrd.img /var/lib/tftpboot/images/rhel8/
+
+3. Create repository metadata:
+   # createrepo /var/www/html/kickstart/repos/rhel8/
+
+PART F: KICKSTART AUTOMATION SCRIPTS
+-------------------------------------
+
+1. Create Kickstart generator script:
+   # vim /opt/kickstart/scripts/generate-kickstart.sh
+   
+   #!/bin/bash
+   #
+   # Kickstart Configuration Generator
+   #
+   
+   TEMPLATE_DIR="/opt/kickstart/templates"
+   OUTPUT_DIR="/var/www/html/kickstart/configs"
+   LOG_FILE="/opt/kickstart/logs/generator.log"
+   
+   log_message() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
+   }
+   
+   # Generate password hash
+   generate_password_hash() {
+       local password="$1"
+       python3 -c "import crypt; print(crypt.crypt('$password', crypt.mksalt(crypt.METHOD_SHA512)))"
+   }
+   
+   # Create Kickstart from template
+   create_kickstart() {
+       local template="$1"
+       local output_file="$2"
+       local hostname="$3"
+       local root_password="$4"
+       local user_name="${5:-admin}"
+       local user_password="${6:-$root_password}"
+       
+       if [ ! -f "$TEMPLATE_DIR/$template" ]; then
+           log_message "ERROR" "Template not found: $template"
+           return 1
+       fi
+       
+       # Generate password hashes
+       local root_hash=$(generate_password_hash "$root_password")
+       local user_hash=$(generate_password_hash "$user_password")
+       
+       # Process template
+       sed -e "s/HOSTNAME_PLACEHOLDER/$hostname/g" \
+           -e "s/ROOT_PASSWORD_HASH/$root_hash/g" \
+           -e "s/USER_NAME_PLACEHOLDER/$user_name/g" \
+           -e "s/USER_PASSWORD_HASH/$user_hash/g" \
+           -e "s/TIMESTAMP/$(date)/g" \
+           "$TEMPLATE_DIR/$template" > "$OUTPUT_DIR/$output_file"
+       
+       log_message "INFO" "Generated Kickstart: $output_file"
+   }
+   
+   # Validate Kickstart file
+   validate_kickstart() {
+       local ks_file="$1"
+       
+       if [ ! -f "$OUTPUT_DIR/$ks_file" ]; then
+           log_message "ERROR" "Kickstart file not found: $ks_file"
+           return 1
+       fi
+       
+       # Basic syntax validation
+       if ksvalidator "$OUTPUT_DIR/$ks_file" >/dev/null 2>&1; then
+           log_message "INFO" "Kickstart validation passed: $ks_file"
+           return 0
+       else
+           log_message "ERROR" "Kickstart validation failed: $ks_file"
+           return 1
+       fi
+   }
+   
+   # Main function
+   main() {
+       local action="$1"
+       
+       case "$action" in
+           "generate")
+               create_kickstart "$2" "$3" "$4" "$5" "$6" "$7"
+               ;;
+           "validate")
+               validate_kickstart "$2"
+               ;;
+           "hash")
+               generate_password_hash "$2"
+               ;;
+           *)
+               echo "Usage: $0 {generate|validate|hash}"
+               echo "  generate <template> <output> <hostname> <root_pass> [user] [user_pass]"
+               echo "  validate <kickstart_file>"
+               echo "  hash <password>"
+               exit 1
+               ;;
+       esac
+   }
+   
+   main "$@"
+
+2. Create deployment tracking script:
+   # vim /opt/kickstart/scripts/deployment-tracker.sh
+   
+   #!/bin/bash
+   #
+   # Kickstart Deployment Tracker
+   #
+   
+   DEPLOYMENT_LOG="/opt/kickstart/logs/deployments.log"
+   STATUS_DIR="/opt/kickstart/status"
+   
+   mkdir -p "$STATUS_DIR"
+   
+   log_deployment() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" >> "$DEPLOYMENT_LOG"
+   }
+   
+   # Track installation start
+   track_installation_start() {
+       local hostname="$1"
+       local mac_address="$2"
+       local kickstart_file="$3"
+       
+       cat > "$STATUS_DIR/${hostname}.status" << EOF
+   hostname=$hostname
+   mac_address=$mac_address
+   kickstart_file=$kickstart_file
+   start_time=$(date '+%Y-%m-%d %H:%M:%S')
+   status=installing
+   EOF
+       
+       log_deployment "INFO" "Installation started: $hostname ($mac_address) using $kickstart_file"
+   }
+   
+   # Track installation completion
+   track_installation_complete() {
+       local hostname="$1"
+       local status="$2"
+       
+       if [ -f "$STATUS_DIR/${hostname}.status" ]; then
+           echo "end_time=$(date '+%Y-%m-%d %H:%M:%S')" >> "$STATUS_DIR/${hostname}.status"
+           echo "status=$status" >> "$STATUS_DIR/${hostname}.status"
+           
+           log_deployment "INFO" "Installation completed: $hostname - $status"
+       fi
+   }
+   
+   # Generate deployment report
+   generate_deployment_report() {
+       local report_file="/opt/kickstart/logs/deployment-report-$(date +%Y%m%d).txt"
+       
+       cat > "$report_file" << EOF
+   Kickstart Deployment Report
+   Generated: $(date)
+   
+   Recent Deployments:
+   $(tail -20 "$DEPLOYMENT_LOG")
+   
+   Current Status:
+   EOF
+       
+       for status_file in "$STATUS_DIR"/*.status; do
+           if [ -f "$status_file" ]; then
+               echo "---" >> "$report_file"
+               cat "$status_file" >> "$report_file"
+           fi
+       done
+       
+       log_deployment "INFO" "Deployment report generated: $report_file"
+   }
+   
+   main() {
+       case "$1" in
+           "start")
+               track_installation_start "$2" "$3" "$4"
+               ;;
+           "complete")
+               track_installation_complete "$2" "$3"
+               ;;
+           "report")
+               generate_deployment_report
+               ;;
+           *)
+               echo "Usage: $0 {start|complete|report}"
+               exit 1
+               ;;
+       esac
+   }
+   
+   main "$@"
+
+3. Create network installation script:
+   # vim /opt/kickstart/scripts/network-install.sh
+   
+   #!/bin/bash
+   #
+   # Network Installation Manager
+   #
+   
+   # Wake-on-LAN function
+   wake_system() {
+       local mac_address="$1"
+       local broadcast_ip="${2:-192.168.1.255}"
+       
+       if command -v wakeonlan >/dev/null 2>&1; then
+           wakeonlan "$mac_address"
+           echo "Wake-on-LAN packet sent to $mac_address"
+       else
+           echo "wakeonlan command not found. Install etherwake package."
+           return 1
+       fi
+   }
+   
+   # Monitor installation progress
+   monitor_installation() {
+       local target_ip="$1"
+       local timeout="${2:-3600}"
+       local start_time=$(date +%s)
+       
+       echo "Monitoring installation progress for $target_ip"
+       
+       while true; do
+           current_time=$(date +%s)
+           elapsed=$((current_time - start_time))
+           
+           if [ $elapsed -gt $timeout ]; then
+               echo "Installation timeout reached ($timeout seconds)"
+               return 1
+           fi
+           
+           if ping -c 1 -W 5 "$target_ip" >/dev/null 2>&1; then
+               if ssh -o ConnectTimeout=5 -o BatchMode=yes root@"$target_ip" "echo 'Installation complete'" >/dev/null 2>&1; then
+                   echo "Installation completed successfully"
+                   return 0
+               fi
+           fi
+           
+           echo "Installation in progress... (${elapsed}s elapsed)"
+           sleep 30
+       done
+   }
+   
+   # Batch installation
+   batch_install() {
+       local systems_file="$1"
+       
+       if [ ! -f "$systems_file" ]; then
+           echo "Systems file not found: $systems_file"
+           return 1
+       fi
+       
+       while IFS=',' read -r hostname mac_address ip_address kickstart_file; do
+           echo "Starting installation for $hostname ($mac_address)"
+           
+           # Track installation start
+           /opt/kickstart/scripts/deployment-tracker.sh start "$hostname" "$mac_address" "$kickstart_file"
+           
+           # Wake system
+           wake_system "$mac_address"
+           
+           # Monitor installation in background
+           (
+               sleep 60  # Wait for system to boot
+               if monitor_installation "$ip_address" 3600; then
+                   /opt/kickstart/scripts/deployment-tracker.sh complete "$hostname" "success"
+               else
+                   /opt/kickstart/scripts/deployment-tracker.sh complete "$hostname" "failed"
+               fi
+           ) &
+           
+           sleep 10  # Delay between installations
+       done < "$systems_file"
+   }
+   
+   main() {
+       case "$1" in
+           "wake")
+               wake_system "$2" "$3"
+               ;;
+           "monitor")
+               monitor_installation "$2" "$3"
+               ;;
+           "batch")
+               batch_install "$2"
+               ;;
+           *)
+               echo "Usage: $0 {wake|monitor|batch}"
+               echo "  wake <mac_address> [broadcast_ip]"
+               echo "  monitor <target_ip> [timeout]"
+               echo "  batch <systems_file>"
+               exit 1
+               ;;
+       esac
+   }
+   
+   main "$@"
+
+PART G: TESTING AND VALIDATION
+-------------------------------
+
+1. Create test systems file:
+   # vim /opt/kickstart/test-systems.csv
+   
+   workstation01,00:11:22:33:44:55,192.168.1.101,workstation.ks
+   server01,00:11:22:33:44:66,192.168.1.102,basic-server.ks
+
+2. Test Kickstart generation:
+   # chmod +x /opt/kickstart/scripts/*.sh
+   # /opt/kickstart/scripts/generate-kickstart.sh hash "redhat123"
+   # /opt/kickstart/scripts/generate-kickstart.sh validate basic-server.ks
+
+3. Test PXE boot configuration:
+   # systemctl status dhcpd httpd xinetd
+   # curl http://192.168.1.20/kickstart/configs/basic-server.ks
+
+4. Verify TFTP functionality:
+   # tftp 192.168.1.20 -c get pxelinux.0
+
+5. Test network installation:
+   # /opt/kickstart/scripts/network-install.sh wake 00:11:22:33:44:55
+
+6. Monitor deployment:
+   # /opt/kickstart/scripts/deployment-tracker.sh report
+   # tail -f /opt/kickstart/logs/deployments.log
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status dhcpd httpd xinetd
+# journalctl -u dhcpd -f
+# tail -f /var/log/httpd/access_log
+# netstat -tulpn | grep -E "(67|68|69|80)"
+# tcpdump -i eth0 port 67 or port 68
+# ksvalidator /var/www/html/kickstart/configs/basic-server.ks
+
+EXPECTED RESULTS:
+-----------------
+- DHCP server providing PXE boot information
+- TFTP server serving boot files
+- HTTP server hosting Kickstart configurations
+- PXE boot menu displaying installation options
+- Automated system installations completing successfully
+- Installation tracking and monitoring functional
+
+VALIDATION CHECKLIST:
+---------------------
+□ DHCP server configured for PXE boot
+□ TFTP server serving boot files
+□ HTTP server hosting Kickstart files
+□ PXE boot menu operational
+□ Kickstart configurations validated
+□ Installation media accessible
+□ Automation scripts functional
+□ Network installations successful
+□ Deployment tracking working
+
+CLEANUP:
+--------
+# systemctl stop dhcpd httpd xinetd
+# rm -rf /var/www/html/kickstart
+# rm -rf /var/lib/tftpboot/*
+# rm -rf /opt/kickstart

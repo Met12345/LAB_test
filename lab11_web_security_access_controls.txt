@@ -1,0 +1,373 @@
+RHCE RH254 HANDS-ON LAB: WEB SERVER SECURITY AND ACCESS CONTROLS
+================================================================
+
+LAB OBJECTIVE:
+Configure Apache web server security features and implement access controls for directories and resources
+
+PREREQUISITES:
+- Apache HTTP Server installed and configured
+- Root access to RHEL system
+- Understanding of web security concepts
+
+LAB SCENARIO:
+Implement comprehensive security controls for Apache web server including authentication, authorization, and access restrictions.
+
+EQUIPMENT NEEDED:
+- RHEL system with Apache installed
+- Multiple client systems for testing access controls
+
+LAB TASKS:
+
+PART A: BASIC SECURITY CONFIGURATION
+-------------------------------------
+
+1. Configure server information hiding:
+   # Install Apache and Enable port
+   
+   # yum install httpd -y
+   # systemctl start httpd
+   # systemctl enable httpd
+
+   # firewall-cmd --permanent --add-service=http
+   # firewall-cmd --permanent --add-service=https
+   # firewall-cmd --reload  
+   
+   # Install Vim 
+   # yum install vim -y 
+
+   # vim /etc/httpd/conf/httpd.conf
+   
+   # Hide server information
+ServerTokens Prod
+ServerSignature Off
+   
+   # Security headers
+Header always set X-Frame-Options DENY
+Header always set X-Content-Type-Options nosniff
+Header always set X-XSS-Protection "1; mode=block"
+Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+2. Disable unnecessary modules:
+   # vim /etc/httpd/conf.modules.d/00-base.conf
+   
+   # Comment out unused modules:
+   #LoadModule userdir_module modules/mod_userdir.so
+   #LoadModule autoindex_module modules/mod_autoindex.so
+
+3. Configure directory browsing restrictions:
+   # vim /etc/httpd/conf/httpd.conf
+   
+   <Directory "/var/www/html">
+       Options -Indexes -FollowSymLinks
+       AllowOverride None
+       Require all granted
+   </Directory>
+
+PART B: CONFIGURE BASIC AUTHENTICATION
+---------------------------------------
+
+1. Create protected directory:
+   # mkdir -p /var/www/html/secure
+   # echo "<h1>Secure Area</h1>" > /var/www/html/secure/index.html
+
+2. Create password file:   (Pending )
+   # htpasswd -c /etc/httpd/.htpasswd admin
+   # htpasswd /etc/httpd/.htpasswd user1
+   # htpasswd /etc/httpd/.htpasswd user2
+   # chmod 640 /etc/httpd/.htpasswd
+   # chown root:apache /etc/httpd/.htpasswd
+
+3. Configure basic authentication:
+   # vim /etc/httpd/conf.d/auth-basic.conf
+   
+<Directory "/var/www/html/secure">
+   AuthType Basic
+   AuthName "Restricted Area"
+   AuthUserFile /etc/httpd/.htpasswd
+   Require valid-user
+</Directory>
+
+PART C: CONFIGURE DIGEST AUTHENTICATION
+----------------------------------------
+
+1. Create digest password file:
+   # htdigest -c /etc/httpd/.htdigest "Secure Realm" admin
+   # htdigest /etc/httpd/.htdigest "Secure Realm" user1
+   # chmod 640 /etc/httpd/.htdigest
+   # chown root:apache /etc/httpd/.htdigest
+
+2. Create directory for digest authentication:
+   # mkdir -p /var/www/html/digest-secure
+   # echo "<h1>Digest Secure Area</h1>" > /var/www/html/digest-secure/index.html
+
+3. Configure digest authentication:
+   # vim /etc/httpd/conf.d/auth-digest.conf
+   
+<Directory "/var/www/html/digest-secure">
+    AuthType Digest
+    AuthName "Secure Realm"
+    AuthDigestProvider file
+    AuthUserFile /etc/httpd/.htdigest
+    Require valid-user
+</Directory>
+
+
+PART D: CONFIGURE IP-BASED ACCESS CONTROLS
+-------------------------------------------
+
+1. Create IP-restricted directory:
+   # mkdir -p /var/www/html/admin
+   # echo "<h1>Admin Area</h1>" > /var/www/html/admin/index.html
+
+2. Configure IP-based restrictions:
+   # vim /etc/httpd/conf.d/ip-access.conf
+   
+<Directory "/var/www/html/admin">
+   Options -Indexes
+   AllowOverride None
+   Require ip 20.192.245.25
+   Require ip 127.0.0.1
+</Directory>
+
+3. Configure host-based restrictions:
+   # vim /etc/httpd/conf.d/host-access.conf
+   
+<Directory "/var/www/html/internal">
+   Options -Indexes
+   AllowOverride None
+   Require host example.com
+   Require host .trusted-domain.com
+</Directory>
+
+PART E: CONFIGURE TIME-BASED ACCESS CONTROLS
+---------------------------------------------
+
+1. Install mod_evasive for DoS protection:
+   # yum install mod_evasive -y
+
+2. Configure mod_evasive:
+   # vim /etc/httpd/conf.d/evasive.conf
+   
+<IfModule mod_evasive24.c>
+   DOSHashTableSize    2048
+   DOSPageCount        2
+   DOSPageInterval     1
+   DOSSiteCount        50
+   DOSSiteInterval     1
+   DOSBlockingPeriod   600
+   DOSLogDir           /var/log/httpd
+   DOSEmailNotify      admin@example.com
+</IfModule>
+
+3. Configure rate limiting:
+   # vim /etc/httpd/conf.d/rate-limit.conf
+   
+   <Directory "/var/www/html/api">
+       SetEnvIf Request_URI "^/api/" api_request
+       SetEnvIf Remote_Addr "^20\.192\.245\.25" local_network  (Use Your Ip)   20.192.245.25
+       
+       <RequireAll>
+           Require env local_network
+       </RequireAll>
+   </Directory>
+
+PART F: CONFIGURE SSL CLIENT CERTIFICATES
+------------------------------------------
+
+1. Create client certificate directory:
+   # mkdir -p /var/www/html/client-cert
+   # echo "<h1>Client Certificate Required</h1>" > /var/www/html/client-cert/index.html
+   # chmod 755 /var/www/html/client-cert
+
+2. Install and Enable SSL Module 
+   # yum install mod_ssl -y
+   # /usr/libexec/httpd-ssl-gencerts
+   # 
+   # mv /etc/httpd/conf.d/autoindex.conf \
+    /etc/httpd/conf.d/autoindex.conf.disabled
+   # httpd -M | grep ssl
+
+3. Prepare SSL directory structure
+   # mkdir -p /etc/ssl/private /etc/ssl/csr /etc/ssl/certs
+   # chmod 700 /etc/ssl/private
+   # mkdir -p /etc/ssl/ca/private /etc/ssl/ca/certs
+   # chmod 700 /etc/ssl/ca/private
+
+4. Create local Certificate Authority 
+   # openssl genrsa -out /etc/ssl/ca/private/ca.key.pem 4096
+   # chmod 600 /etc/ssl/ca/private/ca.key.pem
+   # openssl req -new -x509 \
+    -key /etc/ssl/ca/private/ca.key.pem \
+    -out /etc/ssl/ca/certs/ca.cert.pem \
+    -days 3650
+
+
+2. Generate client certificate:
+   # openssl genrsa -out /etc/ssl/private/client.key 2048
+   # chmod 600 /etc/ssl/private/client.key
+   # openssl req -new -key /etc/ssl/private/client.key -out /etc/ssl/csr/client.csr
+   # openssl x509 -req -in /etc/ssl/csr/client.csr -CA /etc/ssl/ca/certs/ca.cert.pem \
+     -CAkey /etc/ssl/ca/private/ca.key.pem -CAcreateserial -out /etc/ssl/certs/client.crt -days 365
+
+3. Configure client certificate authentication:
+   # vim /etc/httpd/conf.d/client-cert.conf
+
+SSLCACertificateFile /etc/ssl/ca/certs/ca.cert.pem
+
+<Directory "/var/www/html/client-cert">
+    SSLRequireSSL
+    SSLVerifyClient require
+    SSLVerifyDepth 2
+    SSLOptions +StdEnvVars
+    Require all granted
+</Directory>
+
+
+PART G: CONFIGURE .HTACCESS SECURITY
+-------------------------------------
+
+1. Enable .htaccess processing:
+   # vim /etc/httpd/conf/httpd.conf
+   
+   <Directory "/var/www/html">
+       AllowOverride AuthConfig Limit
+   </Directory>
+
+2. Create .htaccess file for directory protection:
+   # mkdir -p /var/www/html/protected
+   # chmod 755 /var/www/html/protected
+
+   # vim /var/www/html/protected/.htaccess
+   
+AuthType Basic
+AuthName "Protected Directory"
+AuthUserFile /etc/httpd/.htpasswd
+Require valid-user
+   
+# Deny access to sensitive files
+<Files "*.conf">
+   Require all denied
+</Files>
+   
+<Files "*.log">
+   Require all denied
+</Files>
+
+
+3. Configure global .htaccess restrictions:
+   # vim /etc/httpd/conf/httpd.conf
+   
+<Files ".ht*">
+   Require all denied
+</Files>
+
+PART H: CONFIGURE ADVANCED SECURITY FEATURES
+---------------------------------------------
+
+1. Configure mod_security (Web Application Firewall):
+   # yum install mod_security -y
+   # vim /etc/httpd/conf.d/mod_security.conf
+   
+<IfModule mod_security2.c>
+   SecRuleEngine On
+   SecRequestBodyAccess On
+   SecResponseBodyAccess Off
+   SecRequestBodyLimit 13107200
+   SecRequestBodyNoFilesLimit 131072
+   SecRequestBodyInMemoryLimit 131072
+   SecRequestBodyLimitAction Reject
+   SecRule REQUEST_HEADERS:Content-Type "text/xml" \
+   "id:'200000',phase:1,t:none,t:lowercase,pass,nolog,ctl:requestBodyProcessor=XML"
+</IfModule>
+
+2. Configure custom error pages:
+   # mkdir -p /var/www/html/errors
+   # echo "<h1>403 - Access Forbidden</h1>" > /var/www/html/errors/403.html
+   # echo "<h1>404 - Page Not Found</h1>" > /var/www/html/errors/404.html
+   
+   # vim /etc/httpd/conf/httpd.conf
+   ErrorDocument 403 /errors/403.html
+   ErrorDocument 404 /errors/404.html
+
+3. Configure log monitoring:
+   # vim /etc/httpd/conf/httpd.conf
+   
+   LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %D" combined_with_time
+   CustomLog logs/access_log combined_with_time
+
+PART I: TESTING ACCESS CONTROLS
+--------------------------------
+
+1. Test basic authentication:
+   # curl -u admin:password http://localhost/secure/
+   # curl http://localhost/secure/  # Should return 401
+
+2. Test IP-based restrictions:
+   # curl http://localhost/admin/  # From allowed IP
+   # curl -H "X-Forwarded-For: 10.0.0.1" http://localhost/admin/  # Should be denied
+
+3. Test digest authentication:
+   # curl --digest -u admin:password http://localhost/digest-secure/
+
+4. Test SSL client certificates:
+   # curl --cert /etc/ssl/certs/client.crt --key /etc/ssl/private/client.key \
+     https://localhost/client-cert/
+
+PART J: MONITORING AND LOGGING
+-------------------------------
+
+1. Monitor authentication attempts:
+   # tail -f /var/log/httpd/access_log | grep "401\|403"
+
+2. Monitor security events:
+   # tail -f /var/log/httpd/error_log | grep -i security
+
+3. Set up log rotation:
+   # vim /etc/logrotate.d/httpd
+   
+/var/log/httpd/*log {
+   daily
+   missingok
+   rotate 52
+   compress
+   delaycompress
+   notifempty
+   create 640 apache apache
+   postrotate
+      /bin/systemctl reload httpd.service > /dev/null 2>/dev/null || true
+   endscript
+}
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# httpd -t
+# tail -f /var/log/httpd/error_log
+# curl -I http://localhost/secure/
+# htpasswd -v /etc/httpd/.htpasswd admin
+# ls -la /etc/httpd/.htpasswd
+
+EXPECTED RESULTS:
+-----------------
+- Authentication required for protected directories
+- IP-based access controls working
+- Security headers present in responses
+- Unauthorized access properly blocked
+- Comprehensive logging of security events
+
+VALIDATION CHECKLIST:
+---------------------
+□ Basic authentication working         Done
+□ Digest authentication configured     Done
+□ IP-based restrictions functional     Done
+□ SSL client certificates working      Done
+□ Security headers implemented         Done
+□ Error pages customized
+□ Logging captures security events
+
+CLEANUP:
+--------
+# rm /etc/httpd/conf.d/auth-*.conf
+# rm /etc/httpd/conf.d/ip-access.conf
+# rm /etc/httpd/conf.d/client-cert.conf
+# rm /etc/httpd/.htpasswd /etc/httpd/.htdigest
+# systemctl reload httpd

@@ -1,0 +1,248 @@
+RHCE RH254 HANDS-ON LAB: SSH SERVER HARDENING AND KEY-BASED AUTHENTICATION
+=========================================================================
+
+LAB OBJECTIVE:
+Configure secure SSH server with key-based authentication, disable password auth, and implement security hardening
+
+PREREQUISITES:
+- RHEL 7/8 systems with root access
+- Network connectivity between systems
+- Understanding of public key cryptography
+
+LAB SCENARIO:
+Harden SSH server on server1, configure key-based authentication, and establish secure connections from client systems.
+
+EQUIPMENT NEEDED:
+- 2 RHEL systems (server1: 192.168.1.10, client1: 192.168.1.20)
+- SSH client software
+
+LAB TASKS:
+
+PART A: SSH SERVER HARDENING
+-----------------------------
+
+1. Backup SSH configuration:
+   # cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+
+2. Configure SSH hardening (/etc/ssh/sshd_config):
+   #install Vim 
+   #yum install vim 
+
+   # vim /etc/ssh/sshd_config
+   
+   # Basic security settings
+Port 2222
+Protocol 2
+PermitRootLogin no
+MaxAuthTries 3
+MaxSessions 2
+MaxStartups 2
+   
+   # Authentication settings
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+UsePAM yes
+   
+   # User restrictions
+AllowUsers sshuser1 sshuser2
+DenyUsers root
+AllowGroups sshusers
+AllowTcpForwarding yes
+
+   
+   # Connection settings
+ClientAliveInterval 300
+ClientAliveCountMax 2
+LoginGraceTime 60
+   
+   # Disable unused features
+X11Forwarding no
+GatewayPorts no
+PermitTunnel no
+   
+   # Logging
+SyslogFacility AUTHPRIV
+LogLevel VERBOSE
+
+3. Create SSH users and group:
+   # groupadd sshusers
+   # useradd -G sshusers sshuser1
+   # useradd -G sshusers sshuser2
+   # passwd sshuser1
+   # passwd sshuser2
+
+4. Configure firewall for custom SSH port:
+   # firewall-cmd --permanent --remove-service=ssh
+   # firewall-cmd --permanent --add-port=2222/tcp
+   # firewall-cmd --reload
+
+5. Update SELinux for custom SSH port:
+   # semanage port -a -t ssh_port_t -p tcp 2222
+   # semanage port -l | grep ssh
+
+PART B: GENERATE AND CONFIGURE SSH KEYS
+----------------------------------------
+
+1. Generate SSH key pair on client (as sshuser1):
+
+   # su - sshuser1
+
+   $ ssh-keygen -t rsa -b 4096 -C "sshuser1@client1"
+   $ ssh-keygen -t ed25519 -C "sshuser1@client1"
+   
+   # Store keys in default location (~/.ssh/)
+   # Set strong passphrase for private key
+
+2. Copy public key to server (method 1):
+   $ ssh-copy-id -i ~/.ssh/id_ed25519.pub -p 2222 sshuser1@server1
+
+3. Manual key installation (method 2):
+   # On server, as sshuser1:
+   $ mkdir -p ~/.ssh
+   $ chmod 700 ~/.ssh
+   $ touch ~/.ssh/authorized_keys
+   $ chmod 600 ~/.ssh/authorized_keys
+   
+   # Copy public key content to authorized_keys
+   $ vim ~/.ssh/authorized_keys
+   # Paste the public key content
+
+4. Configure SSH client settings (~/.ssh/config):
+   $ vim ~/.ssh/config
+   
+   Host server1
+       HostName 192.168.1.10
+       Port 2222
+       User sshuser1
+       IdentityFile ~/.ssh/id_ed25519
+       IdentitiesOnly yes
+       ServerAliveInterval 60
+
+PART C: ADVANCED SSH SECURITY CONFIGURATION 
+--------------------------------------------
+
+1. Configure SSH host-based authentication: (Server 1)
+   # vim /etc/ssh/sshd_config
+   HostbasedAuthentication yes
+   IgnoreUserKnownHosts no
+   IgnoreRhosts yes
+
+2. Set up SSH certificate authority:  (server 1)
+   # ssh-keygen -t rsa -b 4096 -f /etc/ssh/ca_key
+   # vim /etc/ssh/sshd_config
+   TrustedUserCAKeys /etc/ssh/ca_key.pub
+
+3. Configure SSH banner:
+   # vim /etc/ssh/banner
+   "WARNING: Unauthorized access prohibited!"
+   
+   # vim /etc/ssh/sshd_config
+   Banner /etc/ssh/banner
+
+4. Enable SSH key fingerprint verification:
+   # vim /etc/ssh/sshd_config
+   FingerprintHash sha256
+
+5. Configure connection multiplexing on client:
+   $ vim ~/.ssh/config
+   ControlMaster auto
+   ControlPath ~/.ssh/master-%r@%h:%p
+   ControlPersist 10m
+
+PART D: RESTART SSH AND TEST CONNECTIONS
+-----------------------------------------
+
+1. Test SSH configuration:
+   # sshd -t
+   # systemctl restart sshd
+   # systemctl status sshd
+
+2. Verify SSH is listening on new port:
+   # netstat -tulpn | grep :2222
+   # ss -tulpn | grep :2222
+
+3. Test key-based authentication:
+   $ ssh -p 2222 sshuser1@192.168.1.10
+   $ ssh server1  # Using config file
+
+4. Test password authentication (should fail):
+   $ ssh -o PreferredAuthentications=password -p 2222 sshuser1@192.168.1.10
+
+5. Test root login (should fail):
+   $ ssh -p 2222 root@192.168.1.10
+
+PART E: SSH TUNNELING AND PORT FORWARDING
+------------------------------------------
+
+1. Configure local port forwarding:
+   $ ssh -L 8080:localhost:80 -p 2222 sshuser1@192.168.1.10
+
+2. Configure remote port forwarding:
+   $ ssh -R 9090:localhost:22 -p 2222 sshuser1@192.168.1.10
+
+3. Configure dynamic port forwarding (SOCKS proxy):
+   $ ssh -D 1080 -p 2222 sshuser1@192.168.1.10
+
+4. Configure SSH jump host:
+   $ ssh -J sshuser1@192.168.1.10:2222 sshuser2@192.168.1.30
+
+PART F: MONITORING AND LOGGING
+-------------------------------
+
+1. Monitor SSH connections:
+   # tail -f /var/log/secure
+   # journalctl -u sshd -f
+
+2. Check active SSH sessions:
+   # who
+   # w
+   # last
+
+3. Monitor failed login attempts:
+   # grep "Failed password" /var/log/secure
+   # grep "Invalid user" /var/log/secure
+
+4. Set up SSH connection alerts:
+   # vim /etc/rsyslog.conf
+   auth.info /var/log/ssh-connections.log
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# sshd -t
+# systemctl status sshd
+# tail -f /var/log/secure
+# ssh -vvv -p 2222 user@host
+# semanage port -l | grep ssh
+# netstat -tulpn | grep :2222
+
+EXPECTED RESULTS:
+-----------------
+- SSH server accepts connections on custom port
+- Key-based authentication works
+- Password authentication disabled
+- Root login disabled
+- Connection limits enforced
+- All SSH activity logged
+
+VALIDATION CHECKLIST:
+---------------------
+□ SSH service running on custom port        Done
+□ Key-based authentication working          Done 
+□ Password authentication disabled          Done 
+□ Root login blocked                        Done 
+□ User restrictions enforced                Done 
+□ Firewall allows custom SSH port           Done 
+□ SELinux configured for custom port        Done 
+□ SSH connections logged
+
+CLEANUP:
+--------
+# systemctl stop sshd
+# cp /etc/ssh/sshd_config.backup /etc/ssh/sshd_config
+# systemctl start sshd
+# firewall-cmd --permanent --add-service=ssh
+# firewall-cmd --permanent --remove-port=2222/tcp
+# firewall-cmd --reload
+# semanage port -d -t ssh_port_t -p tcp 2222

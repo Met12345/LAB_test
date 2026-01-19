@@ -1,0 +1,361 @@
+RHCE RH254 HANDS-ON LAB: MAIL RELAY AND SMART HOST SETUP
+========================================================
+
+LAB OBJECTIVE:
+Configure Postfix as a mail relay server and set up smart host configuration for routing emails through external mail servers
+
+PREREQUISITES:
+- Postfix mail server installed and configured
+- Root access to RHEL system
+- Access to external SMTP server for smart host configuration
+
+LAB SCENARIO:
+Configure Postfix to act as a mail relay for internal network and route outbound emails through a smart host (external SMTP server).
+
+EQUIPMENT NEEDED:
+- RHEL system with Postfix installed
+- External SMTP server details (Gmail, corporate mail server, etc.)
+- Internal network clients for testing
+
+LAB TASKS:
+
+PART A: CONFIGURE POSTFIX AS MAIL RELAY
+----------------------------------------
+
+1. Configure Postfix for relay operation:
+   # Install Vim 
+   # yum install vim -y 
+
+   # yum install postfix mailx -y
+   # systemctl enable postfix
+   
+   # vim /etc/postfix/main.cf
+   
+# Basic relay configuration
+myhostname = relay.example.com
+mydomain = example.com
+myorigin = $mydomain
+   
+# Network and relay settings
+inet_interfaces = all
+mynetworks = 20.192.236.144, 10.0.0.0/8, 127.0.0.0/8
+relay_domains = example.com, internal.local
+   
+# Disable local delivery for relay-only operation
+mydestination = 
+local_transport = error:local mail delivery is disabled
+
+2. Configure relay restrictions:
+   # vim /etc/postfix/main.cf
+   
+# Relay restrictions
+smtpd_recipient_restrictions = 
+   permit_mynetworks,
+   permit_sasl_authenticated,
+   reject_unauth_destination,
+   reject_non_fqdn_recipient,
+   reject_unknown_recipient_domain,
+   permit
+   
+# Client restrictions for relay
+smtpd_client_restrictions = 
+   permit_mynetworks,
+   reject_rbl_client zen.spamhaus.org,
+   permit
+
+3. Configure relay host mapping:
+   # vim /etc/postfix/transport
+   
+# Transport mappings
+example.com         smtp:[mail.example.com]
+internal.local      smtp:[20.192.236.144]
+external.com       smtp:[smtp.external.com]:587
+   
+   # postmap /etc/postfix/transport
+
+4. Update main configuration for transport:
+   # vim /etc/postfix/main.cf
+   transport_maps = hash:/etc/postfix/transport
+
+PART B: CONFIGURE SMART HOST
+-----------------------------
+
+1. Configure basic smart host:
+   # vim /etc/postfix/main.cf
+   
+# Smart host configuration
+relayhost = [smtp.gmail.com]:587
+   
+# SMTP client settings
+smtp_use_tls = yes
+smtp_tls_security_level = encrypt
+smtp_tls_note_starttls_offer = yes
+smtp_tls_CAfile = /etc/ssl/certs/ca-bundle.crt
+
+2. Configure SASL authentication for smart host:
+   # vim /etc/postfix/sasl_passwd
+   
+# SMTP server authentication
+[smtp.gmail.com]:587    username@gmail.com:app_password
+[smtp.office365.com]:587    user@company.com:password
+[mail.company.com]:25   relay_user:relay_password
+   
+   # postmap /etc/postfix/sasl_passwd
+   # chmod 600 /etc/postfix/sasl_passwd*
+
+3. Configure SASL settings:
+   # vim /etc/postfix/main.cf
+   
+# SASL configuration
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_sasl_mechanism_filter = plain, login
+
+PART C: CONFIGURE CONDITIONAL RELAY
+------------------------------------
+
+1. Configure sender-dependent relay:
+   # vim /etc/postfix/sender_relay
+   
+# Sender-dependent relay mapping
+user1@example.com       [smtp.gmail.com]:587
+user2@example.com       [smtp.office365.com]:587
+@internal.local         [mail.internal.com]:25
+   
+   # postmap /etc/postfix/sender_relay
+
+2. Update main configuration:
+   # vim /etc/postfix/main.cf
+   sender_dependent_relayhost_maps = hash:/etc/postfix/sender_relay
+
+3. Configure recipient-dependent relay:
+   # vim /etc/postfix/recipient_relay
+   
+# Recipient-dependent relay
+@external.com           [smtp.external.com]:587
+@partner.org            [mail.partner.org]:25
+   
+   # postmap /etc/postfix/recipient_relay
+
+4. Configure transport for recipient relay:
+   # vim /etc/postfix/main.cf
+   transport_maps = hash:/etc/postfix/transport, hash:/etc/postfix/recipient_relay
+
+PART D: CONFIGURE RELAY AUTHENTICATION
+---------------------------------------
+
+1. Install and configure SASL:
+   # yum install cyrus-sasl cyrus-sasl-plain -y
+
+2. Configure SASL for client authentication:
+   # vim /etc/postfix/main.cf
+   
+# SASL server configuration (for clients connecting to relay)
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_type = cyrus
+smtpd_sasl_path = smtpd
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain = example.com
+broken_sasl_auth_clients = yes
+
+3. Configure SASL users:
+   # vim /etc/sasl2/smtpd.conf
+   
+pwcheck_method: auxprop
+auxprop_plugin: sasldb
+mech_list: PLAIN LOGIN CRAM-MD5 DIGEST-MD5
+
+4. Create SASL users:
+   # saslpasswd2 -c -u example.com relay_user1
+   # saslpasswd2 -c -u example.com relay_user2
+   # chown postfix:postfix /etc/sasldb2
+
+PART E: CONFIGURE RELAY RESTRICTIONS AND SECURITY
+--------------------------------------------------
+
+1. Configure relay access control:
+   # vim /etc/postfix/relay_recipients
+   
+# Allowed relay recipients
+user1@example.com       OK
+user2@example.com       OK
+admin@example.com       OK
+@internal.local         OK
+   
+   # postmap /etc/postfix/relay_recipients
+
+2. Update main configuration:
+   # vim /etc/postfix/main.cf
+   relay_recipient_maps = hash:/etc/postfix/relay_recipients
+
+3. Configure header checks for relay:
+   # vim /etc/postfix/header_checks
+   
+   # Remove sensitive headers
+   /^Received: from .*\.internal\.local/ IGNORE
+   /^X-Originating-IP:/    IGNORE
+   
+   # postmap /etc/postfix/header_checks
+
+4. Update configuration for header checks:
+   # vim /etc/postfix/main.cf
+   header_checks = regexp:/etc/postfix/header_checks
+
+PART F: CONFIGURE BACKUP RELAY
+-------------------------------
+
+1. Configure multiple relay hosts:
+   # vim /etc/postfix/main.cf
+   
+# Primary and backup relay hosts
+relayhost = [smtp.primary.com]:587
+smtp_fallback_relay = [smtp.backup.com]:587
+
+2. Configure relay host failover:
+   # vim /etc/postfix/relay_hosts
+   
+# Relay host priorities
+smtp.primary.com        1
+smtp.backup.com         2
+smtp.tertiary.com       3
+   
+   # postmap /etc/postfix/relay_hosts
+
+3. Configure transport with failover:
+   # vim /etc/postfix/transport
+   
+   # Transport with backup
+   example.com    smtp:[smtp.primary.com]:587,[smtp.backup.com]:587
+
+PART G: CONFIGURE RELAY MONITORING
+-----------------------------------
+
+1. Configure relay logging:
+   # vim /etc/postfix/main.cf
+   
+# Enhanced logging for relay
+smtp_tls_loglevel = 1
+smtpd_tls_loglevel = 1
+debug_peer_list = smtp.gmail.com
+debug_peer_level = 2
+
+2. Create relay monitoring script:
+   # vim /usr/local/bin/relay-monitor.sh
+   
+#!/bin/bash
+# Relay monitoring script
+   
+LOGFILE="/var/log/maillog"
+ALERT_EMAIL="admin@example.com"
+   
+# Check for relay failures
+FAILURES=$(grep "$(date '+%b %d')" $LOGFILE | grep -c "relay.*failed")
+   
+if [ $FAILURES -gt 10 ]; then
+   echo "High relay failure rate: $FAILURES failures today" | \
+   mail -s "Relay Alert: High Failure Rate" $ALERT_EMAIL
+fi
+   
+# Check queue size
+QUEUE_SIZE=$(postqueue -p | tail -1 | awk '{print $5}')
+if [ "$QUEUE_SIZE" -gt 100 ]; then
+   echo "Large mail queue: $QUEUE_SIZE messages" | \
+   mail -s "Relay Alert: Large Queue" $ALERT_EMAIL
+fi
+   
+   # chmod +x /usr/local/bin/relay-monitor.sh
+
+3. Schedule monitoring:
+   # crontab -e
+   # Add: */15 * * * * /usr/local/bin/relay-monitor.sh
+
+PART H: TESTING RELAY CONFIGURATION
+------------------------------------
+
+1. Test basic relay functionality:
+   # echo "Test relay message" | mail -s "Relay Test" user@external.com
+   # mailq
+
+2. Test smart host authentication:
+   # postfix flush
+   # tail -f /var/log/maillog | grep "sasl_username"
+
+3. Test from external client:
+   # telnet relay.example.com 25
+   HELO client.example.com
+   MAIL FROM: test@example.com
+   RCPT TO: external@gmail.com
+   DATA
+   Subject: Relay test
+   
+   Testing relay functionality.
+   .
+   QUIT
+
+4. Test authenticated relay:
+   # telnet relay.example.com 25
+   EHLO client.example.com
+   AUTH PLAIN
+   # (provide base64 encoded username:password)
+
+PART I: PERFORMANCE TUNING
+---------------------------
+
+1. Configure relay performance settings:
+   # vim /etc/postfix/main.cf
+   
+# Performance tuning
+smtp_destination_concurrency_limit = 20
+smtp_destination_rate_delay = 1s
+smtp_extra_recipient_limit = 10
+   
+# Queue management
+maximal_queue_lifetime = 5d
+bounce_queue_lifetime = 5d
+defer_transports = 
+   
+# Connection pooling
+smtp_connection_cache_destinations = gmail.com, office365.com
+smtp_connection_cache_time_limit = 2s
+
+2. Monitor relay performance:
+   # postconf | grep smtp_destination
+   # qshape active
+   # qshape deferred
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# postfix check
+# postqueue -p
+# postcat -q [queue_id]
+# tail -f /var/log/maillog | grep relay
+# postconf -n | grep relay
+# testsaslauthd -u username -p password
+
+EXPECTED RESULTS:
+-----------------
+- Mail relay accepting connections from internal network
+- Smart host routing working for external emails
+- SASL authentication successful
+- Relay restrictions enforced
+- Backup relay functional during failover
+- Monitoring and alerting operational
+
+VALIDATION CHECKLIST:
+---------------------
+□ Relay service accepting internal connections           Done
+□ Smart host authentication working                      Done
+□ External email delivery successful                     Done
+□ Relay restrictions enforced                            Done
+□ Backup relay configured                                Done
+□ Performance tuning applied                             Done
+□ Monitoring scripts active                              Done
+
+CLEANUP:
+--------
+# systemctl stop postfix
+# rm /etc/postfix/sasl_passwd*
+# rm /etc/postfix/transport*
+# rm /etc/postfix/relay_*
+# crontab -e  # Remove monitoring entries

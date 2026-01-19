@@ -1,0 +1,1136 @@
+RHCE RH254 HANDS-ON LAB: SYSTEM BACKUP STRATEGIES
+===============================================
+
+LAB OBJECTIVE:
+Configure comprehensive system backup strategies including full, incremental, and differential backups using various tools and methods for enterprise data protection
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of backup concepts and strategies
+- Basic knowledge of file systems and storage
+- Familiarity with scheduling and automation
+
+LAB SCENARIO:
+Implement enterprise backup strategies with multiple backup types, retention policies, verification procedures, and automated scheduling for complete data protection.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20)
+- Backup storage location (/backup or remote storage)
+- Test data for backup operations
+- Network storage (optional)
+
+LAB TASKS:
+
+PART A: CONFIGURE BACKUP INFRASTRUCTURE
+----------------------------------------
+
+1. Create backup directory structure:
+   # mkdir -p /backup/{full,incremental,differential,logs,scripts}
+   # mkdir -p /backup/restore-test
+   # chmod 700 /backup
+   # chown root:root /backup
+
+2. Create backup configuration:
+   # vim /etc/backup/backup.conf
+   
+   # Backup Configuration File
+   BACKUP_ROOT="/backup"
+   FULL_BACKUP_DIR="$BACKUP_ROOT/full"
+   INCREMENTAL_BACKUP_DIR="$BACKUP_ROOT/incremental"
+   DIFFERENTIAL_BACKUP_DIR="$BACKUP_ROOT/differential"
+   LOG_DIR="$BACKUP_ROOT/logs"
+   
+   # Backup sources
+   BACKUP_SOURCES="/etc /home /var/log /opt /usr/local"
+   EXCLUDE_PATTERNS="/tmp /proc /sys /dev /run /mnt /media"
+   
+   # Retention policies (days)
+   FULL_RETENTION=30
+   INCREMENTAL_RETENTION=14
+   DIFFERENTIAL_RETENTION=7
+   LOG_RETENTION=90
+   
+   # Compression and encryption
+   COMPRESSION_LEVEL=6
+   ENCRYPT_BACKUPS=false
+   ENCRYPTION_KEY="/etc/backup/backup.key"
+   
+   # Notification settings
+   NOTIFY_EMAIL="admin@example.com"
+   NOTIFY_ON_SUCCESS=true
+   NOTIFY_ON_FAILURE=true
+
+3. Create backup logging system:
+   # vim /usr/local/bin/backup-logger.sh
+   
+   #!/bin/bash
+   LOG_FILE="/backup/logs/backup-$(date +%Y%m%d).log"
+   
+   log_message() {
+       local level=$1
+       local message=$2
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] $message" >> $LOG_FILE
+   }
+   
+   log_info() {
+       log_message "INFO" "$1"
+   }
+   
+   log_warning() {
+       log_message "WARNING" "$1"
+   }
+   
+   log_error() {
+       log_message "ERROR" "$1"
+   }
+   
+   log_success() {
+       log_message "SUCCESS" "$1"
+   }
+   
+   # chmod +x /usr/local/bin/backup-logger.sh
+
+4. Create backup verification system:
+   # vim /usr/local/bin/backup-verifier.sh
+   
+   #!/bin/bash
+   source /usr/local/bin/backup-logger.sh
+   
+   verify_backup() {
+       local backup_file=$1
+       local backup_type=$2
+       
+       log_info "Starting verification of $backup_type backup: $backup_file"
+       
+       if [ ! -f "$backup_file" ]; then
+           log_error "Backup file not found: $backup_file"
+           return 1
+       fi
+       
+       # Check file size
+       local file_size=$(stat -c%s "$backup_file")
+       if [ $file_size -lt 1024 ]; then
+           log_error "Backup file too small: $file_size bytes"
+           return 1
+       fi
+       
+       # Test archive integrity
+       case "${backup_file##*.}" in
+           "gz"|"tgz")
+               if gzip -t "$backup_file" 2>/dev/null; then
+                   log_success "Backup archive integrity verified"
+               else
+                   log_error "Backup archive integrity check failed"
+                   return 1
+               fi
+               ;;
+           "bz2")
+               if bzip2 -t "$backup_file" 2>/dev/null; then
+                   log_success "Backup archive integrity verified"
+               else
+                   log_error "Backup archive integrity check failed"
+                   return 1
+               fi
+               ;;
+           *)
+               if tar -tf "$backup_file" >/dev/null 2>&1; then
+                   log_success "Backup archive integrity verified"
+               else
+                   log_error "Backup archive integrity check failed"
+                   return 1
+               fi
+               ;;
+       esac
+       
+       # Test restore capability (sample)
+       local test_dir="/tmp/backup-test-$$"
+       mkdir -p "$test_dir"
+       
+       if tar -xf "$backup_file" -C "$test_dir" --strip-components=1 etc/passwd 2>/dev/null; then
+           log_success "Sample restore test successful"
+           rm -rf "$test_dir"
+       else
+           log_warning "Sample restore test failed"
+           rm -rf "$test_dir"
+       fi
+       
+       return 0
+   }
+   
+   # chmod +x /usr/local/bin/backup-verifier.sh
+
+PART B: CREATE FULL BACKUP SYSTEM
+----------------------------------
+
+1. Create full backup script:
+   # vim /usr/local/bin/full-backup.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+   BACKUP_FILE="$FULL_BACKUP_DIR/full-backup-$BACKUP_DATE.tar.gz"
+   EXCLUDE_FILE="/tmp/backup-exclude-$$"
+   
+   log_info "Starting full backup process"
+   
+   # Create exclude file
+   echo "$EXCLUDE_PATTERNS" | tr ' ' '\n' > $EXCLUDE_FILE
+   echo "/backup" >> $EXCLUDE_FILE
+   
+   # Start backup
+   log_info "Creating full backup: $BACKUP_FILE"
+   
+   if tar --exclude-from=$EXCLUDE_FILE \
+          -czf "$BACKUP_FILE" \
+          $BACKUP_SOURCES 2>/dev/null; then
+       
+       log_success "Full backup completed successfully"
+       
+       # Verify backup
+       source /usr/local/bin/backup-verifier.sh
+       if verify_backup "$BACKUP_FILE" "full"; then
+           log_success "Full backup verification passed"
+       else
+           log_error "Full backup verification failed"
+       fi
+       
+       # Update backup index
+       echo "$BACKUP_DATE:full:$BACKUP_FILE:$(stat -c%s "$BACKUP_FILE")" >> $BACKUP_ROOT/backup-index.log
+       
+   else
+       log_error "Full backup failed"
+       rm -f "$BACKUP_FILE"
+       exit 1
+   fi
+   
+   # Cleanup
+   rm -f $EXCLUDE_FILE
+   
+   # Create reference file for incremental backups
+   touch "$BACKUP_ROOT/last-full-backup"
+   
+   log_info "Full backup process completed"
+   
+   # chmod +x /usr/local/bin/full-backup.sh
+
+2. Create full backup with encryption:
+   # vim /usr/local/bin/full-backup-encrypted.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+   BACKUP_FILE="$FULL_BACKUP_DIR/full-backup-encrypted-$BACKUP_DATE.tar.gz.gpg"
+   TEMP_FILE="/tmp/full-backup-$BACKUP_DATE.tar.gz"
+   EXCLUDE_FILE="/tmp/backup-exclude-$$"
+   
+   log_info "Starting encrypted full backup process"
+   
+   # Check if encryption key exists
+   if [ ! -f "$ENCRYPTION_KEY" ]; then
+       log_error "Encryption key not found: $ENCRYPTION_KEY"
+       exit 1
+   fi
+   
+   # Create exclude file
+   echo "$EXCLUDE_PATTERNS" | tr ' ' '\n' > $EXCLUDE_FILE
+   echo "/backup" >> $EXCLUDE_FILE
+   
+   # Create backup
+   log_info "Creating temporary backup file"
+   if tar --exclude-from=$EXCLUDE_FILE \
+          -czf "$TEMP_FILE" \
+          $BACKUP_SOURCES 2>/dev/null; then
+       
+       log_info "Encrypting backup file"
+       if gpg --cipher-algo AES256 \
+              --compress-algo 1 \
+              --symmetric \
+              --passphrase-file "$ENCRYPTION_KEY" \
+              --output "$BACKUP_FILE" \
+              "$TEMP_FILE" 2>/dev/null; then
+           
+           log_success "Encrypted full backup completed successfully"
+           rm -f "$TEMP_FILE"
+           
+           # Update backup index
+           echo "$BACKUP_DATE:full-encrypted:$BACKUP_FILE:$(stat -c%s "$BACKUP_FILE")" >> $BACKUP_ROOT/backup-index.log
+           
+       else
+           log_error "Backup encryption failed"
+           rm -f "$TEMP_FILE" "$BACKUP_FILE"
+           exit 1
+       fi
+   else
+       log_error "Backup creation failed"
+       rm -f "$TEMP_FILE"
+       exit 1
+   fi
+   
+   # Cleanup
+   rm -f $EXCLUDE_FILE
+   
+   log_info "Encrypted full backup process completed"
+   
+   # chmod +x /usr/local/bin/full-backup-encrypted.sh
+
+PART C: CREATE INCREMENTAL BACKUP SYSTEM
+-----------------------------------------
+
+1. Create incremental backup script:
+   # vim /usr/local/bin/incremental-backup.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+   BACKUP_FILE="$INCREMENTAL_BACKUP_DIR/incremental-backup-$BACKUP_DATE.tar.gz"
+   EXCLUDE_FILE="/tmp/backup-exclude-$$"
+   REFERENCE_FILE="$BACKUP_ROOT/last-backup"
+   
+   log_info "Starting incremental backup process"
+   
+   # Check if reference file exists
+   if [ ! -f "$REFERENCE_FILE" ]; then
+       log_warning "No reference file found, creating full backup instead"
+       /usr/local/bin/full-backup.sh
+       exit $?
+   fi
+   
+   # Create exclude file
+   echo "$EXCLUDE_PATTERNS" | tr ' ' '\n' > $EXCLUDE_FILE
+   echo "/backup" >> $EXCLUDE_FILE
+   
+   # Find files newer than last backup
+   log_info "Finding files modified since last backup"
+   CHANGED_FILES="/tmp/changed-files-$$"
+   
+   find $BACKUP_SOURCES -newer "$REFERENCE_FILE" -type f > $CHANGED_FILES 2>/dev/null
+   
+   if [ ! -s "$CHANGED_FILES" ]; then
+       log_info "No files changed since last backup"
+       rm -f $CHANGED_FILES $EXCLUDE_FILE
+       exit 0
+   fi
+   
+   # Create incremental backup
+   log_info "Creating incremental backup: $BACKUP_FILE"
+   
+   if tar --exclude-from=$EXCLUDE_FILE \
+          -czf "$BACKUP_FILE" \
+          -T "$CHANGED_FILES" 2>/dev/null; then
+       
+       log_success "Incremental backup completed successfully"
+       
+       # Verify backup
+       source /usr/local/bin/backup-verifier.sh
+       if verify_backup "$BACKUP_FILE" "incremental"; then
+           log_success "Incremental backup verification passed"
+       else
+           log_error "Incremental backup verification failed"
+       fi
+       
+       # Update backup index
+       echo "$BACKUP_DATE:incremental:$BACKUP_FILE:$(stat -c%s "$BACKUP_FILE")" >> $BACKUP_ROOT/backup-index.log
+       
+       # Update reference file
+       touch "$REFERENCE_FILE"
+       
+   else
+       log_error "Incremental backup failed"
+       rm -f "$BACKUP_FILE"
+       exit 1
+   fi
+   
+   # Cleanup
+   rm -f $EXCLUDE_FILE $CHANGED_FILES
+   
+   log_info "Incremental backup process completed"
+   
+   # chmod +x /usr/local/bin/incremental-backup.sh
+
+2. Create incremental backup with metadata:
+   # vim /usr/local/bin/incremental-backup-metadata.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+   BACKUP_FILE="$INCREMENTAL_BACKUP_DIR/incremental-meta-$BACKUP_DATE.tar.gz"
+   METADATA_FILE="$INCREMENTAL_BACKUP_DIR/metadata-$BACKUP_DATE.txt"
+   EXCLUDE_FILE="/tmp/backup-exclude-$$"
+   REFERENCE_FILE="$BACKUP_ROOT/last-backup"
+   
+   log_info "Starting incremental backup with metadata"
+   
+   # Check reference file
+   if [ ! -f "$REFERENCE_FILE" ]; then
+       log_error "Reference file not found for incremental backup"
+       exit 1
+   fi
+   
+   # Create exclude file
+   echo "$EXCLUDE_PATTERNS" | tr ' ' '\n' > $EXCLUDE_FILE
+   echo "/backup" >> $EXCLUDE_FILE
+   
+   # Create metadata file
+   echo "Incremental Backup Metadata" > $METADATA_FILE
+   echo "Backup Date: $BACKUP_DATE" >> $METADATA_FILE
+   echo "Reference Date: $(stat -c %y "$REFERENCE_FILE")" >> $METADATA_FILE
+   echo "Backup Sources: $BACKUP_SOURCES" >> $METADATA_FILE
+   echo "---" >> $METADATA_FILE
+   
+   # Find and catalog changed files
+   CHANGED_FILES="/tmp/changed-files-$$"
+   find $BACKUP_SOURCES -newer "$REFERENCE_FILE" -type f -exec ls -la {} \; > $CHANGED_FILES 2>/dev/null
+   
+   if [ -s "$CHANGED_FILES" ]; then
+       echo "Changed Files:" >> $METADATA_FILE
+       cat $CHANGED_FILES >> $METADATA_FILE
+       
+       # Create backup including metadata
+       if tar --exclude-from=$EXCLUDE_FILE \
+              -czf "$BACKUP_FILE" \
+              -T <(awk '{print $NF}' $CHANGED_FILES) \
+              "$METADATA_FILE" 2>/dev/null; then
+           
+           log_success "Incremental backup with metadata completed"
+           
+           # Update backup index
+           echo "$BACKUP_DATE:incremental-meta:$BACKUP_FILE:$(stat -c%s "$BACKUP_FILE")" >> $BACKUP_ROOT/backup-index.log
+           
+           touch "$REFERENCE_FILE"
+       else
+           log_error "Incremental backup with metadata failed"
+           rm -f "$BACKUP_FILE" "$METADATA_FILE"
+           exit 1
+       fi
+   else
+       log_info "No files changed since last backup"
+   fi
+   
+   # Cleanup
+   rm -f $EXCLUDE_FILE $CHANGED_FILES
+   
+   # chmod +x /usr/local/bin/incremental-backup-metadata.sh
+
+PART D: CREATE DIFFERENTIAL BACKUP SYSTEM
+------------------------------------------
+
+1. Create differential backup script:
+   # vim /usr/local/bin/differential-backup.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+   BACKUP_FILE="$DIFFERENTIAL_BACKUP_DIR/differential-backup-$BACKUP_DATE.tar.gz"
+   EXCLUDE_FILE="/tmp/backup-exclude-$$"
+   REFERENCE_FILE="$BACKUP_ROOT/last-full-backup"
+   
+   log_info "Starting differential backup process"
+   
+   # Check if full backup reference exists
+   if [ ! -f "$REFERENCE_FILE" ]; then
+       log_warning "No full backup reference found, creating full backup instead"
+       /usr/local/bin/full-backup.sh
+       exit $?
+   fi
+   
+   # Create exclude file
+   echo "$EXCLUDE_PATTERNS" | tr ' ' '\n' > $EXCLUDE_FILE
+   echo "/backup" >> $EXCLUDE_FILE
+   
+   # Find files newer than last full backup
+   log_info "Finding files modified since last full backup"
+   CHANGED_FILES="/tmp/changed-files-$$"
+   
+   find $BACKUP_SOURCES -newer "$REFERENCE_FILE" -type f > $CHANGED_FILES 2>/dev/null
+   
+   if [ ! -s "$CHANGED_FILES" ]; then
+       log_info "No files changed since last full backup"
+       rm -f $CHANGED_FILES $EXCLUDE_FILE
+       exit 0
+   fi
+   
+   # Create differential backup
+   log_info "Creating differential backup: $BACKUP_FILE"
+   
+   if tar --exclude-from=$EXCLUDE_FILE \
+          -czf "$BACKUP_FILE" \
+          -T "$CHANGED_FILES" 2>/dev/null; then
+       
+       log_success "Differential backup completed successfully"
+       
+       # Verify backup
+       source /usr/local/bin/backup-verifier.sh
+       if verify_backup "$BACKUP_FILE" "differential"; then
+           log_success "Differential backup verification passed"
+       else
+           log_error "Differential backup verification failed"
+       fi
+       
+       # Update backup index
+       echo "$BACKUP_DATE:differential:$BACKUP_FILE:$(stat -c%s "$BACKUP_FILE")" >> $BACKUP_ROOT/backup-index.log
+       
+   else
+       log_error "Differential backup failed"
+       rm -f "$BACKUP_FILE"
+       exit 1
+   fi
+   
+   # Cleanup
+   rm -f $EXCLUDE_FILE $CHANGED_FILES
+   
+   log_info "Differential backup process completed"
+   
+   # chmod +x /usr/local/bin/differential-backup.sh
+
+PART E: CREATE BACKUP MANAGEMENT SYSTEM
+----------------------------------------
+
+1. Create backup scheduler:
+   # vim /usr/local/bin/backup-scheduler.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   SCHEDULE_CONFIG="/etc/backup/schedule.conf"
+   
+   # Create default schedule if it doesn't exist
+   if [ ! -f $SCHEDULE_CONFIG ]; then
+       cat > $SCHEDULE_CONFIG << 'EOF'
+   # Backup Schedule Configuration
+   # Format: day_of_week:backup_type:time
+   # day_of_week: 0=Sunday, 1=Monday, etc.
+   0:full:02:00
+   1:incremental:02:00
+   2:incremental:02:00
+   3:incremental:02:00
+   4:incremental:02:00
+   5:incremental:02:00
+   6:differential:02:00
+   EOF
+   fi
+   
+   CURRENT_DOW=$(date +%u)  # 1=Monday, 7=Sunday
+   CURRENT_DOW=$((CURRENT_DOW % 7))  # Convert to 0=Sunday format
+   CURRENT_TIME=$(date +%H:%M)
+   
+   log_info "Checking backup schedule for day $CURRENT_DOW at $CURRENT_TIME"
+   
+   while IFS=':' read -r day backup_type scheduled_time; do
+       [[ $day =~ ^#.*$ ]] && continue
+       [[ -z $day ]] && continue
+       
+       if [ $day -eq $CURRENT_DOW ]; then
+           log_info "Found scheduled backup: $backup_type at $scheduled_time"
+           
+           case $backup_type in
+               "full")
+                   log_info "Executing full backup"
+                   /usr/local/bin/full-backup.sh
+                   ;;
+               "incremental")
+                   log_info "Executing incremental backup"
+                   /usr/local/bin/incremental-backup.sh
+                   ;;
+               "differential")
+                   log_info "Executing differential backup"
+                   /usr/local/bin/differential-backup.sh
+                   ;;
+               *)
+                   log_error "Unknown backup type: $backup_type"
+                   ;;
+           esac
+           break
+       fi
+   done < $SCHEDULE_CONFIG
+   
+   # chmod +x /usr/local/bin/backup-scheduler.sh
+
+2. Create backup retention manager:
+   # vim /usr/local/bin/backup-retention.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   log_info "Starting backup retention cleanup"
+   
+   # Clean old full backups
+   log_info "Cleaning full backups older than $FULL_RETENTION days"
+   find $FULL_BACKUP_DIR -name "*.tar.gz*" -mtime +$FULL_RETENTION -type f | while read file; do
+       log_info "Removing old full backup: $file"
+       rm -f "$file"
+   done
+   
+   # Clean old incremental backups
+   log_info "Cleaning incremental backups older than $INCREMENTAL_RETENTION days"
+   find $INCREMENTAL_BACKUP_DIR -name "*.tar.gz*" -mtime +$INCREMENTAL_RETENTION -type f | while read file; do
+       log_info "Removing old incremental backup: $file"
+       rm -f "$file"
+   done
+   
+   # Clean old differential backups
+   log_info "Cleaning differential backups older than $DIFFERENTIAL_RETENTION days"
+   find $DIFFERENTIAL_BACKUP_DIR -name "*.tar.gz*" -mtime +$DIFFERENTIAL_RETENTION -type f | while read file; do
+       log_info "Removing old differential backup: $file"
+       rm -f "$file"
+   done
+   
+   # Clean old logs
+   log_info "Cleaning logs older than $LOG_RETENTION days"
+   find $LOG_DIR -name "*.log" -mtime +$LOG_RETENTION -type f | while read file; do
+       log_info "Removing old log: $file"
+       rm -f "$file"
+   done
+   
+   # Update backup index (remove entries for deleted files)
+   if [ -f "$BACKUP_ROOT/backup-index.log" ]; then
+       TEMP_INDEX="/tmp/backup-index-$$"
+       while IFS=':' read -r date type file size; do
+           if [ -f "$file" ]; then
+               echo "$date:$type:$file:$size" >> $TEMP_INDEX
+           fi
+       done < "$BACKUP_ROOT/backup-index.log"
+       
+       mv $TEMP_INDEX "$BACKUP_ROOT/backup-index.log"
+   fi
+   
+   log_info "Backup retention cleanup completed"
+   
+   # chmod +x /usr/local/bin/backup-retention.sh
+PART F: CREATE BACKUP MONITORING AND REPORTING
+----------------------------------------------
+
+1. Create backup status monitor:
+   # vim /usr/local/bin/backup-status-monitor.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   REPORT_FILE="/backup/logs/backup-status-$(date +%Y%m%d).log"
+   
+   log_info "Generating backup status report"
+   
+   echo "=== BACKUP STATUS REPORT - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Check backup directory sizes
+   echo "BACKUP DIRECTORY SIZES:" >> $REPORT_FILE
+   du -sh $FULL_BACKUP_DIR $INCREMENTAL_BACKUP_DIR $DIFFERENTIAL_BACKUP_DIR >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Recent backup summary
+   echo "RECENT BACKUPS (Last 7 days):" >> $REPORT_FILE
+   if [ -f "$BACKUP_ROOT/backup-index.log" ]; then
+       WEEK_AGO=$(date -d '7 days ago' +%Y%m%d)
+       grep -E "^[0-9]{8}" "$BACKUP_ROOT/backup-index.log" | \
+       awk -F':' -v cutoff=$WEEK_AGO '$1 >= cutoff {print $1, $2, $4}' | \
+       while read date type size; do
+           echo "  $date - $type - $(numfmt --to=iec $size)" >> $REPORT_FILE
+       done
+   else
+       echo "  No backup index found" >> $REPORT_FILE
+   fi
+   echo >> $REPORT_FILE
+   
+   # Backup verification status
+   echo "BACKUP VERIFICATION STATUS:" >> $REPORT_FILE
+   LAST_FULL=$(find $FULL_BACKUP_DIR -name "*.tar.gz" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+   if [ -n "$LAST_FULL" ]; then
+       echo "  Last full backup: $(basename "$LAST_FULL")" >> $REPORT_FILE
+       if source /usr/local/bin/backup-verifier.sh && verify_backup "$LAST_FULL" "full" >/dev/null 2>&1; then
+           echo "  Verification: PASSED" >> $REPORT_FILE
+       else
+           echo "  Verification: FAILED" >> $REPORT_FILE
+       fi
+   else
+       echo "  No full backups found" >> $REPORT_FILE
+   fi
+   echo >> $REPORT_FILE
+   
+   # Storage usage analysis
+   echo "STORAGE USAGE ANALYSIS:" >> $REPORT_FILE
+   TOTAL_BACKUP_SIZE=$(du -sb /backup | cut -f1)
+   AVAILABLE_SPACE=$(df /backup | tail -1 | awk '{print $4 * 1024}')
+   USAGE_PERCENT=$(echo "scale=2; $TOTAL_BACKUP_SIZE * 100 / ($TOTAL_BACKUP_SIZE + $AVAILABLE_SPACE)" | bc)
+   
+   echo "  Total backup size: $(numfmt --to=iec $TOTAL_BACKUP_SIZE)" >> $REPORT_FILE
+   echo "  Available space: $(numfmt --to=iec $AVAILABLE_SPACE)" >> $REPORT_FILE
+   echo "  Usage percentage: ${USAGE_PERCENT}%" >> $REPORT_FILE
+   
+   if (( $(echo "$USAGE_PERCENT > 80" | bc -l) )); then
+       echo "  WARNING: Backup storage usage is high" >> $REPORT_FILE
+   fi
+   
+   log_success "Backup status report generated: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/backup-status-monitor.sh
+
+2. Create backup health checker:
+   # vim /usr/local/bin/backup-health-checker.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   HEALTH_REPORT="/backup/logs/backup-health-$(date +%Y%m%d).log"
+   ALERT_FILE="/backup/logs/backup-alerts.log"
+   
+   log_info "Starting backup health check"
+   
+   echo "=== BACKUP HEALTH CHECK - $(date) ===" > $HEALTH_REPORT
+   echo >> $HEALTH_REPORT
+   
+   HEALTH_ISSUES=0
+   
+   # Check if recent full backup exists
+   echo "FULL BACKUP CHECK:" >> $HEALTH_REPORT
+   LAST_FULL_DATE=$(find $FULL_BACKUP_DIR -name "*.tar.gz*" -type f -printf '%T@ %f\n' | sort -n | tail -1 | cut -d' ' -f2 | grep -o '[0-9]\{8\}')
+   
+   if [ -n "$LAST_FULL_DATE" ]; then
+       DAYS_SINCE_FULL=$(( ($(date +%s) - $(date -d "$LAST_FULL_DATE" +%s)) / 86400 ))
+       echo "  Last full backup: $DAYS_SINCE_FULL days ago" >> $HEALTH_REPORT
+       
+       if [ $DAYS_SINCE_FULL -gt 7 ]; then
+           echo "  WARNING: Full backup is older than 7 days" >> $HEALTH_REPORT
+           echo "$(date): WARNING - Full backup is $DAYS_SINCE_FULL days old" >> $ALERT_FILE
+           HEALTH_ISSUES=$((HEALTH_ISSUES + 1))
+       else
+           echo "  Status: OK" >> $HEALTH_REPORT
+       fi
+   else
+       echo "  ERROR: No full backup found" >> $HEALTH_REPORT
+       echo "$(date): ERROR - No full backup found" >> $ALERT_FILE
+       HEALTH_ISSUES=$((HEALTH_ISSUES + 1))
+   fi
+   echo >> $HEALTH_REPORT
+   
+   # Check backup consistency
+   echo "BACKUP CONSISTENCY CHECK:" >> $HEALTH_REPORT
+   BACKUP_COUNT_FULL=$(find $FULL_BACKUP_DIR -name "*.tar.gz*" -type f | wc -l)
+   BACKUP_COUNT_INC=$(find $INCREMENTAL_BACKUP_DIR -name "*.tar.gz*" -type f | wc -l)
+   BACKUP_COUNT_DIFF=$(find $DIFFERENTIAL_BACKUP_DIR -name "*.tar.gz*" -type f | wc -l)
+   
+   echo "  Full backups: $BACKUP_COUNT_FULL" >> $HEALTH_REPORT
+   echo "  Incremental backups: $BACKUP_COUNT_INC" >> $HEALTH_REPORT
+   echo "  Differential backups: $BACKUP_COUNT_DIFF" >> $HEALTH_REPORT
+   
+   if [ $BACKUP_COUNT_FULL -eq 0 ]; then
+       echo "  ERROR: No full backups available" >> $HEALTH_REPORT
+       HEALTH_ISSUES=$((HEALTH_ISSUES + 1))
+   fi
+   echo >> $HEALTH_REPORT
+   
+   # Check backup file integrity
+   echo "BACKUP INTEGRITY CHECK:" >> $HEALTH_REPORT
+   CORRUPT_BACKUPS=0
+   
+   # Check recent backups
+   find /backup -name "*.tar.gz" -type f -mtime -7 | head -5 | while read backup_file; do
+       if ! tar -tf "$backup_file" >/dev/null 2>&1; then
+           echo "  CORRUPT: $(basename "$backup_file")" >> $HEALTH_REPORT
+           CORRUPT_BACKUPS=$((CORRUPT_BACKUPS + 1))
+       fi
+   done
+   
+   if [ $CORRUPT_BACKUPS -eq 0 ]; then
+       echo "  All recent backups passed integrity check" >> $HEALTH_REPORT
+   else
+       echo "  WARNING: $CORRUPT_BACKUPS corrupt backup(s) found" >> $HEALTH_REPORT
+       HEALTH_ISSUES=$((HEALTH_ISSUES + 1))
+   fi
+   echo >> $HEALTH_REPORT
+   
+   # Overall health status
+   echo "OVERALL HEALTH STATUS:" >> $HEALTH_REPORT
+   if [ $HEALTH_ISSUES -eq 0 ]; then
+       echo "  Status: HEALTHY" >> $HEALTH_REPORT
+       log_success "Backup system health check passed"
+   else
+       echo "  Status: ISSUES DETECTED ($HEALTH_ISSUES)" >> $HEALTH_REPORT
+       log_warning "Backup system health check found $HEALTH_ISSUES issues"
+   fi
+   
+   log_info "Backup health check completed: $HEALTH_REPORT"
+   
+   # chmod +x /usr/local/bin/backup-health-checker.sh
+
+PART G: CREATE BACKUP AUTOMATION
+---------------------------------
+
+1. Create master backup controller:
+   # vim /usr/local/bin/backup-controller.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   BACKUP_TYPE=${1:-"auto"}
+   
+   log_info "Starting backup controller with type: $BACKUP_TYPE"
+   
+   case $BACKUP_TYPE in
+       "full")
+           log_info "Executing full backup"
+           /usr/local/bin/full-backup.sh
+           ;;
+       "incremental")
+           log_info "Executing incremental backup"
+           /usr/local/bin/incremental-backup.sh
+           ;;
+       "differential")
+           log_info "Executing differential backup"
+           /usr/local/bin/differential-backup.sh
+           ;;
+       "auto")
+           log_info "Executing scheduled backup"
+           /usr/local/bin/backup-scheduler.sh
+           ;;
+       *)
+           log_error "Unknown backup type: $BACKUP_TYPE"
+           echo "Usage: $0 {full|incremental|differential|auto}"
+           exit 1
+           ;;
+   esac
+   
+   BACKUP_EXIT_CODE=$?
+   
+   # Run post-backup tasks
+   if [ $BACKUP_EXIT_CODE -eq 0 ]; then
+       log_info "Running post-backup tasks"
+       
+       # Run retention cleanup
+       /usr/local/bin/backup-retention.sh
+       
+       # Generate status report
+       /usr/local/bin/backup-status-monitor.sh
+       
+       # Run health check
+       /usr/local/bin/backup-health-checker.sh
+       
+       log_success "Backup controller completed successfully"
+   else
+       log_error "Backup failed with exit code $BACKUP_EXIT_CODE"
+   fi
+   
+   exit $BACKUP_EXIT_CODE
+   
+   # chmod +x /usr/local/bin/backup-controller.sh
+
+2. Create backup notification system:
+   # vim /usr/local/bin/backup-notifier.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   NOTIFICATION_TYPE=$1
+   MESSAGE=$2
+   
+   log_info "Sending backup notification: $NOTIFICATION_TYPE"
+   
+   case $NOTIFICATION_TYPE in
+       "success")
+           SUBJECT="Backup Completed Successfully - $(hostname)"
+           BODY="Backup operation completed successfully on $(date)\n\n$MESSAGE"
+           ;;
+       "failure")
+           SUBJECT="Backup Failed - $(hostname)"
+           BODY="Backup operation failed on $(date)\n\nError: $MESSAGE"
+           ;;
+       "warning")
+           SUBJECT="Backup Warning - $(hostname)"
+           BODY="Backup operation completed with warnings on $(date)\n\nWarning: $MESSAGE"
+           ;;
+       *)
+           log_error "Unknown notification type: $NOTIFICATION_TYPE"
+           exit 1
+           ;;
+   esac
+   
+   # Send email notification (if configured)
+   if [ "$NOTIFY_EMAIL" != "" ] && command -v mail >/dev/null 2>&1; then
+       echo -e "$BODY" | mail -s "$SUBJECT" "$NOTIFY_EMAIL"
+       log_info "Email notification sent to $NOTIFY_EMAIL"
+   fi
+   
+   # Log notification
+   echo "$(date): $NOTIFICATION_TYPE - $MESSAGE" >> /backup/logs/notifications.log
+   
+   # chmod +x /usr/local/bin/backup-notifier.sh
+
+3. Schedule backup automation:
+   # vim /etc/cron.d/backup-automation
+   
+   # Automated backup scheduling
+   # Full backup every Sunday at 2 AM
+   0 2 * * 0 root /usr/local/bin/backup-controller.sh full
+   
+   # Incremental backup Monday-Friday at 2 AM
+   0 2 * * 1-5 root /usr/local/bin/backup-controller.sh incremental
+   
+   # Differential backup Saturday at 2 AM
+   0 2 * * 6 root /usr/local/bin/backup-controller.sh differential
+   
+   # Backup health check daily at 6 AM
+   0 6 * * * root /usr/local/bin/backup-health-checker.sh
+   
+   # Backup status report daily at 7 AM
+   0 7 * * * root /usr/local/bin/backup-status-monitor.sh
+   
+   # Retention cleanup weekly on Sunday at 4 AM
+   0 4 * * 0 root /usr/local/bin/backup-retention.sh
+
+PART H: CREATE BACKUP TESTING AND VALIDATION
+---------------------------------------------
+
+1. Create backup restore tester:
+   # vim /usr/local/bin/backup-restore-tester.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   BACKUP_FILE=$1
+   TEST_DIR="/backup/restore-test/test-$(date +%Y%m%d_%H%M%S)"
+   
+   if [ -z "$BACKUP_FILE" ]; then
+       echo "Usage: $0 <backup_file>"
+       exit 1
+   fi
+   
+   if [ ! -f "$BACKUP_FILE" ]; then
+       log_error "Backup file not found: $BACKUP_FILE"
+       exit 1
+   fi
+   
+   log_info "Starting backup restore test for: $BACKUP_FILE"
+   
+   # Create test directory
+   mkdir -p "$TEST_DIR"
+   
+   # Extract backup
+   log_info "Extracting backup to test directory"
+   if tar -xzf "$BACKUP_FILE" -C "$TEST_DIR" 2>/dev/null; then
+       log_success "Backup extraction successful"
+       
+       # Verify extracted content
+       EXTRACTED_FILES=$(find "$TEST_DIR" -type f | wc -l)
+       EXTRACTED_SIZE=$(du -sb "$TEST_DIR" | cut -f1)
+       
+       log_info "Extracted $EXTRACTED_FILES files, total size: $(numfmt --to=iec $EXTRACTED_SIZE)"
+       
+       # Test file integrity
+       SAMPLE_FILES=$(find "$TEST_DIR" -type f | head -10)
+       CORRUPT_FILES=0
+       
+       echo "$SAMPLE_FILES" | while read file; do
+           if [ ! -r "$file" ]; then
+               log_warning "Cannot read extracted file: $file"
+               CORRUPT_FILES=$((CORRUPT_FILES + 1))
+           fi
+       done
+       
+       if [ $CORRUPT_FILES -eq 0 ]; then
+           log_success "Backup restore test passed"
+           echo "RESTORE_TEST:PASSED:$BACKUP_FILE:$EXTRACTED_FILES:$EXTRACTED_SIZE" >> /backup/logs/restore-tests.log
+       else
+           log_error "Backup restore test failed - $CORRUPT_FILES corrupt files"
+           echo "RESTORE_TEST:FAILED:$BACKUP_FILE:$CORRUPT_FILES:corruption" >> /backup/logs/restore-tests.log
+       fi
+       
+   else
+       log_error "Backup extraction failed"
+       echo "RESTORE_TEST:FAILED:$BACKUP_FILE:0:extraction_failed" >> /backup/logs/restore-tests.log
+   fi
+   
+   # Cleanup test directory
+   rm -rf "$TEST_DIR"
+   
+   log_info "Backup restore test completed"
+   
+   # chmod +x /usr/local/bin/backup-restore-tester.sh
+
+2. Create comprehensive backup validator:
+   # vim /usr/local/bin/backup-validator.sh
+   
+   #!/bin/bash
+   source /etc/backup/backup.conf
+   source /usr/local/bin/backup-logger.sh
+   
+   VALIDATION_REPORT="/backup/logs/validation-$(date +%Y%m%d).log"
+   
+   log_info "Starting comprehensive backup validation"
+   
+   echo "=== BACKUP VALIDATION REPORT - $(date) ===" > $VALIDATION_REPORT
+   echo >> $VALIDATION_REPORT
+   
+   VALIDATION_ERRORS=0
+   
+   # Validate backup directory structure
+   echo "DIRECTORY STRUCTURE VALIDATION:" >> $VALIDATION_REPORT
+   for dir in $FULL_BACKUP_DIR $INCREMENTAL_BACKUP_DIR $DIFFERENTIAL_BACKUP_DIR $LOG_DIR; do
+       if [ -d "$dir" ]; then
+           echo "  $dir: OK" >> $VALIDATION_REPORT
+       else
+           echo "  $dir: MISSING" >> $VALIDATION_REPORT
+           VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+       fi
+   done
+   echo >> $VALIDATION_REPORT
+   
+   # Validate backup files
+   echo "BACKUP FILE VALIDATION:" >> $VALIDATION_REPORT
+   
+   # Check full backups
+   FULL_BACKUPS=$(find $FULL_BACKUP_DIR -name "*.tar.gz*" -type f | wc -l)
+   echo "  Full backups found: $FULL_BACKUPS" >> $VALIDATION_REPORT
+   
+   if [ $FULL_BACKUPS -gt 0 ]; then
+       # Test latest full backup
+       LATEST_FULL=$(find $FULL_BACKUP_DIR -name "*.tar.gz" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+       echo "  Testing latest full backup: $(basename "$LATEST_FULL")" >> $VALIDATION_REPORT
+       
+       if /usr/local/bin/backup-restore-tester.sh "$LATEST_FULL" >/dev/null 2>&1; then
+           echo "  Latest full backup: VALID" >> $VALIDATION_REPORT
+       else
+           echo "  Latest full backup: INVALID" >> $VALIDATION_REPORT
+           VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+       fi
+   else
+       echo "  WARNING: No full backups found" >> $VALIDATION_REPORT
+       VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+   fi
+   echo >> $VALIDATION_REPORT
+   
+   # Validate backup index
+   echo "BACKUP INDEX VALIDATION:" >> $VALIDATION_REPORT
+   if [ -f "$BACKUP_ROOT/backup-index.log" ]; then
+       INDEX_ENTRIES=$(wc -l < "$BACKUP_ROOT/backup-index.log")
+       echo "  Index entries: $INDEX_ENTRIES" >> $VALIDATION_REPORT
+       
+       # Check if indexed files exist
+       MISSING_FILES=0
+       while IFS=':' read -r date type file size; do
+           if [ ! -f "$file" ]; then
+               MISSING_FILES=$((MISSING_FILES + 1))
+           fi
+       done < "$BACKUP_ROOT/backup-index.log"
+       
+       if [ $MISSING_FILES -eq 0 ]; then
+           echo "  Index integrity: OK" >> $VALIDATION_REPORT
+       else
+           echo "  Index integrity: $MISSING_FILES missing files" >> $VALIDATION_REPORT
+           VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+       fi
+   else
+       echo "  Backup index: MISSING" >> $VALIDATION_REPORT
+       VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+   fi
+   echo >> $VALIDATION_REPORT
+   
+   # Overall validation result
+   echo "VALIDATION SUMMARY:" >> $VALIDATION_REPORT
+   if [ $VALIDATION_ERRORS -eq 0 ]; then
+       echo "  Status: PASSED" >> $VALIDATION_REPORT
+       log_success "Backup validation passed"
+   else
+       echo "  Status: FAILED ($VALIDATION_ERRORS errors)" >> $VALIDATION_REPORT
+       log_error "Backup validation failed with $VALIDATION_ERRORS errors"
+   fi
+   
+   log_info "Backup validation completed: $VALIDATION_REPORT"
+   
+   # chmod +x /usr/local/bin/backup-validator.sh
+
+PART I: TESTING AND VALIDATION
+-------------------------------
+
+1. Test backup infrastructure:
+   # mkdir -p /test-data
+   # echo "Test file 1" > /test-data/file1.txt
+   # echo "Test file 2" > /test-data/file2.txt
+   # mkdir -p /test-data/subdir
+   # echo "Test file 3" > /test-data/subdir/file3.txt
+
+2. Test full backup:
+   # /usr/local/bin/full-backup.sh
+   # ls -la /backup/full/
+
+3. Test incremental backup:
+   # echo "Modified content" >> /test-data/file1.txt
+   # sleep 2
+   # /usr/local/bin/incremental-backup.sh
+   # ls -la /backup/incremental/
+
+4. Test differential backup:
+   # echo "More changes" > /test-data/file4.txt
+   # /usr/local/bin/differential-backup.sh
+   # ls -la /backup/differential/
+
+5. Test backup verification:
+   # LATEST_BACKUP=$(find /backup/full -name "*.tar.gz" -type f | head -1)
+   # /usr/local/bin/backup-restore-tester.sh "$LATEST_BACKUP"
+
+6. Test backup controller:
+   # /usr/local/bin/backup-controller.sh full
+   # /usr/local/bin/backup-controller.sh incremental
+
+7. Test monitoring and reporting:
+   # /usr/local/bin/backup-status-monitor.sh
+   # /usr/local/bin/backup-health-checker.sh
+   # /usr/local/bin/backup-validator.sh
+
+8. Test retention cleanup:
+   # /usr/local/bin/backup-retention.sh
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# tail -f /backup/logs/backup-$(date +%Y%m%d).log
+# ls -la /backup/*/
+# cat /backup/backup-index.log
+# df -h /backup
+# tar -tf /backup/full/full-backup-*.tar.gz | head -10
+
+EXPECTED RESULTS:
+-----------------
+- Complete backup infrastructure operational
+- Full, incremental, and differential backups working
+- Backup verification and validation functional
+- Automated scheduling and retention working
+- Monitoring and reporting systems active
+- Backup restoration testing successful
+
+VALIDATION CHECKLIST:
+---------------------
+□ Backup directory structure created
+□ Full backup system operational
+□ Incremental backup system working
+□ Differential backup system functional
+□ Backup verification working
+□ Retention policies applied
+□ Monitoring and reporting active
+□ Automation scheduled correctly
+□ Restore testing successful
+
+CLEANUP:
+--------
+# rm /etc/cron.d/backup-automation
+# rm -rf /backup
+# rm -rf /etc/backup
+# rm /usr/local/bin/backup-*.sh
+# rm /usr/local/bin/full-backup*.sh
+# rm /usr/local/bin/incremental-backup*.sh
+# rm /usr/local/bin/differential-backup*.sh
+# rm -rf /test-data

@@ -1,0 +1,304 @@
+RHCE RH254 HANDS-ON LAB: SSL/TLS CERTIFICATE IMPLEMENTATION
+==========================================================
+
+LAB OBJECTIVE:
+Configure SSL/TLS certificates for Apache HTTPS connections with self-signed and CA-signed certificates
+
+PREREQUISITES:
+- Apache HTTP Server installed and configured
+- Root access to RHEL system
+- Understanding of SSL/TLS concepts
+
+LAB SCENARIO:
+Implement SSL/TLS encryption for Apache web server using both self-signed certificates and certificate authority signed certificates.
+
+EQUIPMENT NEEDED:
+- RHEL system with Apache installed
+- OpenSSL tools
+- Web browser supporting HTTPS
+
+LAB TASKS:
+
+PART A: INSTALL Apache & SSL MODULE AND PREPARE ENVIRONMENT
+---------------------------------------------------
+1. Install Apache 
+   # yum install httpd -y
+   # systemctl enable httpd
+   # systemctl start httpd 
+   # systemctl status httpd
+
+2. Install SSL module for Apache:
+   # yum install mod_ssl openssl -y
+
+3. Verify SSL module installation:
+   # httpd -M | grep ssl
+   # ls -la /etc/httpd/modules/mod_ssl.so
+
+4. Create directories for certificates:
+   # mkdir -p /etc/ssl/certs
+   # mkdir -p /etc/ssl/private
+   # chmod 700 /etc/ssl/private
+
+5. Check default SSL configuration:
+   # Install Vim 
+   # yum install vim 
+   # vim /etc/httpd/conf.d/ssl.conf
+
+PART B: CREATE SELF-SIGNED SSL CERTIFICATE
+-------------------------------------------
+
+1. Generate private key:
+   # openssl genrsa -out /etc/ssl/private/apache-selfsigned.key 2048
+   # chmod 600 /etc/ssl/private/apache-selfsigned.key
+
+2. Create self-signed certificate:
+   # openssl req -new -x509 -key /etc/ssl/private/apache-selfsigned.key \
+     -out /etc/ssl/certs/apache-selfsigned.crt -days 365
+   
+   # Enter certificate information:
+   Country Name: IN
+   State: Your State
+   City: Your City
+   Organization: Your Company
+   Organizational Unit: IT Department
+   Common Name: server1.example.com
+   Email: admin@example.com
+
+3. Verify certificate:
+   # openssl x509 -in /etc/ssl/certs/apache-selfsigned.crt -text -noout
+   # openssl x509 -in /etc/ssl/certs/apache-selfsigned.crt -noout -dates
+
+PART C: CONFIGURE APACHE FOR SSL
+---------------------------------
+
+1. Configure SSL virtual host:
+   # vim /etc/httpd/conf.d/ssl-vhost.conf
+   
+<IfModule mod_ssl.c>
+<VirtualHost *:443>
+   ServerName server1.example.com
+   DocumentRoot /var/www/html
+       
+   # SSL Configuration
+   SSLEngine on
+   SSLCertificateFile /etc/ssl/certs/server1.cert.pem
+   SSLCertificateKeyFile /etc/ssl/private/server1.key.pem
+   SSLCACertificateFile /etc/pki/CA/certs/ca.cert.pem
+       
+   # SSL Protocol and Cipher Configuration
+   SSLProtocol all -SSLv2 -SSLv3
+   SSLCipherSuite ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
+   SSLHonorCipherOrder on
+       
+   # Security Headers
+   Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+   Header always set X-Frame-Options DENY
+   Header always set X-Content-Type-Options nosniff
+       
+   # Logging
+   
+   ErrorLog logs/ssl_error.log
+   CustomLog logs/ssl_access.log combined
+</VirtualHost>
+</IfModule>
+
+2. Configure HTTP to HTTPS redirect:
+   # vim /etc/httpd/conf.d/redirect-ssl.conf
+   
+<VirtualHost *:80>
+   ServerName server1.example.com
+   Redirect permanent / https://server1.example.com/
+</VirtualHost>
+
+3. Update main SSL configuration:
+   # vim /etc/httpd/conf.d/ssl.conf
+   
+   # Comment out default SSL virtual host
+   # <VirtualHost _default_:443>
+   # ... (comment out the entire default block)
+
+PART D: CREATE CERTIFICATE AUTHORITY AND SIGNED CERTIFICATE
+------------------------------------------------------------
+
+1. Create Certificate Authority (CA):
+   # mkdir -p /etc/pki/CA/{certs,crl,newcerts,private}
+   # chmod 700 /etc/pki/CA/private
+   # echo 1000 > /etc/pki/CA/serial
+   # touch /etc/pki/CA/index.txt
+
+2. Generate CA private key:
+   # openssl genrsa -aes256 -out /etc/pki/CA/private/ca.key.pem 4096
+   # chmod 400 /etc/pki/CA/private/ca.key.pem
+
+3. Create CA certificate:
+   # openssl req -config /etc/ssl/openssl.cnf -key /etc/ssl/ca/private/ca.key.pem \
+     -new -x509 -days 7300 -sha256 -extensions v3_ca \
+     -out /etc/ssl/ca/certs/ca.cert.pem
+   
+   # Enter CA information:
+   Common Name: Example CA
+
+4. Generate server private key:
+   # openssl genrsa -out /etc/ssl/private/server1.key.pem 2048
+   # chmod 400 /etc/ssl/private/server1.key.pem
+
+5. Create certificate signing request (CSR):
+   # openssl req -config /etc/ssl/openssl.cnf -key /etc/ssl/private/server1.key.pem \
+     -new -sha256 -out /etc/pki/CA/certs/ca.cert.pem
+   
+   # Common Name: server1.example.com
+
+6. Sign the certificate with CA:
+   # openssl ca -config /etc/ssl/openssl.cnf -extensions server_cert \
+     -days 375 -notext -md sha256 -in /etc/ssl/csr/server1.csr.pem \
+     -out /etc/ssl/certs/server1.cert.pem
+
+
+
+
+PART E: CONFIGURE FIREWALL AND SELINUX
+---------------------------------------
+
+1. Configure firewall for HTTPS:
+   # Install Firewall
+   # yum install firewalld -y
+   # systemctl enable firewalld
+   # systemctl start firewalld
+   
+   # firewall-cmd --permanent --add-service=https
+   # firewall-cmd --reload
+   # firewall-cmd --list-services
+
+2. Configure SELinux for SSL:
+   # setsebool -P httpd_can_network_connect on
+   # semanage fcontext -a -t httpd_config_t "/etc/ssl/certs(/.*)?"
+   # semanage fcontext -a -t httpd_config_t "/etc/ssl/private(/.*)?"
+   # restorecon -R /etc/ssl/
+
+3. Check SELinux contexts:
+   # ls -Z /etc/ssl/certs/
+   # ls -Z /etc/ssl/private/
+
+PART F: TEST SSL CONFIGURATION
+-------------------------------
+
+1. Test Apache configuration:
+   # httpd -t
+   # apachectl configtest
+
+2. Restart Apache:
+   # systemctl restart httpd
+   # systemctl status httpd
+
+3. Verify SSL is listening:
+   # netstat -tulpn | grep :443   (Not working )
+   # ss -tulpn | grep :443
+
+4. Test SSL connection:
+   # openssl s_client -connect localhost:443 -servername server1.example.com
+   # curl -k https://localhost
+
+   # vim /etc/hosts
+   # 127.0.0.1   server1.example.com
+
+   # curl -k https://server1.example.com
+
+5. Test certificate details:
+   # echo | openssl s_client -connect localhost:443 2>/dev/null | openssl x509 -noout -dates
+   # echo | openssl s_client -connect localhost:443 2>/dev/null | openssl x509 -noout -subject
+
+PART G: ADVANCED SSL CONFIGURATION
+-----------------------------------
+
+1. Configure Perfect Forward Secrecy:
+   # vim /etc/httpd/conf.d/ssl-vhost.conf
+   
+   # Add to SSL virtual host:
+   SSLCipherSuite EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH
+   SSLProtocol All -SSLv2 -SSLv3 -TLSv1 -TLSv1.1
+   SSLHonorCipherOrder On
+
+2. Configure OCSP Stapling:
+   # vim /etc/httpd/conf.d/ssl-vhost.conf
+   
+   # Add to SSL virtual host:
+   SSLUseStapling on
+   SSLStaplingResponderTimeout 5
+   SSLStaplingReturnResponderErrors off
+
+3. Configure SSL session cache:
+   # vim /etc/httpd/conf.d/ssl.conf
+   
+   SSLSessionCache shmcb:/run/httpd/sslcache(512000)
+   SSLSessionCacheTimeout 300
+
+4. Configure client certificate authentication:
+   # vim /etc/httpd/conf.d/ssl-vhost.conf
+   
+   # Add to SSL virtual host:
+   SSLVerifyClient require
+   SSLVerifyDepth 2
+   SSLCACertificateFile /etc/ssl/ca/certs/ca.cert.pem
+
+PART H: MONITORING AND TESTING
+-------------------------------
+
+1. Monitor SSL connections:
+   # tail -f /var/log/httpd/ssl_access.log
+   # tail -f /var/log/httpd/ssl_error.log
+
+2. Test SSL security:
+   # nmap --script ssl-enum-ciphers -p 443 localhost
+   # SSLVerifyClient optional
+
+
+3. Validate certificate chain:
+   # openssl verify -CAfile /etc/ssl/ca/certs/ca.cert.pem /etc/ssl/certs/server1.cert.pem
+
+4. Test with web browser:
+   # Open browser and navigate to:
+   https://server1.example.com
+   # Check certificate details in browser
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status httpd
+# tail -f /var/log/httpd/ssl_error.log
+# openssl s_client -connect localhost:443 -debug
+# httpd -t
+# semanage fcontext -l | grep ssl
+
+EXPECTED RESULTS:
+-----------------
+- HTTPS connections working with SSL/TLS encryption
+- Self-signed certificate functional
+- CA-signed certificate properly configured
+- HTTP to HTTPS redirection working
+- Strong cipher suites configured
+
+VALIDATION CHECKLIST:
+---------------------
+□ SSL module loaded                        Done
+□ HTTPS connections working                Done
+□ Certificate validation successful        Done
+□ Firewall allows HTTPS traffic            Done
+□ SELinux contexts correct                 Done
+□ Strong SSL configuration implemented     Done
+
+CLEANUP:
+--------
+# systemctl stop httpd
+# rm /etc/httpd/conf.d/ssl-vhost.conf
+# rm /etc/httpd/conf.d/redirect-ssl.conf
+# rm -rf /etc/ssl/ca
+# firewall-cmd --permanent --remove-service=https
+# firewall-cmd --reload
+
+
+
+dir             = /etc/ssl/ca
+private_key     = $dir/private/ca.key.pem
+certificate     = $dir/certs/ca.cert.pem
+database        = $dir/index.txt
+serial          = $dir/serial
+new_certs_dir   = $dir/newcerts

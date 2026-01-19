@@ -1,0 +1,272 @@
+RHCE RH254 HANDS-ON LAB: IPv6 CONFIGURATION AND DUAL-STACK NETWORKING
+====================================================================
+
+LAB OBJECTIVE:
+Configure IPv6 addressing, routing, and dual-stack networking alongside IPv4
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- Network infrastructure supporting IPv6
+- Understanding of IPv6 addressing concepts
+
+LAB SCENARIO:
+Configure IPv6 addressing on network interfaces, set up dual-stack networking, and configure IPv6 services.
+
+EQUIPMENT NEEDED:
+- 2 RHEL systems for testing IPv6 connectivity
+- IPv6-capable network infrastructure
+- Router with IPv6 support
+
+LAB TASKS:
+
+PART A: IPv6 BASIC CONFIGURATION
+---------------------------------
+
+1. Check IPv6 support and current configuration:
+   # ip -6 addr show
+   # cat /proc/net/if_inet6
+   # sysctl net.ipv6.conf.all.disable_ipv6
+
+2. Enable IPv6 if disabled: 
+   # install vim 
+   
+   # yum install vim -y
+
+   # vim /etc/sysctl.conf
+   net.ipv6.conf.all.disable_ipv6 = 0
+   net.ipv6.conf.default.disable_ipv6 = 0
+   
+   # sysctl -p
+
+3. check the NAME connection 
+   # nmcli -g NAME connection show --active
+
+4. Configure static IPv6 address (traditional method): 
+   # vim /etc/sysconfig/network-scripts/ifcfg-eth0  (use your connection name etho= your connection name )
+   
+   # Add IPv6 configuration
+   IPV6INIT=yes
+   IPV6ADDR=2001:db8:1::10/64
+   IPV6_DEFAULTGW=2001:db8:1::1
+   IPV6_AUTOCONF=no
+   IPV6_AUTOTUNNEL=no
+
+5. Configure IPv6 using NetworkManager:  (use your connection name etho= your connection name )
+   # nmcli connection modify eth0 ipv6.method manual
+   # nmcli connection modify eth0 ipv6.addresses 2001:db8:1::10/64
+   # nmcli connection modify eth0 ipv6.gateway 2001:db8:1::1
+   # nmcli connection modify eth0 ipv6.dns 2001:4860:4860::8888
+   # nmcli connection up eth0
+
+6. Configure link-local addressing:
+   # ip -6 addr add fe80::1/64 dev eth0
+   # ip -6 route add fe80::/64 dev eth0
+
+PART B: IPv6 AUTOCONFIGURATION (SLAAC)
+---------------------------------------
+
+1. Enable IPv6 autoconfiguration:
+   # vim /etc/sysconfig/network-scripts/ifcfg-eth0
+   IPV6_AUTOCONF=yes
+   IPV6_AUTOTUNNEL=no
+   IPV6INIT=yes
+
+2. Configure Router Advertisement daemon (if acting as router):
+   # yum install radvd -y
+   # vim /etc/radvd.conf
+   
+   interface eth0 {
+       AdvSendAdvert on;
+       MinRtrAdvInterval 30;
+       MaxRtrAdvInterval 100;
+       prefix 2001:db8:1::/64 {
+           AdvOnLink on;
+           AdvAutonomous on;
+           AdvRouterAddr off;
+       };
+   };
+
+3. IPv6 forwarding enable
+   # vim /etc/sysctl.conf
+
+   net.ipv6.conf.all.forwarding = 1
+   net.ipv6.conf.default.forwarding = 1
+
+   # sysctl -p
+
+
+4. Start and enable radvd:
+   # systemctl enable radvd
+   # systemctl start radvd
+   # systemctl status radvd
+
+5. Test autoconfiguration on client:
+   # nmcli connection modify eth0 ipv6.method auto
+   # nmcli connection up eth0
+   # ip -6 addr show eth0
+
+PART C: DUAL-STACK CONFIGURATION
+---------------------------------
+
+1. Configure dual-stack interface:
+   # vim /etc/sysconfig/network-scripts/ifcfg-eth0
+   
+   # IPv4 configuration
+   BOOTPROTO=static
+   IPADDR=192.168.1.10
+   NETMASK=255.255.255.0
+   GATEWAY=192.168.1.1
+   DNS1=8.8.8.8
+   
+   # IPv6 configuration
+   IPV6INIT=yes
+   IPV6ADDR=2001:db8:1::10/64
+   IPV6_DEFAULTGW=2001:db8:1::1
+   IPV6_AUTOCONF=no
+
+2. Configure dual-stack with NetworkManager:
+   # nmcli connection modify eth0 ipv4.method manual
+   # nmcli connection modify eth0 ipv4.addresses 192.168.1.10/24
+   # nmcli connection modify eth0 ipv4.gateway 192.168.1.1
+   # nmcli connection modify eth0 ipv4.dns 8.8.8.8
+   
+   # nmcli connection modify eth0 ipv6.method manual
+   # nmcli connection modify eth0 ipv6.addresses 2001:db8:1::10/64
+   # nmcli connection modify eth0 ipv6.gateway 2001:db8:1::1
+   # nmcli connection modify eth0 ipv6.dns 2001:4860:4860::8888
+
+3. Restart network interface:
+   # nmcli connection down eth0
+   # nmcli connection up eth0
+
+PART D: IPv6 ROUTING CONFIGURATION
+-----------------------------------
+
+1. View IPv6 routing table:
+   # ip -6 route show
+   # route -A inet6
+
+2. Add static IPv6 routes:
+   # ip -6 route add 2001:db8:2::/64 via 2001:db8:1::1 dev eth0
+   # ip -6 route add default via 2001:db8:1::1 dev eth0
+
+3. Configure persistent IPv6 routes:
+   # vim /etc/sysconfig/network-scripts/route6-eth0
+   2001:db8:2::/64 via 2001:db8:1::1 dev eth0
+   default via 2001:db8:1::1 dev eth0
+
+4. Configure IPv6 forwarding (for router):
+   # vim /etc/sysctl.conf
+   net.ipv6.conf.all.forwarding = 1
+   net.ipv6.conf.default.forwarding = 1
+   
+   # sysctl -p
+
+PART E: IPv6 SERVICES CONFIGURATION
+------------------------------------
+
+1. Configure SSH for IPv6:
+   # vim /etc/ssh/sshd_config
+   AddressFamily any
+   ListenAddress ::
+   ListenAddress 0.0.0.0
+   
+   # systemctl restart sshd
+
+2. Configure Apache for IPv6:
+   # vim /etc/httpd/conf/httpd.conf
+   Listen 80
+   Listen [::]:80
+   
+   # systemctl restart httpd
+
+3. Configure firewall for IPv6:
+   # firewall-cmd --permanent --add-service=ssh
+   # firewall-cmd --permanent --add-service=http
+   # firewall-cmd --reload
+   
+   # ip6tables -L
+
+4. Configure DNS for IPv6:
+   # vim /etc/resolv.conf
+   nameserver 2001:4860:4860::8888
+   nameserver 2001:4860:4860::8844
+
+PART F: TESTING AND VERIFICATION
+---------------------------------
+
+1. Test IPv6 connectivity:
+   # ping6 ::1
+   # ping6 2001:db8:1::1
+   # ping6 google.com
+   # ping6 ipv6.google.com
+
+2. Test dual-stack connectivity:
+   # ping -4 google.com
+   # ping -6 google.com
+   # curl -4 http://google.com
+   # curl -6 http://ipv6.google.com
+
+3. Test IPv6 services:
+   # ssh user@2001:db8:1::20
+   # telnet 2001:db8:1::20 80
+   # wget http://[2001:db8:1::20]/
+
+4. Check IPv6 neighbor discovery:
+   # ip -6 neighbor show
+   # ndp -a
+
+5. Test IPv6 routing:
+   # traceroute6 ipv6.google.com
+   # tracepath6 2001:db8:2::1
+
+PART G: IPv6 TUNNELING (6to4, Teredo)
+--------------------------------------
+
+1. Configure 6to4 tunnel:
+   # modprobe sit
+   # ip tunnel add tun6to4 mode sit remote any local 192.168.1.10
+   # ip link set dev tun6to4 up
+   # ip -6 addr add 2002:c0a8:010a::1/16 dev tun6to4
+   # ip -6 route add 2000::/3 via ::192.88.99.1 dev tun6to4
+
+2. Configure Teredo (if available):
+   # yum install miredo -y
+   # systemctl enable miredo
+   # systemctl start miredo
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# ip -6 addr show
+# ip -6 route show
+# ping6 ::1
+# systemctl status NetworkManager
+# nmcli device status
+# cat /proc/net/if_inet6
+# sysctl net.ipv6.conf.all.disable_ipv6
+
+EXPECTED RESULTS:
+-----------------
+- IPv6 addresses configured correctly
+- Dual-stack networking functional
+- IPv6 services accessible
+- Routing working for both protocols
+- Autoconfiguration working when enabled
+
+VALIDATION CHECKLIST:
+---------------------
+□ IPv6 addresses assigned
+□ IPv6 connectivity working
+□ Dual-stack configuration active
+□ IPv6 services responding
+□ Routing tables correct
+□ DNS resolution working for IPv6
+□ Firewall allows IPv6 traffic
+
+CLEANUP:
+--------
+# nmcli connection modify eth0 ipv6.method ignore
+# ip -6 route flush dev eth0
+# systemctl stop radvd
+# systemctl disable radvd
+# ip tunnel del tun6to4

@@ -1,0 +1,635 @@
+RHCE RH254 HANDS-ON LAB: SAMBA FILE SHARING ADVANCED CONFIGURATION
+================================================================
+
+LAB OBJECTIVE:
+Configure advanced Samba file sharing with domain integration, advanced security, user management, and performance optimization for enterprise file services
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of system performance metrics
+- Basic knowledge of scripting and monitoring concepts
+
+LAB SCENARIO:
+Implement enterprise-grade system monitoring and performance tuning for production servers including CPU, memory, disk I/O, network monitoring, and automated alerting.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20)
+- Email server for alerts (optional)
+- Storage for monitoring data
+
+LAB TASKS:
+
+PART A: INSTALL MONITORING TOOLS
+---------------------------------
+
+1. Install system monitoring packages:
+   # dnf install sysstat iotop htop atop nmon perf tuned -y
+   # dnf install mailx postfix -y
+
+2. Enable system statistics collection:
+   # systemctl enable sysstat
+   # systemctl start sysstat
+
+3. Configure data collection intervals:
+   # vim /etc/sysconfig/sysstat
+   
+   # Data collection interval (minutes)
+   HISTORY=30
+   COMPRESSAFTER=31
+   SADC_OPTIONS="-S DISK"
+
+4. Enable tuned service:
+   # systemctl enable tuned
+   # systemctl start tuned
+   # tuned-adm active
+
+PART B: CPU MONITORING AND TUNING
+----------------------------------
+
+1. Create CPU monitoring script:
+   # vim /usr/local/bin/cpu-monitor.sh
+   
+   #!/bin/bash
+   THRESHOLD=80
+   LOGFILE="/var/log/cpu-monitor.log"
+   
+   while true; do
+       CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+       CPU_INT=${CPU_USAGE%.*}
+       
+       if [ $CPU_INT -gt $THRESHOLD ]; then
+           echo "$(date): HIGH CPU USAGE: ${CPU_USAGE}%" >> $LOGFILE
+           echo "Top processes:" >> $LOGFILE
+           ps aux --sort=-%cpu | head -10 >> $LOGFILE
+           echo "---" >> $LOGFILE
+       fi
+       sleep 60
+   done
+   
+   # chmod +x /usr/local/bin/cpu-monitor.sh
+
+2. Configure CPU performance profiles:
+   # tuned-adm list
+   # tuned-adm profile throughput-performance
+   # tuned-adm active
+
+3. Create custom tuned profile:
+   # mkdir /etc/tuned/custom-performance
+   # vim /etc/tuned/custom-performance/tuned.conf
+   
+   [main]
+   summary=Custom performance profile
+   include=throughput-performance
+   
+   [cpu]
+   governor=performance
+   energy_perf_bias=performance
+   min_perf_pct=100
+   
+   [sysctl]
+   kernel.sched_migration_cost_ns=5000000
+   kernel.sched_autogroup_enabled=0
+
+4. Apply custom profile:
+   # tuned-adm profile custom-performance
+
+PART C: MEMORY MONITORING AND OPTIMIZATION
+-------------------------------------------
+
+1. Create memory monitoring script:
+   # vim /usr/local/bin/memory-monitor.sh
+   
+   #!/bin/bash
+   THRESHOLD=85
+   LOGFILE="/var/log/memory-monitor.log"
+   
+   while true; do
+       MEM_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
+       
+       if [ $MEM_USAGE -gt $THRESHOLD ]; then
+           echo "$(date): HIGH MEMORY USAGE: ${MEM_USAGE}%" >> $LOGFILE
+           echo "Memory details:" >> $LOGFILE
+           free -h >> $LOGFILE
+           echo "Top memory consumers:" >> $LOGFILE
+           ps aux --sort=-%mem | head -10 >> $LOGFILE
+           echo "---" >> $LOGFILE
+       fi
+       sleep 60
+   done
+   
+   # chmod +x /usr/local/bin/memory-monitor.sh
+
+2. Configure swap monitoring:
+   # vim /usr/local/bin/swap-monitor.sh
+   
+   #!/bin/bash
+   THRESHOLD=50
+   LOGFILE="/var/log/swap-monitor.log"
+   
+   while true; do
+       SWAP_TOTAL=$(free | grep Swap | awk '{print $2}')
+       if [ $SWAP_TOTAL -gt 0 ]; then
+           SWAP_USAGE=$(free | grep Swap | awk '{printf("%.0f", $3/$2 * 100.0)}')
+           
+           if [ $SWAP_USAGE -gt $THRESHOLD ]; then
+               echo "$(date): HIGH SWAP USAGE: ${SWAP_USAGE}%" >> $LOGFILE
+               swapon -s >> $LOGFILE
+               echo "---" >> $LOGFILE
+           fi
+       fi
+       sleep 120
+   done
+   
+   # chmod +x /usr/local/bin/swap-monitor.sh
+
+3. Optimize memory settings:
+   # vim /etc/sysctl.d/memory-tuning.conf
+   
+   # Memory optimization
+   vm.swappiness=10
+   vm.dirty_ratio=15
+   vm.dirty_background_ratio=5
+   vm.vfs_cache_pressure=50
+   
+   # sysctl -p /etc/sysctl.d/memory-tuning.conf
+
+PART D: DISK I/O MONITORING AND TUNING
+---------------------------------------
+
+1. Create disk I/O monitoring script:
+   # vim /usr/local/bin/disk-monitor.sh
+   
+   #!/bin/bash
+   THRESHOLD=80
+   LOGFILE="/var/log/disk-monitor.log"
+   
+   while true; do
+       iostat -x 1 1 | grep -E '^(Device|sd|nvme)' | while read line; do
+           if echo $line | grep -q "Device"; then
+               continue
+           fi
+           
+           UTIL=$(echo $line | awk '{print $NF}' | cut -d'.' -f1)
+           DEVICE=$(echo $line | awk '{print $1}')
+           
+           if [ "$UTIL" -gt $THRESHOLD ] 2>/dev/null; then
+               echo "$(date): HIGH DISK UTILIZATION: $DEVICE ${UTIL}%" >> $LOGFILE
+               iostat -x 1 1 >> $LOGFILE
+               echo "---" >> $LOGFILE
+           fi
+       done
+       sleep 60
+   done
+   
+   # chmod +x /usr/local/bin/disk-monitor.sh
+
+2. Configure disk scheduler optimization:
+   # vim /usr/local/bin/optimize-disk-scheduler.sh
+   
+   #!/bin/bash
+   for disk in /sys/block/sd*/queue/scheduler; do
+       if [ -f "$disk" ]; then
+           echo mq-deadline > $disk
+           echo "Set mq-deadline for $(dirname $disk | cut -d'/' -f4)"
+       fi
+   done
+   
+   for disk in /sys/block/nvme*/queue/scheduler; do
+       if [ -f "$disk" ]; then
+           echo none > $disk
+           echo "Set none scheduler for $(dirname $disk | cut -d'/' -f4)"
+       fi
+   done
+   
+   # chmod +x /usr/local/bin/optimize-disk-scheduler.sh
+   # /usr/local/bin/optimize-disk-scheduler.sh
+
+3. Monitor disk space usage:
+   # vim /usr/local/bin/diskspace-monitor.sh
+   
+   #!/bin/bash
+   THRESHOLD=85
+   LOGFILE="/var/log/diskspace-monitor.log"
+   
+   df -h | grep -E '^/dev/' | while read line; do
+       USAGE=$(echo $line | awk '{print $5}' | cut -d'%' -f1)
+       FILESYSTEM=$(echo $line | awk '{print $1}')
+       MOUNTPOINT=$(echo $line | awk '{print $6}')
+       
+       if [ $USAGE -gt $THRESHOLD ]; then
+           echo "$(date): HIGH DISK USAGE: $FILESYSTEM ($MOUNTPOINT) ${USAGE}%" >> $LOGFILE
+           echo "Largest files in $MOUNTPOINT:" >> $LOGFILE
+           find $MOUNTPOINT -type f -exec ls -lh {} \; 2>/dev/null | sort -k5 -hr | head -10 >> $LOGFILE
+           echo "---" >> $LOGFILE
+       fi
+   done
+   
+   # chmod +x /usr/local/bin/diskspace-monitor.sh
+
+PART E: NETWORK MONITORING AND OPTIMIZATION
+--------------------------------------------
+
+1. Create network monitoring script:
+   # vim /usr/local/bin/network-monitor.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/network-monitor.log"
+   INTERFACE="eth0"
+   
+   while true; do
+       echo "$(date): Network Statistics" >> $LOGFILE
+       cat /proc/net/dev | grep $INTERFACE >> $LOGFILE
+       
+       # Monitor network connections
+       CONNECTIONS=$(netstat -an | wc -l)
+       echo "Active connections: $CONNECTIONS" >> $LOGFILE
+       
+       # Monitor bandwidth usage
+       sar -n DEV 1 1 | grep $INTERFACE >> $LOGFILE
+       echo "---" >> $LOGFILE
+       
+       sleep 300
+   done
+   
+   # chmod +x /usr/local/bin/network-monitor.sh
+
+2. Optimize network settings:
+   # vim /etc/sysctl.d/network-tuning.conf
+   
+   # Network optimization
+   net.core.rmem_max=134217728
+   net.core.wmem_max=134217728
+   net.ipv4.tcp_rmem=4096 87380 134217728
+   net.ipv4.tcp_wmem=4096 65536 134217728
+   net.core.netdev_max_backlog=5000
+   net.ipv4.tcp_congestion_control=bbr
+   
+   # sysctl -p /etc/sysctl.d/network-tuning.conf
+
+3. Monitor network security:
+   # vim /usr/local/bin/network-security-monitor.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/network-security.log"
+   
+   while true; do
+       # Monitor failed SSH attempts
+       FAILED_SSH=$(journalctl --since "5 minutes ago" | grep "Failed password" | wc -l)
+       if [ $FAILED_SSH -gt 5 ]; then
+           echo "$(date): HIGH SSH FAILURES: $FAILED_SSH attempts" >> $LOGFILE
+       fi
+       
+       # Monitor unusual network connections
+       netstat -an | grep ESTABLISHED | awk '{print $5}' | cut -d: -f1 | sort | uniq -c | sort -nr | head -10 >> $LOGFILE
+       echo "---" >> $LOGFILE
+       
+       sleep 300
+   done
+   
+   # chmod +x /usr/local/bin/network-security-monitor.sh
+
+PART F: PROCESS AND SERVICE MONITORING
+---------------------------------------
+
+1. Create process monitoring script:
+   # vim /usr/local/bin/process-monitor.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/process-monitor.log"
+   
+   # Monitor critical services
+   SERVICES=("sshd" "httpd" "mysqld" "postfix")
+   
+   for service in "${SERVICES[@]}"; do
+       if ! systemctl is-active $service >/dev/null 2>&1; then
+           echo "$(date): SERVICE DOWN: $service" >> $LOGFILE
+           systemctl status $service >> $LOGFILE 2>&1
+           echo "---" >> $LOGFILE
+       fi
+   done
+   
+   # Monitor zombie processes
+   ZOMBIES=$(ps aux | grep -c '[Zz]ombie\|<defunct>')
+   if [ $ZOMBIES -gt 0 ]; then
+       echo "$(date): ZOMBIE PROCESSES DETECTED: $ZOMBIES" >> $LOGFILE
+       ps aux | grep '[Zz]ombie\|<defunct>' >> $LOGFILE
+       echo "---" >> $LOGFILE
+   fi
+   
+   # chmod +x /usr/local/bin/process-monitor.sh
+
+2. Create load average monitoring:
+   # vim /usr/local/bin/load-monitor.sh
+   
+   #!/bin/bash
+   THRESHOLD=2.0
+   LOGFILE="/var/log/load-monitor.log"
+   
+   while true; do
+       LOAD_1MIN=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}' | tr -d ' ')
+       
+       if (( $(echo "$LOAD_1MIN > $THRESHOLD" | bc -l) )); then
+           echo "$(date): HIGH LOAD AVERAGE: $LOAD_1MIN" >> $LOGFILE
+           uptime >> $LOGFILE
+           ps aux --sort=-%cpu | head -10 >> $LOGFILE
+           echo "---" >> $LOGFILE
+       fi
+       sleep 60
+   done
+   
+   # chmod +x /usr/local/bin/load-monitor.sh
+
+PART G: COMPREHENSIVE SYSTEM HEALTH DASHBOARD
+----------------------------------------------
+
+1. Create system health script:
+   # vim /usr/local/bin/system-health.sh
+   
+   #!/bin/bash
+   REPORT_FILE="/var/log/system-health-$(date +%Y%m%d_%H%M%S).log"
+   
+   echo "=== SYSTEM HEALTH REPORT - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # System uptime and load
+   echo "UPTIME AND LOAD:" >> $REPORT_FILE
+   uptime >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # CPU usage
+   echo "CPU USAGE:" >> $REPORT_FILE
+   top -bn1 | grep "Cpu(s)" >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Memory usage
+   echo "MEMORY USAGE:" >> $REPORT_FILE
+   free -h >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Disk usage
+   echo "DISK USAGE:" >> $REPORT_FILE
+   df -h >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Network statistics
+   echo "NETWORK STATISTICS:" >> $REPORT_FILE
+   sar -n DEV 1 1 | grep -E "(Average|eth0)" >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Service status
+   echo "CRITICAL SERVICES:" >> $REPORT_FILE
+   for service in sshd httpd mysqld postfix; do
+       echo -n "$service: " >> $REPORT_FILE
+       systemctl is-active $service >> $REPORT_FILE 2>&1
+   done
+   echo >> $REPORT_FILE
+   
+   # Top processes
+   echo "TOP PROCESSES (CPU):" >> $REPORT_FILE
+   ps aux --sort=-%cpu | head -10 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   echo "TOP PROCESSES (MEMORY):" >> $REPORT_FILE
+   ps aux --sort=-%mem | head -10 >> $REPORT_FILE
+   
+   # chmod +x /usr/local/bin/system-health.sh
+
+2. Create performance baseline script:
+   # vim /usr/local/bin/performance-baseline.sh
+   
+   #!/bin/bash
+   BASELINE_DIR="/var/log/performance-baseline"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   mkdir -p $BASELINE_DIR
+   
+   echo "Creating performance baseline at $(date)"
+   
+   # CPU baseline
+   echo "CPU baseline" > $BASELINE_DIR/cpu-$DATE.log
+   sar -u 1 60 >> $BASELINE_DIR/cpu-$DATE.log
+   
+   # Memory baseline
+   echo "Memory baseline" > $BASELINE_DIR/memory-$DATE.log
+   sar -r 1 60 >> $BASELINE_DIR/memory-$DATE.log
+   
+   # Disk I/O baseline
+   echo "Disk I/O baseline" > $BASELINE_DIR/disk-$DATE.log
+   sar -d 1 60 >> $BASELINE_DIR/disk-$DATE.log
+   
+   # Network baseline
+   echo "Network baseline" > $BASELINE_DIR/network-$DATE.log
+   sar -n DEV 1 60 >> $BASELINE_DIR/network-$DATE.log
+   
+   echo "Baseline created in $BASELINE_DIR"
+   
+   # chmod +x /usr/local/bin/performance-baseline.sh
+
+PART H: AUTOMATED ALERTING SYSTEM
+----------------------------------
+
+1. Create alert configuration:
+   # vim /etc/monitoring-alerts.conf
+   
+   # Monitoring thresholds
+   CPU_THRESHOLD=80
+   MEMORY_THRESHOLD=85
+   DISK_THRESHOLD=85
+   LOAD_THRESHOLD=2.0
+   
+   # Alert settings
+   ALERT_EMAIL="admin@example.com"
+   ALERT_INTERVAL=300
+   LOG_RETENTION_DAYS=30
+
+2. Create alerting script:
+   # vim /usr/local/bin/system-alerts.sh
+   
+   #!/bin/bash
+   source /etc/monitoring-alerts.conf
+   
+   ALERT_LOG="/var/log/system-alerts.log"
+   LAST_ALERT_FILE="/tmp/last-alert-time"
+   
+   # Check if enough time has passed since last alert
+   if [ -f $LAST_ALERT_FILE ]; then
+       LAST_ALERT=$(cat $LAST_ALERT_FILE)
+       CURRENT_TIME=$(date +%s)
+       if [ $((CURRENT_TIME - LAST_ALERT)) -lt $ALERT_INTERVAL ]; then
+           exit 0
+       fi
+   fi
+   
+   ALERT_MESSAGE=""
+   
+   # Check CPU usage
+   CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 | cut -d'.' -f1)
+   if [ $CPU_USAGE -gt $CPU_THRESHOLD ]; then
+       ALERT_MESSAGE="$ALERT_MESSAGE\nHIGH CPU USAGE: ${CPU_USAGE}%"
+   fi
+   
+   # Check memory usage
+   MEM_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
+   if [ $MEM_USAGE -gt $MEMORY_THRESHOLD ]; then
+       ALERT_MESSAGE="$ALERT_MESSAGE\nHIGH MEMORY USAGE: ${MEM_USAGE}%"
+   fi
+   
+   # Check disk usage
+   df -h | grep -E '^/dev/' | while read line; do
+       USAGE=$(echo $line | awk '{print $5}' | cut -d'%' -f1)
+       FILESYSTEM=$(echo $line | awk '{print $6}')
+       if [ $USAGE -gt $DISK_THRESHOLD ]; then
+           ALERT_MESSAGE="$ALERT_MESSAGE\nHIGH DISK USAGE: $FILESYSTEM ${USAGE}%"
+       fi
+   done
+   
+   # Send alert if needed
+   if [ -n "$ALERT_MESSAGE" ]; then
+       echo -e "SYSTEM ALERT - $(hostname) - $(date)\n$ALERT_MESSAGE" | \
+       mail -s "System Alert: $(hostname)" $ALERT_EMAIL
+       
+       echo "$(date): Alert sent - $ALERT_MESSAGE" >> $ALERT_LOG
+       date +%s > $LAST_ALERT_FILE
+   fi
+   
+   # chmod +x /usr/local/bin/system-alerts.sh
+
+3. Create log cleanup script:
+   # vim /usr/local/bin/cleanup-logs.sh
+   
+   #!/bin/bash
+   source /etc/monitoring-alerts.conf
+   
+   # Clean up old monitoring logs
+   find /var/log -name "*monitor*.log" -mtime +$LOG_RETENTION_DAYS -delete
+   find /var/log -name "system-health-*.log" -mtime +$LOG_RETENTION_DAYS -delete
+   find /var/log/performance-baseline -name "*.log" -mtime +$LOG_RETENTION_DAYS -delete
+   
+   echo "$(date): Log cleanup completed" >> /var/log/cleanup.log
+   
+   # chmod +x /usr/local/bin/cleanup-logs.sh
+
+PART I: SYSTEMD SERVICE INTEGRATION
+------------------------------------
+
+1. Create monitoring service units:
+   # vim /etc/systemd/system/cpu-monitor.service
+   
+   [Unit]
+   Description=CPU Monitoring Service
+   After=multi-user.target
+   
+   [Service]
+   Type=simple
+   ExecStart=/usr/local/bin/cpu-monitor.sh
+   Restart=always
+   RestartSec=10
+   User=root
+   
+   [Install]
+   WantedBy=multi-user.target
+
+2. Create memory monitoring service:
+   # vim /etc/systemd/system/memory-monitor.service
+   
+   [Unit]
+   Description=Memory Monitoring Service
+   After=multi-user.target
+   
+   [Service]
+   Type=simple
+   ExecStart=/usr/local/bin/memory-monitor.sh
+   Restart=always
+   RestartSec=10
+   User=root
+   
+   [Install]
+   WantedBy=multi-user.target
+
+3. Enable monitoring services:
+   # systemctl daemon-reload
+   # systemctl enable cpu-monitor memory-monitor
+   # systemctl start cpu-monitor memory-monitor
+
+PART J: CRON SCHEDULING FOR MONITORING
+---------------------------------------
+
+1. Configure monitoring cron jobs:
+   # crontab -e
+   
+   # System health report every hour
+   0 * * * * /usr/local/bin/system-health.sh
+   
+   # Disk space monitoring every 15 minutes
+   */15 * * * * /usr/local/bin/diskspace-monitor.sh
+   
+   # Process monitoring every 5 minutes
+   */5 * * * * /usr/local/bin/process-monitor.sh
+   
+   # System alerts every 5 minutes
+   */5 * * * * /usr/local/bin/system-alerts.sh
+   
+   # Daily performance baseline
+   0 2 * * * /usr/local/bin/performance-baseline.sh
+   
+   # Weekly log cleanup
+   0 3 * * 0 /usr/local/bin/cleanup-logs.sh
+
+PART K: TESTING AND VALIDATION
+-------------------------------
+
+1. Test monitoring scripts:
+   # /usr/local/bin/system-health.sh
+   # /usr/local/bin/cpu-monitor.sh &
+   # /usr/local/bin/memory-monitor.sh &
+
+2. Generate test load:
+   # stress --cpu 4 --timeout 60s
+   # dd if=/dev/zero of=/tmp/testfile bs=1M count=1000
+
+3. Verify alerting:
+   # /usr/local/bin/system-alerts.sh
+   # tail -f /var/log/system-alerts.log
+
+4. Check service status:
+   # systemctl status cpu-monitor memory-monitor
+   # journalctl -u cpu-monitor -f
+
+5. Validate performance tuning:
+   # tuned-adm active
+   # sysctl -a | grep -E "(vm\.|net\.)"
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status tuned
+# journalctl -u cpu-monitor
+# ps aux | grep monitor
+# crontab -l
+# tail -f /var/log/messages
+
+EXPECTED RESULTS:
+-----------------
+- Comprehensive monitoring system operational
+- Performance tuning profiles applied
+- Automated alerting functional
+- System health reports generated
+- Resource optimization implemented
+
+VALIDATION CHECKLIST:
+---------------------
+□ Monitoring tools installed
+□ Performance profiles active
+□ Monitoring scripts running
+□ Alerting system configured
+□ Cron jobs scheduled
+□ Log rotation working
+□ System optimization applied
+
+CLEANUP:
+--------
+# systemctl stop cpu-monitor memory-monitor
+# systemctl disable cpu-monitor memory-monitor
+# rm /etc/systemd/system/*-monitor.service
+# crontab -e  # Remove monitoring entries
+# rm /usr/local/bin/*monitor*.sh
+# rm -rf /var/log/performance-baseline

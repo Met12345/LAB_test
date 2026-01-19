@@ -1,0 +1,248 @@
+RHCE RH254 HANDS-ON LAB: FTP SERVER CONFIGURATION (VSFTPD)
+==========================================================
+
+LAB OBJECTIVE:
+Configure vsftpd FTP server with anonymous and authenticated access, security controls
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- Network connectivity
+- Understanding of file permissions and user management
+
+LAB SCENARIO:
+Configure secure FTP server with both anonymous and user-based access.
+Implement security controls and logging for FTP operations.
+
+EQUIPMENT NEEDED:
+- RHEL system (server1: 192.168.1.10)
+- FTP client for testing (command line or GUI)
+
+LAB TASKS:
+
+PART A: INSTALL AND BASIC CONFIGURATION
+----------------------------------------
+
+1. Install vsftpd:
+   # yum install vsftpd -y
+   # systemctl enable vsftpd
+
+2. Backup original configuration:
+   # cp /etc/vsftpd/vsftpd.conf /etc/vsftpd/vsftpd.conf.backup
+
+3. Create FTP users:
+   # useradd -s /sbin/nologin ftpuser1
+   # useradd -s /sbin/nologin ftpuser2
+   # passwd ftpuser1
+   # passwd ftpuser2
+
+4. Create FTP directories:
+   # mkdir -p /var/ftp/pub/upload
+   # mkdir -p /home/ftpuser1/ftp-data
+   # mkdir -p /home/ftpuser2/ftp-data
+   # chmod 755 /var/ftp/pub
+   # chmod 777 /var/ftp/pub/upload
+   # chown ftpuser1:ftpuser1 /home/ftpuser1/ftp-data
+   # chown ftpuser2:ftpuser2 /home/ftpuser2/ftp-data
+
+PART B: CONFIGURE VSFTPD MAIN SETTINGS
+---------------------------------------
+
+1. Edit main configuration (/etc/vsftpd/vsftpd.conf):
+   # install vim
+   # yum install vim
+   # vim /etc/vsftpd/vsftpd.conf
+   
+   # Basic settings
+   anonymous_enable=YES
+   local_enable=YES
+   write_enable=YES
+   local_umask=022
+   
+   # Anonymous user settings
+   anon_upload_enable=YES
+   anon_mkdir_write_enable=YES
+   anon_root=/var/ftp
+   anon_upload_enable=YES
+   anon_world_readable_only=NO
+   allow_writeable_chroot=YES
+
+   
+   # Security settings
+   chroot_local_user=YES
+   chroot_list_enable=YES
+   chroot_list_file=/etc/vsftpd/chroot_list
+   
+   # Logging
+   xferlog_enable=YES
+   xferlog_std_format=YES
+   xferlog_file=/var/log/xferlog
+   
+   # Connection settings
+   connect_from_port_20=YES
+   listen=YES
+   listen_ipv6=NO
+   
+   # User restrictions
+   userlist_enable=NO      (This Line )
+   userlist_deny=NO
+   userlist_file=/etc/vsftpd/user_list
+   
+   # Passive mode settings
+   pasv_enable=YES
+   pasv_min_port=30000
+   pasv_max_port=31000
+
+PART C: CONFIGURE USER ACCESS CONTROLS
+---------------------------------------
+
+1. Create chroot exception list:
+   # vim /etc/vsftpd/chroot_list
+   ftpuser1
+   ftpuser2
+
+2. Create allowed users list:
+   # vim /etc/vsftpd/user_list
+   ftpuser1
+   ftpuser2
+
+3. Configure SELinux for FTP:
+   # setsebool -P ftpd_full_access on
+   # setsebool -P ftpd_anon_write on
+   # setsebool -P ftpd_connect_all_unreserved on
+   # semanage fcontext -a -t public_content_rw_t "/var/ftp/pub/upload(/.*)?"
+   # restorecon -R /var/ftp
+
+4. Set up firewall:
+   # install firewall 
+   # yum install firewalld
+   # systemctl start firewalld
+   # systemctl enable firewalld
+   # firewall-cmd --permanent --add-service=ftp
+   # firewall-cmd --permanent --add-port=30000-31000/tcp
+   # firewall-cmd --reload
+
+PART D: ADVANCED SECURITY CONFIGURATION
+----------------------------------------
+
+1. Configure SSL/TLS encryption:
+   # openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+     -keyout /etc/ssl/private/vsftpd.key \
+     -out /etc/ssl/certs/vsftpd.crt
+   
+   # vim /etc/vsftpd/vsftpd.conf
+   # Add SSL settings
+ssl_enable=YES
+allow_anon_ssl=NO
+force_local_data_ssl=NO       (THIs line )
+force_local_logins_ssl=NO      (THIs line )
+ssl_tlsv1=YES
+ssl_sslv2=NO
+ssl_sslv3=NO
+rsa_cert_file=/etc/ssl/certs/vsftpd.crt
+rsa_private_key_file=/etc/ssl/private/vsftpd.key
+
+2. Configure connection limits:
+   # vim /etc/vsftpd/vsftpd.conf
+   max_clients=50
+   max_per_ip=3
+   local_max_rate=1000000
+   anon_max_rate=500000
+
+3. Configure banner and messages:
+   # vim /etc/vsftpd/vsftpd.conf
+ftpd_banner=Welcome to Company FTP Server
+banner_file=/etc/vsftpd/banner
+   
+   # echo "Authorized users only!" > /etc/vsftpd/banner
+
+PART E: START SERVICE AND TESTING
+----------------------------------
+
+1. Start vsftpd service:
+   # systemctl start vsftpd
+   # systemctl status vsftpd
+
+2. Verify FTP is listening:
+   # netstat -tulpn | grep :21
+   # ss -tulpn | grep :21
+
+3. Test anonymous FTP access:
+   # install ftp 
+   # yum install -y ftp
+   # ftp 192.168.1.10
+   Name: anonymous
+   Password: (press enter)
+   ftp> ls
+   ftp> cd pub
+   ftp> put testfile.txt
+   ftp> quit
+
+4. Test authenticated user access:
+   # ftp 192.168.1.10
+   Name: ftpuser1
+   Password: (enter password)
+   ftp> ls
+   ftp> put userfile.txt
+   ftp> quit
+
+5. Test from remote client:
+   # ftp 192.168.1.10
+   # sftp ftpuser1@192.168.1.10
+
+PART F: MONITORING AND LOGGING
+-------------------------------
+
+1. Monitor FTP connections:
+   # tail -f /var/log/xferlog
+   # tail -f /var/log/messages | grep vsftpd
+
+2. Check active FTP sessions:
+   # install netstat & lsof 
+   # yum install -y net-tools
+   # yum install -y lsof
+   # netstat -an | grep :21
+   # lsof -i :21
+
+3. Monitor file transfers:
+   # tail -f /var/log/xferlog
+   # watch -n 5 'ls -la /var/ftp/pub/upload'
+
+4. Check vsftpd process:
+   # ps aux | grep vsftpd
+   # systemctl status vsftpd
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status vsftpd
+# tail -f /var/log/messages
+# testparm (for configuration syntax)
+# netstat -tulpn | grep :21
+# semanage boolean -l | grep ftp
+# getsebool -a | grep ftp
+
+EXPECTED RESULTS:
+-----------------
+- Anonymous users can download and upload files
+- Authenticated users have access to their home directories
+- SSL/TLS encryption works for secure connections
+- Connection limits and rate limiting function
+- All FTP operations are logged
+
+VALIDATION CHECKLIST:
+---------------------
+□ vsftpd service running                  Done
+□ Anonymous FTP access working            Done
+□ User authentication working             Done
+□ File uploads/downloads successful       Done
+□ SSL/TLS encryption enabled              Done
+□ Firewall allows FTP traffic             Done
+□ Logging captures FTP activity           Done
+
+CLEANUP:
+--------
+# systemctl stop vsftpd
+# systemctl disable vsftpd
+# userdel ftpuser1 ftpuser2
+# rm -rf /home/ftpuser1 /home/ftpuser2
+# firewall-cmd --permanent --remove-service=ftp
+# firewall-cmd --reload

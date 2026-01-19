@@ -1,0 +1,762 @@
+RHCE RH254 HANDS-ON LAB: SYSTEM DEPLOYMENT STRATEGIES
+======================================================
+
+LAB OBJECTIVE:
+Implement comprehensive system deployment strategies including infrastructure as code, automated provisioning, container deployment, and hybrid cloud deployment methodologies for enterprise environments
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of virtualization and containerization
+- Knowledge of configuration management and automation
+- Familiarity with cloud platforms and orchestration
+
+LAB SCENARIO:
+Deploy enterprise-grade deployment strategies using multiple methodologies to provision, configure, and manage systems across physical, virtual, and cloud environments with consistent automation frameworks.
+
+EQUIPMENT NEEDED:
+- RHEL deployment server (192.168.1.20)
+- Target systems for deployment
+- Container runtime environment
+- Cloud platform access (optional)
+
+LAB TASKS:
+
+PART A: INFRASTRUCTURE AS CODE DEPLOYMENT
+------------------------------------------
+
+1. Create deployment framework structure:
+   # mkdir -p /opt/deployment/{templates,configs,scripts,inventory,logs}
+   # mkdir -p /opt/deployment/strategies/{bare-metal,virtual,container,cloud}
+   # mkdir -p /opt/deployment/environments/{dev,test,prod}
+
+2. Create infrastructure definition templates:
+   # vim /opt/deployment/templates/infrastructure.yaml
+   
+   # Infrastructure as Code Template
+   infrastructure:
+     name: "enterprise-deployment"
+     version: "1.0"
+     
+     environments:
+       dev:
+         servers: 2
+         resources:
+           cpu: 2
+           memory: 4096
+           storage: 50
+       test:
+         servers: 3
+         resources:
+           cpu: 4
+           memory: 8192
+           storage: 100
+       prod:
+         servers: 5
+         resources:
+           cpu: 8
+           memory: 16384
+           storage: 200
+     
+     network:
+       subnet: "192.168.1.0/24"
+       gateway: "192.168.1.1"
+       dns: ["192.168.1.1", "8.8.8.8"]
+     
+     services:
+       - name: "web"
+         port: 80
+         replicas: 2
+       - name: "database"
+         port: 3306
+         replicas: 1
+       - name: "cache"
+         port: 6379
+         replicas: 1
+
+3. Create deployment orchestrator:
+   # vim /opt/deployment/scripts/deployment-orchestrator.sh
+   
+   #!/bin/bash
+   #
+   # System Deployment Orchestrator
+   #
+   
+   DEPLOYMENT_ROOT="/opt/deployment"
+   LOG_FILE="$DEPLOYMENT_ROOT/logs/deployment.log"
+   
+   log_message() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
+   }
+   
+   # Parse infrastructure definition
+   parse_infrastructure() {
+       local config_file="$1"
+       local environment="$2"
+       
+       if [ ! -f "$config_file" ]; then
+           log_message "ERROR" "Infrastructure config not found: $config_file"
+           return 1
+       fi
+       
+       # Extract environment-specific configuration
+       python3 -c "
+   import yaml
+   import sys
+   
+   with open('$config_file', 'r') as f:
+       config = yaml.safe_load(f)
+   
+   env_config = config['infrastructure']['environments']['$environment']
+   print(f\"SERVERS={env_config['servers']}\")
+   print(f\"CPU={env_config['resources']['cpu']}\")
+   print(f\"MEMORY={env_config['resources']['memory']}\")
+   print(f\"STORAGE={env_config['resources']['storage']}\")
+   " > /tmp/env_vars.sh
+       
+       source /tmp/env_vars.sh
+       rm -f /tmp/env_vars.sh
+       
+       log_message "INFO" "Parsed infrastructure for environment: $environment"
+   }
+   
+   # Generate deployment plan
+   generate_deployment_plan() {
+       local strategy="$1"
+       local environment="$2"
+       local plan_file="$DEPLOYMENT_ROOT/configs/deployment-plan-${environment}.json"
+       
+       cat > "$plan_file" << EOF
+   {
+     "deployment": {
+       "strategy": "$strategy",
+       "environment": "$environment",
+       "timestamp": "$(date -Iseconds)",
+       "servers": $SERVERS,
+       "resources": {
+         "cpu": $CPU,
+         "memory": $MEMORY,
+         "storage": $STORAGE
+       },
+       "phases": [
+         {
+           "name": "preparation",
+           "tasks": ["validate_resources", "prepare_templates", "check_dependencies"]
+         },
+         {
+           "name": "provisioning",
+           "tasks": ["create_infrastructure", "configure_network", "install_base_system"]
+         },
+         {
+           "name": "configuration",
+           "tasks": ["apply_configurations", "install_services", "configure_security"]
+         },
+         {
+           "name": "validation",
+           "tasks": ["run_tests", "verify_services", "performance_check"]
+         }
+       ]
+     }
+   }
+   EOF
+       
+       log_message "INFO" "Generated deployment plan: $plan_file"
+   }
+
+4. Create deployment strategy selector:
+   # vim /opt/deployment/scripts/strategy-selector.sh
+   
+   #!/bin/bash
+   #
+   # Deployment Strategy Selector
+   #
+   
+   # Detect optimal deployment strategy
+   detect_deployment_strategy() {
+       local target_count="$1"
+       local resource_requirements="$2"
+       local environment_type="$3"
+       
+       # Strategy selection logic
+       if [ "$target_count" -le 5 ] && [ "$environment_type" = "dev" ]; then
+           echo "container"
+       elif [ "$target_count" -le 20 ] && [ "$resource_requirements" = "medium" ]; then
+           echo "virtual"
+       elif [ "$target_count" -gt 20 ] || [ "$environment_type" = "prod" ]; then
+           echo "hybrid-cloud"
+       else
+           echo "bare-metal"
+       fi
+   }
+   
+   # Validate strategy compatibility
+   validate_strategy() {
+       local strategy="$1"
+       local environment="$2"
+       
+       case "$strategy" in
+           "container")
+               command -v podman >/dev/null 2>&1 || return 1
+               ;;
+           "virtual")
+               command -v virsh >/dev/null 2>&1 || return 1
+               ;;
+           "cloud")
+               command -v aws >/dev/null 2>&1 || return 1
+               ;;
+           "bare-metal")
+               [ -f "/opt/deployment/strategies/bare-metal/pxe-config.sh" ] || return 1
+               ;;
+       esac
+       
+       return 0
+   }
+
+PART B: BARE-METAL DEPLOYMENT STRATEGY
+---------------------------------------
+
+1. Create bare-metal deployment script:
+   # vim /opt/deployment/strategies/bare-metal/deploy-bare-metal.sh
+   
+   #!/bin/bash
+   #
+   # Bare-Metal Deployment Strategy
+   #
+   
+   BM_CONFIG_DIR="/opt/deployment/strategies/bare-metal"
+   
+   # Prepare bare-metal deployment
+   prepare_bare_metal() {
+       local inventory_file="$1"
+       
+       # Validate hardware inventory
+       while IFS=',' read -r hostname mac_address ip_address specs; do
+           log_message "INFO" "Preparing bare-metal deployment for $hostname"
+           
+           # Generate host-specific Kickstart
+           generate_host_kickstart "$hostname" "$specs"
+           
+           # Configure PXE boot entry
+           configure_pxe_boot "$hostname" "$mac_address"
+           
+       done < "$inventory_file"
+   }
+   
+   # Generate host-specific Kickstart
+   generate_host_kickstart() {
+       local hostname="$1"
+       local specs="$2"
+       
+       # Parse specs (cpu:memory:storage)
+       IFS=':' read -r cpu memory storage <<< "$specs"
+       
+       cat > "/var/www/html/kickstart/configs/${hostname}.ks" << EOF
+   #version=RHEL8
+   # Auto-generated Kickstart for $hostname
+   
+   auth --enableshadow --passalgo=sha512
+   url --url="http://192.168.1.20/kickstart/repos/rhel8"
+   text
+   
+   network --bootproto=static --ip=\${IP_ADDRESS} --netmask=255.255.255.0 --gateway=192.168.1.1 --nameserver=192.168.1.1 --hostname=$hostname
+   
+   rootpw --iscrypted \$6\$rounds=4096\$salt\$hashedpassword
+   
+   clearpart --all --initlabel
+   part /boot --fstype="xfs" --size=1024
+   part pv.01 --fstype="lvmpv" --size=1 --grow
+   volgroup rhel pv.01
+   logvol / --fstype="xfs" --size=$((storage * 1024 / 2)) --name=root --vgname=rhel
+   logvol /var --fstype="xfs" --size=$((storage * 1024 / 4)) --name=var --vgname=rhel
+   logvol swap --fstype="swap" --size=$((memory / 2)) --name=swap --vgname=rhel
+   
+   %packages
+   @^server-product-environment
+   %end
+   
+   %post
+   # Configure system based on specs
+   echo "CPU_CORES=$cpu" >> /etc/environment
+   echo "MEMORY_GB=$((memory / 1024))" >> /etc/environment
+   %end
+   
+   reboot
+   EOF
+   }
+   
+   # Execute bare-metal deployment
+   execute_bare_metal_deployment() {
+       local inventory_file="$1"
+       
+       prepare_bare_metal "$inventory_file"
+       
+       # Trigger network installations
+       /opt/kickstart/scripts/network-install.sh batch "$inventory_file"
+       
+       log_message "INFO" "Bare-metal deployment initiated"
+   }
+
+2. Create hardware inventory template:
+   # vim /opt/deployment/inventory/bare-metal-inventory.csv
+   
+   # hostname,mac_address,ip_address,specs(cpu:memory:storage)
+   server01,00:11:22:33:44:01,192.168.1.101,8:16384:500
+   server02,00:11:22:33:44:02,192.168.1.102,8:16384:500
+   server03,00:11:22:33:44:03,192.168.1.103,4:8192:250
+
+PART C: VIRTUAL MACHINE DEPLOYMENT STRATEGY
+--------------------------------------------
+
+1. Create VM deployment script:
+   # vim /opt/deployment/strategies/virtual/deploy-virtual.sh
+   
+   #!/bin/bash
+   #
+   # Virtual Machine Deployment Strategy
+   #
+   
+   VM_CONFIG_DIR="/opt/deployment/strategies/virtual"
+   
+   # Create VM from template
+   create_vm() {
+       local vm_name="$1"
+       local cpu_count="$2"
+       local memory_mb="$3"
+       local disk_size="$4"
+       local template_image="$5"
+       
+       log_message "INFO" "Creating VM: $vm_name"
+       
+       # Create VM disk
+       qemu-img create -f qcow2 "/var/lib/libvirt/images/${vm_name}.qcow2" "${disk_size}G"
+       
+       # Define VM
+       virt-install \
+           --name "$vm_name" \
+           --ram "$memory_mb" \
+           --vcpus "$cpu_count" \
+           --disk path="/var/lib/libvirt/images/${vm_name}.qcow2",format=qcow2 \
+           --network network=default \
+           --os-type linux \
+           --os-variant rhel8.0 \
+           --location "http://192.168.1.20/kickstart/repos/rhel8/" \
+           --extra-args "ks=http://192.168.1.20/kickstart/configs/basic-server.ks console=ttyS0" \
+           --console pty,target_type=serial \
+           --noautoconsole
+       
+       log_message "INFO" "VM created: $vm_name"
+   }
+   
+   # Deploy VM cluster
+   deploy_vm_cluster() {
+       local cluster_config="$1"
+       
+       while IFS=',' read -r vm_name cpu memory disk; do
+           create_vm "$vm_name" "$cpu" "$memory" "$disk" "rhel8-template"
+           sleep 30  # Stagger deployments
+       done < "$cluster_config"
+   }
+   
+   # VM post-deployment configuration
+   configure_vm_cluster() {
+       local cluster_config="$1"
+       
+       while IFS=',' read -r vm_name cpu memory disk; do
+           # Wait for VM to be ready
+           wait_for_vm_ready "$vm_name"
+           
+           # Apply post-deployment configuration
+           apply_vm_configuration "$vm_name"
+           
+       done < "$cluster_config"
+   }
+   
+   wait_for_vm_ready() {
+       local vm_name="$1"
+       local timeout=600
+       local elapsed=0
+       
+       while [ $elapsed -lt $timeout ]; do
+           if virsh domstate "$vm_name" | grep -q "running"; then
+               local vm_ip=$(virsh domifaddr "$vm_name" | awk '/ipv4/ {print $4}' | cut -d'/' -f1)
+               if [ -n "$vm_ip" ] && ping -c 1 "$vm_ip" >/dev/null 2>&1; then
+                   log_message "INFO" "VM ready: $vm_name ($vm_ip)"
+                   return 0
+               fi
+           fi
+           sleep 10
+           elapsed=$((elapsed + 10))
+       done
+       
+       log_message "ERROR" "VM not ready within timeout: $vm_name"
+       return 1
+   }
+
+2. Create VM cluster configuration:
+   # vim /opt/deployment/configs/vm-cluster.csv
+   
+   # vm_name,cpu,memory_mb,disk_gb
+   web-server-01,4,8192,100
+   web-server-02,4,8192,100
+   db-server-01,8,16384,200
+   cache-server-01,2,4096,50
+
+PART D: CONTAINER DEPLOYMENT STRATEGY
+--------------------------------------
+
+1. Create container deployment script:
+   # vim /opt/deployment/strategies/container/deploy-containers.sh
+   
+   #!/bin/bash
+   #
+   # Container Deployment Strategy
+   #
+   
+   CONTAINER_CONFIG_DIR="/opt/deployment/strategies/container"
+   
+   # Build custom container images
+   build_container_images() {
+       local build_config="$1"
+       
+       while IFS=',' read -r image_name dockerfile_path context_path; do
+           log_message "INFO" "Building container image: $image_name"
+           
+           podman build -t "$image_name" -f "$dockerfile_path" "$context_path"
+           
+           if [ $? -eq 0 ]; then
+               log_message "INFO" "Container image built successfully: $image_name"
+           else
+               log_message "ERROR" "Failed to build container image: $image_name"
+           fi
+       done < "$build_config"
+   }
+   
+   # Deploy container stack
+   deploy_container_stack() {
+       local stack_config="$1"
+       
+       # Create pod for related containers
+       podman pod create --name application-stack -p 80:80 -p 443:443
+       
+       while IFS=',' read -r container_name image_name ports volumes env_vars; do
+           log_message "INFO" "Deploying container: $container_name"
+           
+           # Parse ports
+           port_args=""
+           if [ -n "$ports" ]; then
+               IFS=';' read -ra PORT_ARRAY <<< "$ports"
+               for port in "${PORT_ARRAY[@]}"; do
+                   port_args="$port_args -p $port"
+               done
+           fi
+           
+           # Parse volumes
+           volume_args=""
+           if [ -n "$volumes" ]; then
+               IFS=';' read -ra VOL_ARRAY <<< "$volumes"
+               for volume in "${VOL_ARRAY[@]}"; do
+                   volume_args="$volume_args -v $volume"
+               done
+           fi
+           
+           # Parse environment variables
+           env_args=""
+           if [ -n "$env_vars" ]; then
+               IFS=';' read -ra ENV_ARRAY <<< "$env_vars"
+               for env_var in "${ENV_ARRAY[@]}"; do
+                   env_args="$env_args -e $env_var"
+               done
+           fi
+           
+           # Deploy container
+           podman run -d \
+               --name "$container_name" \
+               --pod application-stack \
+               $port_args \
+               $volume_args \
+               $env_args \
+               "$image_name"
+           
+       done < "$stack_config"
+   }
+   
+   # Container health monitoring
+   monitor_container_health() {
+       local containers=$(podman ps --format "{{.Names}}")
+       
+       for container in $containers; do
+           local status=$(podman inspect "$container" --format "{{.State.Status}}")
+           local health=$(podman inspect "$container" --format "{{.State.Health.Status}}" 2>/dev/null || echo "unknown")
+           
+           log_message "INFO" "Container $container: status=$status, health=$health"
+           
+           if [ "$status" != "running" ]; then
+               log_message "WARN" "Container not running: $container"
+               podman restart "$container"
+           fi
+       done
+   }
+
+2. Create container stack configuration:
+   # vim /opt/deployment/configs/container-stack.csv
+   
+   # container_name,image_name,ports,volumes,env_vars
+   web-frontend,nginx:latest,8080:80,/opt/web:/usr/share/nginx/html,NGINX_HOST=localhost
+   api-backend,node:16-alpine,3000:3000,/opt/api:/app,NODE_ENV=production;PORT=3000
+   database,mariadb:latest,3306:3306,/opt/data:/var/lib/mysql,MYSQL_ROOT_PASSWORD=secure123
+
+PART E: HYBRID CLOUD DEPLOYMENT STRATEGY
+-----------------------------------------
+
+1. Create cloud deployment script:
+   # vim /opt/deployment/strategies/cloud/deploy-hybrid-cloud.sh
+   
+   #!/bin/bash
+   #
+   # Hybrid Cloud Deployment Strategy
+   #
+   
+   CLOUD_CONFIG_DIR="/opt/deployment/strategies/cloud"
+   
+   # Deploy to AWS
+   deploy_aws_infrastructure() {
+       local aws_config="$1"
+       
+       # Create VPC and networking
+       aws ec2 create-vpc --cidr-block 10.0.0.0/16 --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=deployment-vpc}]'
+       
+       # Create security groups
+       aws ec2 create-security-group \
+           --group-name deployment-sg \
+           --description "Deployment security group" \
+           --vpc-id $(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=deployment-vpc" --query 'Vpcs[0].VpcId' --output text)
+       
+       # Launch instances based on configuration
+       while IFS=',' read -r instance_name instance_type ami_id key_name; do
+           log_message "INFO" "Launching AWS instance: $instance_name"
+           
+           aws ec2 run-instances \
+               --image-id "$ami_id" \
+               --count 1 \
+               --instance-type "$instance_type" \
+               --key-name "$key_name" \
+               --security-groups deployment-sg \
+               --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$instance_name}]" \
+               --user-data file://cloud-init-script.sh
+               
+       done < "$aws_config"
+   }
+   
+   # Hybrid deployment orchestration
+   orchestrate_hybrid_deployment() {
+       local deployment_plan="$1"
+       
+       # Parse deployment plan
+       local on_premise_count=$(jq -r '.deployment.on_premise.count' "$deployment_plan")
+       local cloud_count=$(jq -r '.deployment.cloud.count' "$deployment_plan")
+       
+       # Deploy on-premise infrastructure
+       if [ "$on_premise_count" -gt 0 ]; then
+           log_message "INFO" "Deploying on-premise infrastructure ($on_premise_count instances)"
+           /opt/deployment/strategies/virtual/deploy-virtual.sh
+       fi
+       
+       # Deploy cloud infrastructure
+       if [ "$cloud_count" -gt 0 ]; then
+           log_message "INFO" "Deploying cloud infrastructure ($cloud_count instances)"
+           deploy_aws_infrastructure "$CLOUD_CONFIG_DIR/aws-instances.csv"
+       fi
+       
+       # Configure hybrid networking
+       configure_hybrid_networking
+   }
+   
+   # Configure hybrid networking
+   configure_hybrid_networking() {
+       log_message "INFO" "Configuring hybrid cloud networking"
+       
+       # Setup VPN connection
+       # Configure routing between on-premise and cloud
+       # Implement service discovery
+   }
+
+PART F: DEPLOYMENT VALIDATION AND MONITORING
+---------------------------------------------
+
+1. Create deployment validator:
+   # vim /opt/deployment/scripts/deployment-validator.sh
+   
+   #!/bin/bash
+   #
+   # Deployment Validation Framework
+   #
+   
+   # Validate deployment completeness
+   validate_deployment() {
+       local deployment_plan="$1"
+       local validation_errors=0
+       
+       # Parse expected infrastructure
+       local expected_servers=$(jq -r '.deployment.servers' "$deployment_plan")
+       local strategy=$(jq -r '.deployment.strategy' "$deployment_plan")
+       
+       case "$strategy" in
+           "bare-metal")
+               validation_errors=$(validate_bare_metal_deployment "$expected_servers")
+               ;;
+           "virtual")
+               validation_errors=$(validate_virtual_deployment "$expected_servers")
+               ;;
+           "container")
+               validation_errors=$(validate_container_deployment "$expected_servers")
+               ;;
+           "hybrid-cloud")
+               validation_errors=$(validate_hybrid_deployment "$deployment_plan")
+               ;;
+       esac
+       
+       if [ $validation_errors -eq 0 ]; then
+           log_message "INFO" "Deployment validation passed"
+           return 0
+       else
+           log_message "ERROR" "Deployment validation failed ($validation_errors errors)"
+           return 1
+       fi
+   }
+   
+   # Performance testing
+   run_performance_tests() {
+       local target_list="$1"
+       
+       while read -r target; do
+           log_message "INFO" "Running performance tests on $target"
+           
+           # CPU stress test
+           ssh "$target" "stress-ng --cpu 4 --timeout 60s --metrics-brief" || true
+           
+           # Memory test
+           ssh "$target" "stress-ng --vm 2 --vm-bytes 1G --timeout 60s --metrics-brief" || true
+           
+           # Network test
+           iperf3 -c "$target" -t 30 || true
+           
+       done < "$target_list"
+   }
+
+2. Create monitoring dashboard:
+   # vim /opt/deployment/scripts/deployment-monitor.sh
+   
+   #!/bin/bash
+   #
+   # Deployment Monitoring Dashboard
+   #
+   
+   # Generate deployment status report
+   generate_status_report() {
+       local report_file="/opt/deployment/logs/status-report-$(date +%Y%m%d_%H%M%S).html"
+       
+       cat > "$report_file" << 'EOF'
+   <!DOCTYPE html>
+   <html>
+   <head>
+       <title>Deployment Status Dashboard</title>
+       <meta http-equiv="refresh" content="30">
+   </head>
+   <body>
+       <h1>System Deployment Status</h1>
+       <h2>Infrastructure Overview</h2>
+   EOF
+       
+       # Add deployment statistics
+       echo "<p>Report Generated: $(date)</p>" >> "$report_file"
+       echo "<h3>Active Deployments</h3>" >> "$report_file"
+       
+       # Bare-metal systems
+       echo "<h4>Bare-Metal Systems</h4>" >> "$report_file"
+       echo "<ul>" >> "$report_file"
+       for host in $(awk -F',' '{print $1}' /opt/deployment/inventory/bare-metal-inventory.csv 2>/dev/null); do
+           if ping -c 1 -W 2 "$host" >/dev/null 2>&1; then
+               echo "<li>$host - <span style='color:green'>Online</span></li>" >> "$report_file"
+           else
+               echo "<li>$host - <span style='color:red'>Offline</span></li>" >> "$report_file"
+           fi
+       done
+       echo "</ul>" >> "$report_file"
+       
+       # Virtual machines
+       echo "<h4>Virtual Machines</h4>" >> "$report_file"
+       echo "<ul>" >> "$report_file"
+       for vm in $(virsh list --all --name 2>/dev/null); do
+           local state=$(virsh domstate "$vm" 2>/dev/null)
+           echo "<li>$vm - $state</li>" >> "$report_file"
+       done
+       echo "</ul>" >> "$report_file"
+       
+       # Containers
+       echo "<h4>Containers</h4>" >> "$report_file"
+       echo "<ul>" >> "$report_file"
+       podman ps --format "table {{.Names}}\t{{.Status}}" | tail -n +2 | while read -r name status; do
+           echo "<li>$name - $status</li>" >> "$report_file"
+       done
+       echo "</ul>" >> "$report_file"
+       
+       echo "</body></html>" >> "$report_file"
+       
+       log_message "INFO" "Status report generated: $report_file"
+   }
+
+PART G: TESTING AND AUTOMATION
+-------------------------------
+
+1. Test deployment strategies:
+   # chmod +x /opt/deployment/scripts/*.sh
+   # chmod +x /opt/deployment/strategies/*/*.sh
+
+2. Test infrastructure parsing:
+   # /opt/deployment/scripts/deployment-orchestrator.sh parse /opt/deployment/templates/infrastructure.yaml dev
+
+3. Test bare-metal deployment:
+   # /opt/deployment/strategies/bare-metal/deploy-bare-metal.sh /opt/deployment/inventory/bare-metal-inventory.csv
+
+4. Test container deployment:
+   # /opt/deployment/strategies/container/deploy-containers.sh /opt/deployment/configs/container-stack.csv
+
+5. Create automation schedule:
+   # vim /etc/cron.d/deployment-monitoring
+   
+   # Deployment monitoring automation
+   */15 * * * * root /opt/deployment/scripts/deployment-monitor.sh generate_status_report
+   0 */6 * * * root /opt/deployment/scripts/deployment-validator.sh validate_all_deployments
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# tail -f /opt/deployment/logs/deployment.log
+# virsh list --all
+# podman ps -a
+# systemctl status libvirtd
+# aws ec2 describe-instances --output table
+
+EXPECTED RESULTS:
+-----------------
+- Multiple deployment strategies operational
+- Infrastructure as code templates functional
+- Automated provisioning across platforms
+- Deployment validation and monitoring active
+- Hybrid cloud deployments successful
+
+VALIDATION CHECKLIST:
+---------------------
+□ Deployment framework infrastructure created
+□ Infrastructure as code templates working
+□ Bare-metal deployment strategy functional
+□ Virtual machine deployment operational
+□ Container deployment strategy working
+□ Hybrid cloud deployment configured
+□ Deployment validation framework active
+□ Monitoring and reporting functional
+
+CLEANUP:
+--------
+# virsh destroy $(virsh list --name)
+# podman pod rm -f application-stack
+# rm -rf /opt/deployment
+# rm /etc/cron.d/deployment-monitoring

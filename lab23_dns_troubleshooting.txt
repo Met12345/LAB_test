@@ -1,0 +1,737 @@
+RHCE RH254 HANDS-ON LAB: TROUBLESHOOTING DNS RESOLUTION
+========================================================
+
+LAB OBJECTIVE:
+Learn DNS troubleshooting techniques and tools to diagnose and resolve common DNS resolution problems
+
+PREREQUISITES:
+- BIND DNS server installed and configured
+- Root access to RHEL system
+- Understanding of DNS resolution process
+
+LAB SCENARIO:
+Practice troubleshooting various DNS issues including resolution failures, performance problems, and configuration errors.
+
+EQUIPMENT NEEDED:
+- RHEL system with BIND installed
+- Client systems for testing
+- Network connectivity for external DNS queries
+
+LAB TASKS:
+
+PART A: DNS TROUBLESHOOTING TOOLS
+----------------------------------
+
+1. Install DNS troubleshooting tools:
+   # yum install bind-utils dnsutils tcpdump wireshark-cli -y
+
+2. Verify available DNS tools:
+   # which dig nslookup host
+   # dig -v
+   # nslookup -version
+
+3. Create DNS troubleshooting toolkit script:
+   # vim /usr/local/bin/dns-toolkit.sh
+   
+   #!/bin/bash
+   # DNS troubleshooting toolkit
+   
+   DOMAIN="$1"
+   DNS_SERVER="$2"
+   
+   if [ -z "$DOMAIN" ]; then
+       echo "Usage: $0 <domain> [dns_server]"
+       echo "Example: $0 google.com 8.8.8.8"
+       exit 1
+   fi
+   
+   DNS_SERVER=${DNS_SERVER:-"localhost"}
+   
+   echo "=== DNS Troubleshooting for $DOMAIN ==="
+   echo "Using DNS server: $DNS_SERVER"
+   echo
+   
+   # Basic resolution test
+   echo "1. Basic A record lookup:"
+   dig @$DNS_SERVER $DOMAIN A +short
+   echo
+   
+   # Full DNS query with details
+   echo "2. Detailed A record query:"
+   dig @$DNS_SERVER $DOMAIN A
+   echo
+   
+   # Check all record types
+   echo "3. All record types:"
+   dig @$DNS_SERVER $DOMAIN ANY
+   echo
+   
+   # Trace the resolution path
+   echo "4. Resolution trace:"
+   dig @$DNS_SERVER $DOMAIN +trace
+   echo
+   
+   # Check reverse DNS
+   IP=$(dig @$DNS_SERVER $DOMAIN A +short | head -1)
+   if [ -n "$IP" ]; then
+       echo "5. Reverse DNS for $IP:"
+       dig @$DNS_SERVER -x $IP +short
+   fi
+   
+   # chmod +x /usr/local/bin/dns-toolkit.sh
+
+PART B: COMMON DNS PROBLEMS SIMULATION
+---------------------------------------
+
+1. Create broken zone file for testing:
+   # cp /var/named/example.com.zone /var/named/example.com.zone.backup
+   # vim /var/named/example.com.zone
+   
+   # Introduce syntax errors:
+   $TTL 86400
+   @   IN  SOA dns.example.com. admin.example.com (
+           2024010101
+           3600
+           1800
+           1209600
+           86400
+   )
+   
+   ; Missing closing parenthesis in SOA
+   ; Invalid record format
+   @           IN  NS      dns.example.com.
+   www         IN  A       192.168.1.30.300  ; Invalid IP
+   mail        IN  MX      mail.example.com  ; Missing priority
+   broken      IN  CNAME   ; Missing target
+
+2. Create configuration with common errors:
+   # cp /etc/named.conf /etc/named.conf.backup
+   # vim /etc/named.conf
+   
+   # Introduce common configuration errors:
+   zone "test.local" {
+       type master;
+       file "nonexistent.zone";  # File doesn't exist
+       allow-update { any };     # Security issue
+   };
+   
+   zone "duplicate.com" {
+       type master;
+       file "duplicate.zone";
+   };
+   
+   zone "duplicate.com" {        # Duplicate zone definition
+       type slave;
+       masters { 192.168.1.100; };
+   };
+
+3. Create network connectivity issues:
+   # iptables -A OUTPUT -p udp --dport 53 -d 8.8.8.8 -j DROP
+   # iptables -A OUTPUT -p tcp --dport 53 -d 8.8.8.8 -j DROP
+
+PART C: SYSTEMATIC DNS TROUBLESHOOTING
+---------------------------------------
+
+1. Create comprehensive troubleshooting script:
+   # vim /usr/local/bin/dns-troubleshoot.sh
+   
+   #!/bin/bash
+   # Comprehensive DNS troubleshooting script
+   
+   DOMAIN="$1"
+   DNS_SERVER="${2:-localhost}"
+   
+   echo "=== DNS Troubleshooting Report ==="
+   echo "Domain: $DOMAIN"
+   echo "DNS Server: $DNS_SERVER"
+   echo "Date: $(date)"
+   echo "=================================="
+   echo
+   
+   # Step 1: Check DNS service status
+   echo "1. DNS Service Status:"
+   systemctl status named --no-pager -l
+   echo
+   
+   # Step 2: Check configuration syntax
+   echo "2. Configuration Syntax Check:"
+   if named-checkconf; then
+       echo "Configuration syntax: OK"
+   else
+       echo "Configuration syntax: ERROR"
+       named-checkconf 2>&1
+   fi
+   echo
+   
+   # Step 3: Check zone files
+   echo "3. Zone File Validation:"
+   for zone_file in /var/named/*.zone; do
+       if [ -f "$zone_file" ]; then
+           zone_name=$(basename "$zone_file" .zone)
+           if named-checkzone "$zone_name" "$zone_file" > /dev/null 2>&1; then
+               echo "  $zone_name: OK"
+           else
+               echo "  $zone_name: ERROR"
+               named-checkzone "$zone_name" "$zone_file" 2>&1 | head -3
+           fi
+       fi
+   done
+   echo
+   
+   # Step 4: Check network connectivity
+   echo "4. Network Connectivity:"
+   if netstat -tulpn | grep -q ":53.*named"; then
+       echo "  DNS service listening: YES"
+   else
+       echo "  DNS service listening: NO"
+   fi
+   
+   # Test external connectivity
+   if ping -c 1 8.8.8.8 > /dev/null 2>&1; then
+       echo "  External connectivity: OK"
+   else
+       echo "  External connectivity: FAILED"
+   fi
+   echo
+   
+   # Step 5: Test DNS resolution
+   if [ -n "$DOMAIN" ]; then
+       echo "5. DNS Resolution Test:"
+       
+       # Test local resolution
+       if dig @$DNS_SERVER $DOMAIN +short > /dev/null 2>&1; then
+           echo "  Local resolution: OK"
+           dig @$DNS_SERVER $DOMAIN +short
+       else
+           echo "  Local resolution: FAILED"
+           dig @$DNS_SERVER $DOMAIN 2>&1 | grep -E "(SERVFAIL|NXDOMAIN|connection timed out)"
+       fi
+       
+       # Test external resolution
+       if dig @8.8.8.8 $DOMAIN +short > /dev/null 2>&1; then
+           echo "  External resolution: OK"
+       else
+           echo "  External resolution: FAILED"
+       fi
+   fi
+   echo
+   
+   # Step 6: Check logs for errors
+   echo "6. Recent DNS Errors:"
+   tail -20 /var/log/messages | grep named | grep -i error
+   echo
+   
+   # chmod +x /usr/local/bin/dns-troubleshoot.sh
+
+2. Create performance troubleshooting script:
+   # vim /usr/local/bin/dns-performance.sh
+   
+   #!/bin/bash
+   # DNS performance troubleshooting
+   
+   DOMAIN="$1"
+   DNS_SERVER="${2:-localhost}"
+   ITERATIONS=10
+   
+   echo "=== DNS Performance Analysis ==="
+   echo "Domain: $DOMAIN"
+   echo "DNS Server: $DNS_SERVER"
+   echo "Iterations: $ITERATIONS"
+   echo
+   
+   # Test query response times
+   echo "Query Response Times:"
+   TOTAL_TIME=0
+   for i in $(seq 1 $ITERATIONS); do
+       START_TIME=$(date +%s%N)
+       dig @$DNS_SERVER $DOMAIN +short > /dev/null 2>&1
+       END_TIME=$(date +%s%N)
+       QUERY_TIME=$(( (END_TIME - START_TIME) / 1000000 ))
+       echo "  Query $i: ${QUERY_TIME}ms"
+       TOTAL_TIME=$((TOTAL_TIME + QUERY_TIME))
+   done
+   
+   AVERAGE_TIME=$((TOTAL_TIME / ITERATIONS))
+   echo "  Average: ${AVERAGE_TIME}ms"
+   echo
+   
+   # Test cache performance
+   echo "Cache Performance Test:"
+   echo "  First query (cache miss):"
+   time dig @$DNS_SERVER $DOMAIN > /dev/null 2>&1
+   
+   echo "  Second query (cache hit):"
+   time dig @$DNS_SERVER $DOMAIN > /dev/null 2>&1
+   echo
+   
+   # Check server statistics
+   echo "DNS Server Statistics:"
+   rndc stats > /dev/null 2>&1
+   if [ -f /var/named/data/named_stats.txt ]; then
+       echo "  Recent statistics:"
+       tail -10 /var/named/data/named_stats.txt
+   fi
+   
+   # chmod +x /usr/local/bin/dns-performance.sh
+
+PART D: SPECIFIC PROBLEM DIAGNOSIS
+-----------------------------------
+
+1. Create NXDOMAIN troubleshooting script:
+   # vim /usr/local/bin/diagnose-nxdomain.sh
+   
+   #!/bin/bash
+   # Diagnose NXDOMAIN responses
+   
+   DOMAIN="$1"
+   DNS_SERVER="${2:-localhost}"
+   
+   echo "=== NXDOMAIN Diagnosis for $DOMAIN ==="
+   
+   # Check if domain exists in authoritative servers
+   echo "1. Checking authoritative servers:"
+   PARENT_DOMAIN=$(echo $DOMAIN | cut -d. -f2-)
+   NS_SERVERS=$(dig $PARENT_DOMAIN NS +short)
+   
+   for ns in $NS_SERVERS; do
+       echo "  Checking $ns:"
+       dig @$ns $DOMAIN A +short 2>/dev/null || echo "    NXDOMAIN or timeout"
+   done
+   echo
+   
+   # Check local zone files
+   echo "2. Checking local zone files:"
+   if grep -r "$DOMAIN" /var/named/*.zone 2>/dev/null; then
+       echo "  Found in local zones"
+   else
+       echo "  Not found in local zones"
+   fi
+   echo
+   
+   # Check forwarding
+   echo "3. Checking forwarding configuration:"
+   grep -A 5 "forwarders" /etc/named.conf
+   echo
+   
+   # Test with different record types
+   echo "4. Testing different record types:"
+   for type in A AAAA CNAME MX NS; do
+       RESULT=$(dig @$DNS_SERVER $DOMAIN $type +short 2>/dev/null)
+       if [ -n "$RESULT" ]; then
+           echo "  $type: $RESULT"
+       else
+           echo "  $type: NXDOMAIN"
+       fi
+   done
+   
+   # chmod +x /usr/local/bin/diagnose-nxdomain.sh
+
+2. Create timeout troubleshooting script:
+   # vim /usr/local/bin/diagnose-timeout.sh
+   
+   #!/bin/bash
+   # Diagnose DNS timeout issues
+   
+   DOMAIN="$1"
+   DNS_SERVER="${2:-localhost}"
+   
+   echo "=== DNS Timeout Diagnosis ==="
+   
+   # Check network connectivity
+   echo "1. Network Connectivity Tests:"
+   if ping -c 3 -W 5 $DNS_SERVER > /dev/null 2>&1; then
+       echo "  Ping to $DNS_SERVER: OK"
+   else
+       echo "  Ping to $DNS_SERVER: FAILED"
+   fi
+   
+   # Check port connectivity
+   if nc -z -w 5 $DNS_SERVER 53; then
+       echo "  Port 53 connectivity: OK"
+   else
+       echo "  Port 53 connectivity: FAILED"
+   fi
+   echo
+   
+   # Check firewall rules
+   echo "2. Firewall Status:"
+   firewall-cmd --list-services | grep -q dns && echo "  DNS service allowed" || echo "  DNS service blocked"
+   iptables -L | grep -q "53" && echo "  Custom iptables rules found" || echo "  No custom iptables rules"
+   echo
+   
+   # Test with different timeout values
+   echo "3. Timeout Tests:"
+   for timeout in 1 5 10 30; do
+       echo "  Testing with ${timeout}s timeout:"
+       if timeout ${timeout}s dig @$DNS_SERVER $DOMAIN +time=$timeout > /dev/null 2>&1; then
+           echo "    SUCCESS"
+           break
+       else
+           echo "    TIMEOUT"
+       fi
+   done
+   echo
+   
+   # Check server load
+   echo "4. Server Load:"
+   echo "  Load average: $(uptime | awk -F'load average:' '{print $2}')"
+   echo "  DNS processes: $(ps aux | grep named | wc -l)"
+   echo "  Memory usage: $(free -h | grep Mem)"
+   
+   # chmod +x /usr/local/bin/diagnose-timeout.sh
+
+PART E: LOG ANALYSIS FOR TROUBLESHOOTING
+-----------------------------------------
+
+1. Create log analysis script:
+   # vim /usr/local/bin/analyze-dns-logs.sh
+   
+   #!/bin/bash
+   # DNS log analysis for troubleshooting
+   
+   LOG_FILE="${1:-/var/log/messages}"
+   HOURS="${2:-24}"
+   
+   echo "=== DNS Log Analysis (Last $HOURS hours) ==="
+   echo "Log file: $LOG_FILE"
+   echo
+   
+   # Get recent DNS entries
+   SINCE=$(date -d "$HOURS hours ago" '+%b %d %H:%M')
+   
+   # Count error types
+   echo "1. Error Summary:"
+   grep "named" "$LOG_FILE" | grep -E "(error|failed|denied)" | \
+   awk -v since="$SINCE" '$0 >= since' | \
+   awk '{for(i=6;i<=NF;i++) printf "%s ", $i; print ""}' | \
+   sort | uniq -c | sort -nr | head -10
+   echo
+   
+   # Zone loading issues
+   echo "2. Zone Loading Issues:"
+   grep "named" "$LOG_FILE" | grep -i "zone.*failed" | \
+   awk -v since="$SINCE" '$0 >= since' | tail -10
+   echo
+   
+   # Query denied/refused
+   echo "3. Access Denied Queries:"
+   grep "named" "$LOG_FILE" | grep -E "(denied|refused)" | \
+   awk -v since="$SINCE" '$0 >= since' | tail -10
+   echo
+   
+   # DNSSEC validation failures
+   echo "4. DNSSEC Validation Failures:"
+   grep "named" "$LOG_FILE" | grep -i "dnssec.*failed" | \
+   awk -v since="$SINCE" '$0 >= since' | tail -10
+   echo
+   
+   # High query rate warnings
+   echo "5. Rate Limiting Events:"
+   grep "named" "$LOG_FILE" | grep -i "rate limit" | \
+   awk -v since="$SINCE" '$0 >= since' | tail -10
+   
+   # chmod +x /usr/local/bin/analyze-dns-logs.sh
+
+2. Create real-time DNS monitoring:
+   # vim /usr/local/bin/monitor-dns-realtime.sh
+   
+   #!/bin/bash
+   # Real-time DNS monitoring
+   
+   echo "=== Real-time DNS Monitoring ==="
+   echo "Press Ctrl+C to stop"
+   echo
+   
+   # Monitor DNS queries in real-time
+   tail -f /var/log/messages | grep --line-buffered "named" | \
+   while read line; do
+       timestamp=$(echo "$line" | awk '{print $1, $2, $3}')
+       message=$(echo "$line" | cut -d' ' -f6-)
+       
+       # Highlight different types of messages
+       if echo "$message" | grep -qi "error\|failed"; then
+           echo -e "\033[31m[$timestamp] ERROR: $message\033[0m"
+       elif echo "$message" | grep -qi "warning\|denied"; then
+           echo -e "\033[33m[$timestamp] WARNING: $message\033[0m"
+       elif echo "$message" | grep -qi "started\|loaded"; then
+           echo -e "\033[32m[$timestamp] INFO: $message\033[0m"
+       else
+           echo "[$timestamp] $message"
+       fi
+   done
+   
+   # chmod +x /usr/local/bin/monitor-dns-realtime.sh
+
+PART F: NETWORK-LEVEL DNS TROUBLESHOOTING
+------------------------------------------
+
+1. Create packet capture script for DNS:
+   # vim /usr/local/bin/capture-dns-traffic.sh
+   
+   #!/bin/bash
+   # Capture DNS traffic for analysis
+   
+   INTERFACE="${1:-any}"
+   DURATION="${2:-60}"
+   OUTPUT_FILE="/tmp/dns-capture-$(date +%Y%m%d-%H%M%S).pcap"
+   
+   echo "Capturing DNS traffic on interface $INTERFACE for $DURATION seconds..."
+   echo "Output file: $OUTPUT_FILE"
+   
+   # Capture DNS traffic
+   timeout $DURATION tcpdump -i $INTERFACE -w "$OUTPUT_FILE" \
+   'port 53 or port 853' 2>/dev/null
+   
+   echo "Capture completed. Analyzing..."
+   
+   # Basic analysis
+   echo
+   echo "=== DNS Traffic Analysis ==="
+   echo "Total DNS packets: $(tcpdump -r "$OUTPUT_FILE" 2>/dev/null | wc -l)"
+   echo
+   echo "Query types:"
+   tcpdump -r "$OUTPUT_FILE" -n 2>/dev/null | \
+   grep -E "A\?|AAAA\?|MX\?|NS\?" | \
+   awk '{print $NF}' | sort | uniq -c | sort -nr
+   echo
+   echo "Top queried domains:"
+   tcpdump -r "$OUTPUT_FILE" -n 2>/dev/null | \
+   grep -o '[a-zA-Z0-9.-]*\.[a-zA-Z]{2,}' | \
+   sort | uniq -c | sort -nr | head -10
+   
+   echo
+   echo "Capture file saved as: $OUTPUT_FILE"
+   
+   # chmod +x /usr/local/bin/capture-dns-traffic.sh
+
+2. Create DNS connectivity tester:
+   # vim /usr/local/bin/test-dns-connectivity.sh
+   
+   #!/bin/bash
+   # Test DNS connectivity to various servers
+   
+   DNS_SERVERS=(
+       "8.8.8.8:Google"
+       "8.8.4.4:Google"
+       "1.1.1.1:Cloudflare"
+       "1.0.0.1:Cloudflare"
+       "208.67.222.222:OpenDNS"
+       "208.67.220.220:OpenDNS"
+       "localhost:Local"
+   )
+   
+   TEST_DOMAIN="${1:-google.com}"
+   
+   echo "=== DNS Connectivity Test ==="
+   echo "Test domain: $TEST_DOMAIN"
+   echo
+   
+   for server_info in "${DNS_SERVERS[@]}"; do
+       server=$(echo $server_info | cut -d: -f1)
+       name=$(echo $server_info | cut -d: -f2)
+       
+       printf "%-15s %-12s " "$server" "($name):"
+       
+       # Test UDP connectivity
+       if timeout 5 dig @$server $TEST_DOMAIN +short > /dev/null 2>&1; then
+           printf "UDP:OK  "
+       else
+           printf "UDP:FAIL "
+       fi
+       
+       # Test TCP connectivity
+       if timeout 5 dig @$server $TEST_DOMAIN +tcp +short > /dev/null 2>&1; then
+           printf "TCP:OK"
+       else
+           printf "TCP:FAIL"
+       fi
+       
+       echo
+   done
+   
+   # chmod +x /usr/local/bin/test-dns-connectivity.sh
+
+PART G: AUTOMATED PROBLEM DETECTION
+------------------------------------
+
+1. Create DNS health check script:
+   # vim /usr/local/bin/dns-health-check.sh
+   
+   #!/bin/bash
+   # Automated DNS health check
+   
+   HEALTH_SCORE=100
+   ISSUES=()
+   
+   echo "=== DNS Health Check ==="
+   echo "Starting comprehensive health assessment..."
+   echo
+   
+   # Check 1: Service status
+   if ! systemctl is-active named > /dev/null 2>&1; then
+       HEALTH_SCORE=$((HEALTH_SCORE - 30))
+       ISSUES+=("DNS service not running")
+   fi
+   
+   # Check 2: Configuration syntax
+   if ! named-checkconf > /dev/null 2>&1; then
+       HEALTH_SCORE=$((HEALTH_SCORE - 25))
+       ISSUES+=("Configuration syntax errors")
+   fi
+   
+   # Check 3: Zone file validity
+   ZONE_ERRORS=0
+   for zone_file in /var/named/*.zone; do
+       if [ -f "$zone_file" ]; then
+           zone_name=$(basename "$zone_file" .zone)
+           if ! named-checkzone "$zone_name" "$zone_file" > /dev/null 2>&1; then
+               ZONE_ERRORS=$((ZONE_ERRORS + 1))
+           fi
+       fi
+   done
+   
+   if [ $ZONE_ERRORS -gt 0 ]; then
+       HEALTH_SCORE=$((HEALTH_SCORE - (ZONE_ERRORS * 10)))
+       ISSUES+=("$ZONE_ERRORS zone file(s) have errors")
+   fi
+   
+   # Check 4: External connectivity
+   if ! dig @8.8.8.8 google.com +short > /dev/null 2>&1; then
+       HEALTH_SCORE=$((HEALTH_SCORE - 15))
+       ISSUES+=("External DNS connectivity failed")
+   fi
+   
+   # Check 5: Local resolution
+   if ! dig @localhost google.com +short > /dev/null 2>&1; then
+       HEALTH_SCORE=$((HEALTH_SCORE - 20))
+       ISSUES+=("Local DNS resolution failed")
+   fi
+   
+   # Check 6: Recent errors in logs
+   ERROR_COUNT=$(grep "named" /var/log/messages | grep -c "error\|failed" | tail -1)
+   if [ "$ERROR_COUNT" -gt 10 ]; then
+       HEALTH_SCORE=$((HEALTH_SCORE - 10))
+       ISSUES+=("High error count in logs: $ERROR_COUNT")
+   fi
+   
+   # Report results
+   echo "Health Score: $HEALTH_SCORE/100"
+   echo
+   
+   if [ ${#ISSUES[@]} -eq 0 ]; then
+       echo "✓ All checks passed - DNS service is healthy"
+   else
+       echo "Issues found:"
+       for issue in "${ISSUES[@]}"; do
+           echo "  ✗ $issue"
+       done
+   fi
+   
+   # Recommendations
+   echo
+   echo "Recommendations:"
+   if [ $HEALTH_SCORE -lt 70 ]; then
+       echo "  - Immediate attention required"
+       echo "  - Run detailed troubleshooting: /usr/local/bin/dns-troubleshoot.sh"
+   elif [ $HEALTH_SCORE -lt 90 ]; then
+       echo "  - Minor issues detected"
+       echo "  - Review configuration and logs"
+   else
+       echo "  - DNS service is operating well"
+       echo "  - Continue regular monitoring"
+   fi
+   
+   # chmod +x /usr/local/bin/dns-health-check.sh
+
+PART H: TESTING TROUBLESHOOTING SCENARIOS
+------------------------------------------
+
+1. Test configuration syntax errors:
+   # /usr/local/bin/dns-troubleshoot.sh
+   # named-checkconf
+   # systemctl status named
+
+2. Test zone file errors:
+   # named-checkzone example.com /var/named/example.com.zone
+   # /usr/local/bin/dns-troubleshoot.sh example.com
+
+3. Test network connectivity issues:
+   # /usr/local/bin/test-dns-connectivity.sh
+   # /usr/local/bin/diagnose-timeout.sh google.com
+
+4. Test resolution problems:
+   # /usr/local/bin/diagnose-nxdomain.sh nonexistent.example.com
+   # /usr/local/bin/dns-toolkit.sh example.com
+
+5. Test performance issues:
+   # /usr/local/bin/dns-performance.sh google.com
+   # /usr/local/bin/dns-health-check.sh
+
+6. Monitor real-time issues:
+   # /usr/local/bin/monitor-dns-realtime.sh &
+   # Generate some DNS queries to see monitoring in action
+
+PART I: RESTORE WORKING CONFIGURATION
+--------------------------------------
+
+1. Restore original configuration:
+   # cp /etc/named.conf.backup /etc/named.conf
+   # cp /var/named/example.com.zone.backup /var/named/example.com.zone
+
+2. Remove network restrictions:
+   # iptables -D OUTPUT -p udp --dport 53 -d 8.8.8.8 -j DROP
+   # iptables -D OUTPUT -p tcp --dport 53 -d 8.8.8.8 -j DROP
+
+3. Restart DNS service:
+   # systemctl restart named
+   # systemctl status named
+
+4. Verify restoration:
+   # /usr/local/bin/dns-health-check.sh
+   # dig @localhost google.com
+
+TROUBLESHOOTING COMMANDS REFERENCE:
+-----------------------------------
+# named-checkconf                    # Check configuration syntax
+# named-checkzone zone file          # Check zone file syntax
+# rndc reload                        # Reload configuration
+# rndc flush                         # Flush DNS cache
+# rndc status                        # Show server status
+# rndc stats                         # Generate statistics
+# dig @server domain +trace          # Trace DNS resolution
+# dig @server domain +short          # Quick lookup
+# nslookup domain server             # Alternative lookup tool
+# host domain server                 # Another lookup tool
+# systemctl status named             # Check service status
+# tail -f /var/log/messages          # Monitor logs
+# netstat -tulpn | grep :53          # Check listening ports
+# tcpdump -i any port 53             # Capture DNS traffic
+
+EXPECTED RESULTS:
+-----------------
+- Ability to diagnose common DNS problems
+- Understanding of DNS troubleshooting methodology
+- Familiarity with DNS troubleshooting tools
+- Skills to analyze DNS logs and performance
+- Knowledge of network-level DNS debugging
+
+VALIDATION CHECKLIST:
+---------------------
+□ DNS troubleshooting tools installed and working
+□ Configuration syntax checking functional
+□ Zone file validation working
+□ Network connectivity testing operational
+□ Log analysis scripts functional
+□ Performance testing tools working
+□ Real-time monitoring capabilities
+□ Automated health checking active
+
+CLEANUP:
+--------
+# rm /usr/local/bin/dns-*.sh
+# rm /usr/local/bin/diagnose-*.sh
+# rm /usr/local/bin/analyze-*.sh
+# rm /usr/local/bin/monitor-*.sh
+# rm /usr/local/bin/capture-*.sh
+# rm /usr/local/bin/test-*.sh
+# rm /tmp/dns-capture-*.pcap

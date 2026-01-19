@@ -1,0 +1,574 @@
+RHCE RH254 HANDS-ON LAB: iSCSI TARGET AND INITIATOR CONFIGURATION
+==============================================================
+
+LAB OBJECTIVE:
+Configure iSCSI target server and initiator clients for network-attached block storage, including LUN management, authentication, and multipath configuration
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Multiple network interfaces available
+- Understanding of networking concepts
+- Basic knowledge of iptables and firewall rules
+
+LAB SCENARIO:
+Deploy enterprise network services with load balancing, failover capabilities, network segmentation, and traffic management for high-availability web services.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20)
+- Additional network interfaces (eth1, eth2)
+- Switch with VLAN support (optional)
+- Multiple backend servers for load balancing
+
+LAB TASKS:
+
+PART A: CONFIGURE NETWORK BONDING
+----------------------------------
+
+1. Install network bonding tools:
+   # dnf install NetworkManager-team -y
+   # modprobe bonding
+
+2. Create bonding interface:
+   # nmcli connection add type bond con-name bond0 ifname bond0 mode active-backup
+   # nmcli connection add type ethernet slave-type bond con-name bond0-slave1 ifname eth1 master bond0
+   # nmcli connection add type ethernet slave-type bond con-name bond0-slave2 ifname eth2 master bond0
+
+3. Configure bond0 IP settings:
+   # nmcli connection modify bond0 ipv4.addresses 192.168.1.100/24
+   # nmcli connection modify bond0 ipv4.gateway 192.168.1.1
+   # nmcli connection modify bond0 ipv4.dns 8.8.8.8
+   # nmcli connection modify bond0 ipv4.method manual
+
+4. Activate bonding:
+   # nmcli connection up bond0
+   # cat /proc/net/bonding/bond0
+
+PART B: CONFIGURE VLAN SEGMENTATION
+------------------------------------
+
+1. Create VLAN interfaces:
+   # nmcli connection add type vlan con-name vlan100 ifname eth0.100 dev eth0 id 100
+   # nmcli connection add type vlan con-name vlan200 ifname eth0.200 dev eth0 id 200
+
+2. Configure VLAN IP addresses:
+   # nmcli connection modify vlan100 ipv4.addresses 192.168.100.1/24
+   # nmcli connection modify vlan100 ipv4.method manual
+   # nmcli connection modify vlan200 ipv4.addresses 192.168.200.1/24
+   # nmcli connection modify vlan200 ipv4.method manual
+
+3. Activate VLANs:
+   # nmcli connection up vlan100
+   # nmcli connection up vlan200
+   # ip addr show
+
+4. Configure VLAN routing:
+   # vim /etc/sysconfig/network-scripts/route-eth0.100
+   192.168.100.0/24 dev eth0.100
+   
+   # vim /etc/sysconfig/network-scripts/route-eth0.200
+   192.168.200.0/24 dev eth0.200
+
+PART C: INSTALL AND CONFIGURE HAPROXY LOAD BALANCER
+----------------------------------------------------
+
+1. Install HAProxy:
+   # dnf install haproxy -y
+   # systemctl enable haproxy
+
+2. Configure HAProxy:
+   # cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak
+   # vim /etc/haproxy/haproxy.cfg
+   
+   global
+       log         127.0.0.1:514 local0
+       chroot      /var/lib/haproxy
+       stats       socket /var/lib/haproxy/stats
+       user        haproxy
+       group       haproxy
+       daemon
+   
+   defaults
+       mode                    http
+       log                     global
+       option                  httplog
+       option                  dontlognull
+       option                  http-server-close
+       option                  forwardfor       except 127.0.0.0/8
+       option                  redispatch
+       retries                 3
+       timeout http-request    10s
+       timeout queue           1m
+       timeout connect         10s
+       timeout client          1m
+       timeout server          1m
+       timeout http-keep-alive 10s
+       timeout check           10s
+       maxconn                 3000
+   
+   frontend web_frontend
+       bind *:80
+       bind *:443 ssl crt /etc/ssl/certs/server.pem
+       redirect scheme https if !{ ssl_fc }
+       default_backend web_servers
+   
+   backend web_servers
+       balance roundrobin
+       option httpchk GET /health
+       server web1 192.168.1.21:80 check
+       server web2 192.168.1.22:80 check
+       server web3 192.168.1.23:80 check backup
+   
+   listen stats
+       bind *:8080
+       stats enable
+       stats uri /stats
+       stats refresh 30s
+       stats admin if TRUE
+
+3. Create SSL certificate:
+   # mkdir -p /etc/ssl/certs
+   # openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+     -keyout /etc/ssl/certs/server.key \
+     -out /etc/ssl/certs/server.crt \
+     -subj "/C=US/ST=State/L=City/O=Organization/CN=example.com"
+   # cat /etc/ssl/certs/server.crt /etc/ssl/certs/server.key > /etc/ssl/certs/server.pem
+
+4. Start HAProxy:
+   # systemctl start haproxy
+   # systemctl status haproxy
+
+PART D: CONFIGURE NGINX AS REVERSE PROXY
+-----------------------------------------
+
+1. Install Nginx:
+   # dnf install nginx -y
+   # systemctl enable nginx
+
+2. Configure Nginx upstream:
+   # vim /etc/nginx/conf.d/upstream.conf
+   
+   upstream backend_servers {
+       least_conn;
+       server 192.168.1.21:8080 weight=3 max_fails=3 fail_timeout=30s;
+       server 192.168.1.22:8080 weight=2 max_fails=3 fail_timeout=30s;
+       server 192.168.1.23:8080 weight=1 backup;
+   }
+
+3. Configure reverse proxy:
+   # vim /etc/nginx/conf.d/reverse-proxy.conf
+   
+   server {
+       listen 80;
+       server_name example.com;
+       
+       location / {
+           proxy_pass http://backend_servers;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           
+           proxy_connect_timeout 30s;
+           proxy_send_timeout 30s;
+           proxy_read_timeout 30s;
+       }
+       
+       location /health {
+           access_log off;
+           return 200 "healthy\n";
+           add_header Content-Type text/plain;
+       }
+   }
+
+4. Start Nginx:
+   # systemctl start nginx
+   # nginx -t
+
+PART E: CONFIGURE KEEPALIVED FOR HIGH AVAILABILITY
+---------------------------------------------------
+
+1. Install Keepalived:
+   # dnf install keepalived -y
+   # systemctl enable keepalived
+
+2. Configure Keepalived master:
+   # vim /etc/keepalived/keepalived.conf
+   
+   vrrp_script chk_haproxy {
+       script "/bin/kill -0 `cat /var/run/haproxy.pid`"
+       interval 2
+       weight 2
+       fall 3
+       rise 2
+   }
+   
+   vrrp_instance VI_1 {
+       state MASTER
+       interface eth0
+       virtual_router_id 51
+       priority 110
+       advert_int 1
+       authentication {
+           auth_type PASS
+           auth_pass redhat123
+       }
+       virtual_ipaddress {
+           192.168.1.100
+       }
+       track_script {
+           chk_haproxy
+       }
+   }
+
+3. Configure firewall for VRRP:
+   # firewall-cmd --add-rich-rule="rule protocol value='vrrp' accept" --permanent
+   # firewall-cmd --reload
+
+4. Start Keepalived:
+   # systemctl start keepalived
+   # ip addr show eth0
+
+PART F: CONFIGURE TRAFFIC SHAPING WITH TC
+------------------------------------------
+
+1. Create traffic shaping script:
+   # vim /usr/local/bin/traffic-shaping.sh
+   
+   #!/bin/bash
+   INTERFACE="eth0"
+   
+   # Clear existing rules
+   tc qdisc del dev $INTERFACE root 2>/dev/null
+   
+   # Create root qdisc
+   tc qdisc add dev $INTERFACE root handle 1: htb default 30
+   
+   # Create main class
+   tc class add dev $INTERFACE parent 1: classid 1:1 htb rate 100mbit
+   
+   # High priority traffic (SSH, DNS)
+   tc class add dev $INTERFACE parent 1:1 classid 1:10 htb rate 20mbit ceil 50mbit
+   
+   # Normal priority traffic (HTTP, HTTPS)
+   tc class add dev $INTERFACE parent 1:1 classid 1:20 htb rate 60mbit ceil 80mbit
+   
+   # Low priority traffic (FTP, P2P)
+   tc class add dev $INTERFACE parent 1:1 classid 1:30 htb rate 20mbit ceil 30mbit
+   
+   # Add filters
+   tc filter add dev $INTERFACE protocol ip parent 1:0 prio 1 u32 match ip dport 22 0xffff flowid 1:10
+   tc filter add dev $INTERFACE protocol ip parent 1:0 prio 1 u32 match ip dport 53 0xffff flowid 1:10
+   tc filter add dev $INTERFACE protocol ip parent 1:0 prio 2 u32 match ip dport 80 0xffff flowid 1:20
+   tc filter add dev $INTERFACE protocol ip parent 1:0 prio 2 u32 match ip dport 443 0xffff flowid 1:20
+   tc filter add dev $INTERFACE protocol ip parent 1:0 prio 3 u32 match ip dport 21 0xffff flowid 1:30
+   
+   echo "Traffic shaping configured on $INTERFACE"
+   
+   # chmod +x /usr/local/bin/traffic-shaping.sh
+   # /usr/local/bin/traffic-shaping.sh
+
+2. View traffic shaping status:
+   # tc -s qdisc show dev eth0
+   # tc -s class show dev eth0
+
+PART G: CONFIGURE ADVANCED FIREWALL RULES
+------------------------------------------
+
+1. Create firewall zones:
+   # firewall-cmd --new-zone=dmz-zone --permanent
+   # firewall-cmd --new-zone=internal-zone --permanent
+   # firewall-cmd --reload
+
+2. Configure zone interfaces:
+   # firewall-cmd --zone=dmz-zone --add-interface=eth0.100 --permanent
+   # firewall-cmd --zone=internal-zone --add-interface=eth0.200 --permanent
+
+3. Configure zone rules:
+   # firewall-cmd --zone=dmz-zone --add-service=http --permanent
+   # firewall-cmd --zone=dmz-zone --add-service=https --permanent
+   # firewall-cmd --zone=internal-zone --add-service=ssh --permanent
+   # firewall-cmd --zone=internal-zone --add-service=mysql --permanent
+
+4. Configure port forwarding:
+   # firewall-cmd --zone=public --add-forward-port=port=8080:proto=tcp:toport=80:toaddr=192.168.1.21 --permanent
+   # firewall-cmd --reload
+
+PART H: CONFIGURE NETWORK MONITORING
+-------------------------------------
+
+1. Install monitoring tools:
+   # dnf install iftop nethogs nload -y
+
+2. Create network monitoring script:
+   # vim /usr/local/bin/network-monitor.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/network-monitor.log"
+   
+   while true; do
+       echo "=== Network Monitor - $(date) ===" >> $LOGFILE
+       
+       # Interface statistics
+       cat /proc/net/dev >> $LOGFILE
+       
+       # Connection counts
+       echo "Active connections:" >> $LOGFILE
+       netstat -an | grep ESTABLISHED | wc -l >> $LOGFILE
+       
+       # Top bandwidth consumers
+       echo "Top connections:" >> $LOGFILE
+       netstat -tuln >> $LOGFILE
+       
+       echo "---" >> $LOGFILE
+       sleep 300
+   done
+   
+   # chmod +x /usr/local/bin/network-monitor.sh
+
+3. Create bandwidth monitoring:
+   # vim /usr/local/bin/bandwidth-monitor.sh
+   
+   #!/bin/bash
+   INTERFACE="eth0"
+   LOGFILE="/var/log/bandwidth-monitor.log"
+   
+   while true; do
+       RX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes)
+       TX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes)
+       
+       echo "$(date): RX: $RX_BYTES TX: $TX_BYTES" >> $LOGFILE
+       sleep 60
+   done
+   
+   # chmod +x /usr/local/bin/bandwidth-monitor.sh
+
+PART I: CONFIGURE LOAD BALANCER HEALTH CHECKS
+----------------------------------------------
+
+1. Create health check script:
+   # vim /usr/local/bin/lb-health-check.sh
+   
+   #!/bin/bash
+   SERVERS=("192.168.1.21" "192.168.1.22" "192.168.1.23")
+   LOGFILE="/var/log/lb-health.log"
+   
+   for server in "${SERVERS[@]}"; do
+       if curl -f -s http://$server/health >/dev/null; then
+           echo "$(date): $server - HEALTHY" >> $LOGFILE
+       else
+           echo "$(date): $server - UNHEALTHY" >> $LOGFILE
+           # Send alert or take action
+       fi
+   done
+   
+   # chmod +x /usr/local/bin/lb-health-check.sh
+
+2. Create HAProxy stats monitoring:
+   # vim /usr/local/bin/haproxy-stats.sh
+   
+   #!/bin/bash
+   STATS_URL="http://localhost:8080/stats;csv"
+   LOGFILE="/var/log/haproxy-stats.log"
+   
+   echo "$(date): HAProxy Statistics" >> $LOGFILE
+   curl -s $STATS_URL >> $LOGFILE
+   echo "---" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/haproxy-stats.sh
+
+PART J: CONFIGURE NETWORK FAILOVER TESTING
+-------------------------------------------
+
+1. Create failover test script:
+   # vim /usr/local/bin/test-failover.sh
+   
+   #!/bin/bash
+   VIP="192.168.1.100"
+   LOGFILE="/var/log/failover-test.log"
+   
+   echo "Starting failover test at $(date)" >> $LOGFILE
+   
+   # Test VIP accessibility
+   if ping -c 3 $VIP >/dev/null 2>&1; then
+       echo "VIP $VIP is accessible" >> $LOGFILE
+   else
+       echo "VIP $VIP is NOT accessible" >> $LOGFILE
+   fi
+   
+   # Test web service
+   if curl -f -s http://$VIP >/dev/null; then
+       echo "Web service on VIP is responding" >> $LOGFILE
+   else
+       echo "Web service on VIP is NOT responding" >> $LOGFILE
+   fi
+   
+   # Test individual backend servers
+   for server in 192.168.1.21 192.168.1.22 192.168.1.23; do
+       if curl -f -s http://$server >/dev/null; then
+           echo "Backend server $server is responding" >> $LOGFILE
+       else
+           echo "Backend server $server is NOT responding" >> $LOGFILE
+       fi
+   done
+   
+   echo "Failover test completed at $(date)" >> $LOGFILE
+   echo "---" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/test-failover.sh
+
+2. Create network bond testing:
+   # vim /usr/local/bin/test-bonding.sh
+   
+   #!/bin/bash
+   BOND_INTERFACE="bond0"
+   LOGFILE="/var/log/bonding-test.log"
+   
+   echo "Testing network bonding at $(date)" >> $LOGFILE
+   
+   # Check bond status
+   if [ -f /proc/net/bonding/$BOND_INTERFACE ]; then
+       cat /proc/net/bonding/$BOND_INTERFACE >> $LOGFILE
+   else
+       echo "Bond interface $BOND_INTERFACE not found" >> $LOGFILE
+   fi
+   
+   # Test connectivity
+   if ping -c 5 8.8.8.8 >/dev/null 2>&1; then
+       echo "External connectivity test: PASSED" >> $LOGFILE
+   else
+       echo "External connectivity test: FAILED" >> $LOGFILE
+   fi
+   
+   echo "---" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/test-bonding.sh
+
+PART K: CONFIGURE SYSTEMD SERVICES
+-----------------------------------
+
+1. Create network monitoring service:
+   # vim /etc/systemd/system/network-monitor.service
+   
+   [Unit]
+   Description=Network Monitoring Service
+   After=network.target
+   
+   [Service]
+   Type=simple
+   ExecStart=/usr/local/bin/network-monitor.sh
+   Restart=always
+   RestartSec=10
+   User=root
+   
+   [Install]
+   WantedBy=multi-user.target
+
+2. Create bandwidth monitoring service:
+   # vim /etc/systemd/system/bandwidth-monitor.service
+   
+   [Unit]
+   Description=Bandwidth Monitoring Service
+   After=network.target
+   
+   [Service]
+   Type=simple
+   ExecStart=/usr/local/bin/bandwidth-monitor.sh
+   Restart=always
+   RestartSec=10
+   User=root
+   
+   [Install]
+   WantedBy=multi-user.target
+
+3. Enable services:
+   # systemctl daemon-reload
+   # systemctl enable network-monitor bandwidth-monitor
+   # systemctl start network-monitor bandwidth-monitor
+
+PART L: CONFIGURE CRON JOBS
+----------------------------
+
+1. Schedule monitoring tasks:
+   # crontab -e
+   
+   # Health checks every 2 minutes
+   */2 * * * * /usr/local/bin/lb-health-check.sh
+   
+   # HAProxy stats every 5 minutes
+   */5 * * * * /usr/local/bin/haproxy-stats.sh
+   
+   # Failover testing every 15 minutes
+   */15 * * * * /usr/local/bin/test-failover.sh
+   
+   # Bonding test every 30 minutes
+   */30 * * * * /usr/local/bin/test-bonding.sh
+   
+   # Traffic shaping reset daily
+   0 2 * * * /usr/local/bin/traffic-shaping.sh
+
+PART M: TESTING AND VALIDATION
+-------------------------------
+
+1. Test load balancing:
+   # curl -I http://192.168.1.100
+   # for i in {1..10}; do curl -s http://192.168.1.100 | grep Server; done
+
+2. Test SSL termination:
+   # curl -k https://192.168.1.100
+   # openssl s_client -connect 192.168.1.100:443
+
+3. Test failover:
+   # systemctl stop haproxy
+   # ping 192.168.1.100
+   # systemctl start haproxy
+
+4. Test VLAN connectivity:
+   # ping 192.168.100.1
+   # ping 192.168.200.1
+
+5. Test traffic shaping:
+   # tc -s class show dev eth0
+   # iperf3 -c target-server
+
+6. Test bonding failover:
+   # ip link set eth1 down
+   # ping 8.8.8.8
+   # ip link set eth1 up
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status haproxy keepalived nginx
+# journalctl -u haproxy -f
+# cat /proc/net/bonding/bond0
+# tc qdisc show
+# firewall-cmd --list-all-zones
+# nmcli connection show
+
+EXPECTED RESULTS:
+-----------------
+- Load balancing operational with health checks
+- High availability with automatic failover
+- Network bonding providing redundancy
+- VLAN segmentation working
+- Traffic shaping controlling bandwidth
+- SSL termination functional
+
+VALIDATION CHECKLIST:
+---------------------
+□ Network bonding configured
+□ VLAN interfaces active
+□ HAProxy load balancing working
+□ Keepalived failover functional
+□ Traffic shaping applied
+□ Firewall zones configured
+□ Monitoring services running
+□ Health checks operational
+
+CLEANUP:
+--------
+# systemctl stop haproxy keepalived nginx
+# systemctl disable haproxy keepalived nginx
+# nmcli connection delete bond0 vlan100 vlan200
+# tc qdisc del dev eth0 root
+# firewall-cmd --delete-zone=dmz-zone --permanent
+# crontab -e  # Remove monitoring entries

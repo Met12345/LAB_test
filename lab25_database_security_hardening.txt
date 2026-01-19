@@ -1,0 +1,548 @@
+RHCE RH254 HANDS-ON LAB: DATABASE SECURITY HARDENING
+====================================================
+
+LAB OBJECTIVE:
+Implement comprehensive security measures for MariaDB/MySQL database server to protect against common threats
+
+PREREQUISITES:
+- MariaDB/MySQL server installed and configured
+- Root access to RHEL system
+- Understanding of database security concepts
+
+LAB SCENARIO:
+Harden MariaDB database server with security best practices including access controls, encryption, and audit logging.
+
+EQUIPMENT NEEDED:
+- RHEL system with MariaDB installed
+- SSL certificates for encrypted connections
+- Client systems for testing security measures
+
+LAB TASKS:
+
+PART A: SECURE USER MANAGEMENT
+-------------------------------
+
+1. Review and clean up default users:
+   # mysql -u root -p
+   
+   MariaDB> SELECT User, Host FROM mysql.user;
+   MariaDB> DROP USER ''@'localhost';
+   MariaDB> DROP USER ''@'$(hostname)';
+   MariaDB> DELETE FROM mysql.db WHERE Db LIKE 'test%';
+   MariaDB> FLUSH PRIVILEGES;
+
+2. Create security policy for passwords:
+   MariaDB> INSTALL PLUGIN simple_password_check SONAME 'simple_password_check.so';
+   MariaDB> SET GLOBAL simple_password_check_minimal_length = 8;
+   MariaDB> SET GLOBAL simple_password_check_other_characters = 1;
+   MariaDB> SET GLOBAL simple_password_check_digits = 1;
+
+3. Configure password validation:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Password validation
+   plugin-load-add = simple_password_check.so
+   simple_password_check_minimal_length = 8
+   simple_password_check_other_characters = 1
+   simple_password_check_digits = 1
+
+4. Create secure application users:
+   MariaDB> CREATE USER 'app_read'@'192.168.1.%' IDENTIFIED BY 'SecureRead123!';
+   MariaDB> CREATE USER 'app_write'@'192.168.1.%' IDENTIFIED BY 'SecureWrite123!';
+   MariaDB> CREATE USER 'app_admin'@'localhost' IDENTIFIED BY 'SecureAdmin123!';
+
+5. Grant minimal required privileges:
+   MariaDB> GRANT SELECT ON webapp_prod.* TO 'app_read'@'192.168.1.%';
+   MariaDB> GRANT SELECT, INSERT, UPDATE ON webapp_prod.* TO 'app_write'@'192.168.1.%';
+   MariaDB> GRANT ALL PRIVILEGES ON webapp_prod.* TO 'app_admin'@'localhost';
+   MariaDB> FLUSH PRIVILEGES;
+   MariaDB> EXIT;
+
+PART B: CONFIGURE SSL/TLS ENCRYPTION
+-------------------------------------
+
+1. Generate SSL certificates:
+   # mkdir -p /etc/mysql/ssl
+   # cd /etc/mysql/ssl
+   
+   # Create CA certificate
+   # openssl genrsa 2048 > ca-key.pem
+   # openssl req -new -x509 -nodes -days 3600 -key ca-key.pem -out ca-cert.pem \
+     -subj "/CN=MySQL-CA"
+   
+   # Create server certificate
+   # openssl req -newkey rsa:2048 -days 3600 -nodes -keyout server-key.pem \
+     -out server-req.pem -subj "/CN=mysql-server"
+   # openssl rsa -in server-key.pem -out server-key.pem
+   # openssl x509 -req -in server-req.pem -days 3600 -CA ca-cert.pem \
+     -CAkey ca-key.pem -set_serial 01 -out server-cert.pem
+   
+   # Create client certificate
+   # openssl req -newkey rsa:2048 -days 3600 -nodes -keyout client-key.pem \
+     -out client-req.pem -subj "/CN=mysql-client"
+   # openssl rsa -in client-key.pem -out client-key.pem
+   # openssl x509 -req -in client-req.pem -days 3600 -CA ca-cert.pem \
+     -CAkey ca-key.pem -set_serial 02 -out client-cert.pem
+
+2. Set proper permissions:
+   # chown -R mysql:mysql /etc/mysql/ssl
+   # chmod 600 /etc/mysql/ssl/*-key.pem
+   # chmod 644 /etc/mysql/ssl/*-cert.pem
+
+3. Configure SSL in MariaDB:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # SSL Configuration
+   ssl-ca = /etc/mysql/ssl/ca-cert.pem
+   ssl-cert = /etc/mysql/ssl/server-cert.pem
+   ssl-key = /etc/mysql/ssl/server-key.pem
+   
+   # Require SSL for all connections
+   require_secure_transport = ON
+
+4. Configure client SSL:
+   # vim /etc/my.cnf
+   
+   [client]
+   ssl-ca = /etc/mysql/ssl/ca-cert.pem
+   ssl-cert = /etc/mysql/ssl/client-cert.pem
+   ssl-key = /etc/mysql/ssl/client-key.pem
+
+PART C: CONFIGURE NETWORK SECURITY
+-----------------------------------
+
+1. Restrict network access:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Network security
+   bind-address = 192.168.1.10
+   skip-networking = 0
+   skip-name-resolve = 1
+   
+   # Connection limits
+   max_connections = 50
+   max_user_connections = 10
+   max_connect_errors = 5
+
+2. Configure firewall rules:
+   # firewall-cmd --permanent --remove-service=mysql
+   # firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port protocol="tcp" port="3306" accept'
+   # firewall-cmd --reload
+
+3. Create connection monitoring script:
+   # vim /usr/local/bin/mysql-connections.sh
+   
+   #!/bin/bash
+   # Monitor MySQL connections
+   
+   echo "=== MySQL Connection Monitor ==="
+   echo "Date: $(date)"
+   echo
+   
+   mysql -u root -p -e "
+   SELECT 
+       SUBSTRING_INDEX(host, ':', 1) as client_ip,
+       COUNT(*) as connections,
+       user
+   FROM information_schema.processlist 
+   WHERE command != 'Sleep' 
+   GROUP BY client_ip, user 
+   ORDER BY connections DESC;"
+   
+   echo
+   echo "Failed connection attempts:"
+   grep "Access denied" /var/log/mariadb/mariadb.log | tail -10
+   
+   # chmod +x /usr/local/bin/mysql-connections.sh
+
+PART D: CONFIGURE AUDIT LOGGING
+--------------------------------
+
+1. Install audit plugin:
+   # mysql -u root -p
+   
+   MariaDB> INSTALL PLUGIN server_audit SONAME 'server_audit.so';
+   MariaDB> SET GLOBAL server_audit_logging = ON;
+   MariaDB> SET GLOBAL server_audit_events = 'CONNECT,QUERY,TABLE';
+   MariaDB> SET GLOBAL server_audit_file_path = '/var/log/mariadb/audit.log';
+
+2. Configure audit settings:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Audit logging
+   plugin-load-add = server_audit.so
+   server_audit_logging = ON
+   server_audit_events = CONNECT,QUERY,TABLE
+   server_audit_file_path = /var/log/mariadb/audit.log
+   server_audit_file_rotate_size = 1000000
+   server_audit_file_rotations = 9
+   server_audit_incl_users = app_admin,app_write
+
+3. Create audit log directory:
+   # mkdir -p /var/log/mariadb
+   # chown mysql:mysql /var/log/mariadb
+   # chmod 750 /var/log/mariadb
+
+4. Create audit log analysis script:
+   # vim /usr/local/bin/analyze-audit-log.sh
+   
+   #!/bin/bash
+   # Analyze MySQL audit logs
+   
+   AUDIT_LOG="/var/log/mariadb/audit.log"
+   
+   if [ -f "$AUDIT_LOG" ]; then
+       echo "=== MySQL Audit Log Analysis ==="
+       echo "Date: $(date)"
+       echo
+       
+       echo "Connection attempts today:"
+       grep "$(date '+%Y%m%d')" "$AUDIT_LOG" | grep "CONNECT" | wc -l
+       echo
+       
+       echo "Failed login attempts:"
+       grep "$(date '+%Y%m%d')" "$AUDIT_LOG" | grep "Access denied" | wc -l
+       echo
+       
+       echo "Top users by query count:"
+       grep "$(date '+%Y%m%d')" "$AUDIT_LOG" | grep "QUERY" | \
+       awk -F',' '{print $3}' | sort | uniq -c | sort -nr | head -10
+       echo
+       
+       echo "Suspicious activities (DROP, DELETE, TRUNCATE):"
+       grep "$(date '+%Y%m%d')" "$AUDIT_LOG" | \
+       grep -iE "(DROP|DELETE|TRUNCATE)" | tail -10
+   else
+       echo "Audit log not found"
+   fi
+   
+   # chmod +x /usr/local/bin/analyze-audit-log.sh
+
+PART E: CONFIGURE DATA ENCRYPTION
+----------------------------------
+
+1. Enable data-at-rest encryption:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Encryption settings
+   innodb_encrypt_tables = ON
+   innodb_encrypt_log = ON
+   innodb_encryption_threads = 4
+   
+   # File key management
+   plugin-load-add = file_key_management.so
+   file_key_management_filename = /etc/mysql/keys.txt
+   file_key_management_filekey = FILE:/etc/mysql/keyfile.key
+   file_key_management_encryption_algorithm = AES_CTR
+
+2. Create encryption keys:
+   # echo "1;$(openssl rand -hex 32)" > /etc/mysql/keys.txt
+   # openssl rand -hex 128 > /etc/mysql/keyfile.key
+   # chown mysql:mysql /etc/mysql/keys.txt /etc/mysql/keyfile.key
+   # chmod 600 /etc/mysql/keys.txt /etc/mysql/keyfile.key
+
+3. Create encrypted table example:
+   # mysql -u root -p
+   
+   MariaDB> USE webapp_prod;
+   MariaDB> CREATE TABLE sensitive_data (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       user_id INT,
+       credit_card_hash VARCHAR(255),
+       ssn_encrypted VARBINARY(255),
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+   ) ENCRYPTED=YES;
+
+PART F: CONFIGURE ACCESS CONTROLS
+----------------------------------
+
+1. Create role-based access:
+   # mysql -u root -p
+   
+   MariaDB> CREATE ROLE 'read_only_role';
+   MariaDB> CREATE ROLE 'data_entry_role';
+   MariaDB> CREATE ROLE 'admin_role';
+   
+   MariaDB> GRANT SELECT ON webapp_prod.* TO 'read_only_role';
+   MariaDB> GRANT SELECT, INSERT, UPDATE ON webapp_prod.* TO 'data_entry_role';
+   MariaDB> GRANT ALL PRIVILEGES ON webapp_prod.* TO 'admin_role';
+
+2. Assign roles to users:
+   MariaDB> GRANT 'read_only_role' TO 'app_read'@'192.168.1.%';
+   MariaDB> GRANT 'data_entry_role' TO 'app_write'@'192.168.1.%';
+   MariaDB> GRANT 'admin_role' TO 'app_admin'@'localhost';
+   MariaDB> FLUSH PRIVILEGES;
+
+3. Configure table-level security:
+   MariaDB> CREATE VIEW user_safe_view AS 
+   SELECT id, username, email, created_at 
+   FROM users;
+   
+   MariaDB> GRANT SELECT ON webapp_prod.user_safe_view TO 'read_only_role';
+   MariaDB> REVOKE SELECT ON webapp_prod.users FROM 'read_only_role';
+
+4. Configure column-level security:
+   MariaDB> GRANT SELECT (id, username, email), UPDATE (email) 
+   ON webapp_prod.users TO 'limited_user'@'localhost' 
+   IDENTIFIED BY 'LimitedPass123!';
+
+PART G: CONFIGURE SECURITY MONITORING
+--------------------------------------
+
+1. Create security monitoring script:
+   # vim /usr/local/bin/mysql-security-monitor.sh
+   
+   #!/bin/bash
+   # MySQL security monitoring
+   
+   LOG_FILE="/var/log/mariadb/mariadb.log"
+   AUDIT_LOG="/var/log/mariadb/audit.log"
+   ALERT_EMAIL="security@example.com"
+   
+   echo "=== MySQL Security Monitor ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Check for failed login attempts
+   FAILED_LOGINS=$(grep "$(date '+%Y-%m-%d')" "$LOG_FILE" | grep -c "Access denied")
+   if [ $FAILED_LOGINS -gt 10 ]; then
+       echo "WARNING: High number of failed logins: $FAILED_LOGINS"
+       echo "High MySQL login failures: $FAILED_LOGINS" | \
+       mail -s "MySQL Security Alert" $ALERT_EMAIL
+   fi
+   
+   # Check for privilege escalation attempts
+   PRIV_ATTEMPTS=$(grep "$(date '+%Y%m%d')" "$AUDIT_LOG" | grep -ic "GRANT\|CREATE USER")
+   if [ $PRIV_ATTEMPTS -gt 5 ]; then
+       echo "WARNING: Privilege escalation attempts: $PRIV_ATTEMPTS"
+   fi
+   
+   # Check for suspicious queries
+   SUSPICIOUS=$(grep "$(date '+%Y%m%d')" "$AUDIT_LOG" | \
+               grep -icE "(UNION.*SELECT|OR.*1=1|DROP.*TABLE)")
+   if [ $SUSPICIOUS -gt 0 ]; then
+       echo "WARNING: Suspicious SQL patterns detected: $SUSPICIOUS"
+       echo "Suspicious MySQL queries detected" | \
+       mail -s "MySQL Security Alert: SQL Injection" $ALERT_EMAIL
+   fi
+   
+   # Check SSL connections
+   SSL_CONNECTIONS=$(mysql -u root -p -e "
+   SELECT COUNT(*) as ssl_connections 
+   FROM information_schema.processlist 
+   WHERE command != 'Sleep' AND host LIKE '%ssl%';" 2>/dev/null | tail -1)
+   
+   echo "Current SSL connections: $SSL_CONNECTIONS"
+   
+   # chmod +x /usr/local/bin/mysql-security-monitor.sh
+
+2. Schedule security monitoring:
+   # crontab -e
+   # Add: */15 * * * * /usr/local/bin/mysql-security-monitor.sh
+
+3. Configure fail2ban for MySQL:
+   # yum install fail2ban -y
+   # vim /etc/fail2ban/jail.d/mysql.conf
+   
+   [mysql]
+   enabled = true
+   port = 3306
+   filter = mysql-auth
+   logpath = /var/log/mariadb/mariadb.log
+   maxretry = 3
+   bantime = 3600
+
+4. Create fail2ban filter:
+   # vim /etc/fail2ban/filter.d/mysql-auth.conf
+   
+   [Definition]
+   failregex = Access denied for user.*<HOST>
+   ignoreregex =
+
+PART H: CONFIGURE BACKUP SECURITY
+----------------------------------
+
+1. Create secure backup user:
+   # mysql -u root -p
+   
+   MariaDB> CREATE USER 'secure_backup'@'localhost' 
+   IDENTIFIED BY 'SecureBackup123!' 
+   REQUIRE SSL;
+   
+   MariaDB> GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER 
+   ON *.* TO 'secure_backup'@'localhost';
+   MariaDB> FLUSH PRIVILEGES;
+   MariaDB> EXIT;
+
+2. Create encrypted backup script:
+   # vim /usr/local/bin/secure-mysql-backup.sh
+   
+   #!/bin/bash
+   # Secure MySQL backup with encryption
+   
+   BACKUP_DIR="/var/backups/mysql"
+   DB_USER="secure_backup"
+   DB_PASS="SecureBackup123!"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   ENCRYPTION_KEY="/etc/mysql/backup.key"
+   
+   # Generate encryption key if not exists
+   if [ ! -f "$ENCRYPTION_KEY" ]; then
+       openssl rand -base64 32 > "$ENCRYPTION_KEY"
+       chmod 600 "$ENCRYPTION_KEY"
+   fi
+   
+   echo "Starting secure MySQL backup at $(date)"
+   
+   # Create backup with SSL
+   mysqldump --ssl-ca=/etc/mysql/ssl/ca-cert.pem \
+             --ssl-cert=/etc/mysql/ssl/client-cert.pem \
+             --ssl-key=/etc/mysql/ssl/client-key.pem \
+             -u$DB_USER -p$DB_PASS \
+             --all-databases --single-transaction \
+             --routines --triggers --events | \
+   openssl enc -aes-256-cbc -salt -k "$(cat $ENCRYPTION_KEY)" > \
+   $BACKUP_DIR/secure_backup_$DATE.sql.enc
+   
+   if [ $? -eq 0 ]; then
+       echo "Secure backup completed: $BACKUP_DIR/secure_backup_$DATE.sql.enc"
+       
+       # Create checksum
+       sha256sum $BACKUP_DIR/secure_backup_$DATE.sql.enc > \
+       $BACKUP_DIR/secure_backup_$DATE.sql.enc.sha256
+       
+       # Remove old backups
+       find $BACKUP_DIR -name "secure_backup_*.sql.enc" -mtime +7 -delete
+       find $BACKUP_DIR -name "*.sha256" -mtime +7 -delete
+   else
+       echo "Backup failed!"
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/secure-mysql-backup.sh
+
+PART I: RESTART AND TEST SECURITY
+----------------------------------
+
+1. Restart MariaDB with security settings:
+   # systemctl restart mariadb
+   # systemctl status mariadb
+
+2. Test SSL connections:
+   # mysql -u app_read -p -h 192.168.1.10 --ssl-ca=/etc/mysql/ssl/ca-cert.pem
+   MariaDB> SHOW STATUS LIKE 'Ssl_cipher';
+   MariaDB> EXIT;
+
+3. Test user privileges:
+   # mysql -u app_read -p webapp_prod
+   MariaDB> SELECT * FROM user_safe_view;
+   MariaDB> SELECT * FROM users;  # Should fail
+   MariaDB> EXIT;
+
+4. Test audit logging:
+   # mysql -u app_admin -p webapp_prod
+   MariaDB> SELECT COUNT(*) FROM users;
+   MariaDB> EXIT;
+   # tail -5 /var/log/mariadb/audit.log
+
+5. Test security monitoring:
+   # /usr/local/bin/mysql-security-monitor.sh
+   # /usr/local/bin/analyze-audit-log.sh
+
+PART J: SECURITY VALIDATION
+----------------------------
+
+1. Run security assessment:
+   # vim /usr/local/bin/mysql-security-check.sh
+   
+   #!/bin/bash
+   # MySQL security assessment
+   
+   echo "=== MySQL Security Assessment ==="
+   
+   # Check for anonymous users
+   ANON_USERS=$(mysql -u root -p -e "SELECT COUNT(*) FROM mysql.user WHERE User='';" 2>/dev/null | tail -1)
+   if [ "$ANON_USERS" -eq 0 ]; then
+       echo "✓ No anonymous users found"
+   else
+       echo "✗ Anonymous users exist: $ANON_USERS"
+   fi
+   
+   # Check for users without passwords
+   NO_PASS=$(mysql -u root -p -e "SELECT COUNT(*) FROM mysql.user WHERE authentication_string='';" 2>/dev/null | tail -1)
+   if [ "$NO_PASS" -eq 0 ]; then
+       echo "✓ All users have passwords"
+   else
+       echo "✗ Users without passwords: $NO_PASS"
+   fi
+   
+   # Check SSL status
+   SSL_STATUS=$(mysql -u root -p -e "SHOW VARIABLES LIKE 'have_ssl';" 2>/dev/null | grep YES)
+   if [ -n "$SSL_STATUS" ]; then
+       echo "✓ SSL is enabled"
+   else
+       echo "✗ SSL is not enabled"
+   fi
+   
+   # Check audit plugin
+   AUDIT_STATUS=$(mysql -u root -p -e "SHOW PLUGINS;" 2>/dev/null | grep server_audit)
+   if [ -n "$AUDIT_STATUS" ]; then
+       echo "✓ Audit plugin is active"
+   else
+       echo "✗ Audit plugin is not active"
+   fi
+   
+   echo
+   echo "Security recommendations:"
+   echo "- Regularly update MariaDB to latest version"
+   echo "- Monitor audit logs for suspicious activity"
+   echo "- Rotate SSL certificates annually"
+   echo "- Review user privileges quarterly"
+   
+   # chmod +x /usr/local/bin/mysql-security-check.sh
+
+2. Test backup security:
+   # /usr/local/bin/secure-mysql-backup.sh
+   # ls -la /var/backups/mysql/
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status mariadb
+# tail -f /var/log/mariadb/mariadb.log
+# tail -f /var/log/mariadb/audit.log
+# mysql -u root -p -e "SHOW VARIABLES LIKE 'ssl%';"
+# mysql -u root -p -e "SHOW STATUS LIKE 'Ssl%';"
+# fail2ban-client status mysql
+
+EXPECTED RESULTS:
+-----------------
+- All connections encrypted with SSL/TLS
+- User access restricted by roles and privileges
+- Audit logging capturing all database activities
+- Data-at-rest encryption enabled
+- Security monitoring detecting threats
+- Secure backup procedures implemented
+
+VALIDATION CHECKLIST:
+---------------------
+□ SSL/TLS encryption configured
+□ User privileges minimized
+□ Audit logging operational
+□ Data encryption enabled
+□ Network access restricted
+□ Security monitoring active
+□ Fail2ban protecting database
+□ Secure backup procedures working
+
+CLEANUP:
+--------
+# systemctl stop fail2ban
+# rm /usr/local/bin/mysql-security-*.sh
+# rm /usr/local/bin/analyze-audit-log.sh
+# rm /usr/local/bin/secure-mysql-backup.sh
+# crontab -e  # Remove security monitoring entries

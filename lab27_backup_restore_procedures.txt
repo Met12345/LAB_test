@@ -1,0 +1,740 @@
+RHCE RH254 HANDS-ON LAB: BASIC BACKUP AND RESTORE PROCEDURES
+=============================================================
+
+LAB OBJECTIVE:
+Implement comprehensive backup and restore procedures for MariaDB/MySQL databases including full, incremental, and point-in-time recovery
+
+PREREQUISITES:
+- MariaDB/MySQL server installed and configured
+- Root access to RHEL system
+- Understanding of database backup concepts
+
+LAB SCENARIO:
+Configure automated backup procedures and practice restore operations for database disaster recovery scenarios.
+
+EQUIPMENT NEEDED:
+- RHEL system with MariaDB installed
+- Sufficient storage space for backups
+- Test databases with sample data
+
+LAB TASKS:
+
+PART A: PREPARE BACKUP ENVIRONMENT
+-----------------------------------
+
+1. Create backup directories:
+   # mkdir -p /var/backups/mysql/{full,incremental,logs}
+   # mkdir -p /var/backups/mysql/archive
+   # chown -R mysql:mysql /var/backups/mysql
+   # chmod -R 750 /var/backups/mysql
+
+2. Create backup user with minimal privileges:
+   # mysql -u root -p
+   
+   MariaDB> CREATE USER 'backup_user'@'localhost' 
+   IDENTIFIED BY 'BackupUser123!';
+   
+   MariaDB> GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER, PROCESS 
+   ON *.* TO 'backup_user'@'localhost';
+   
+   MariaDB> GRANT REPLICATION CLIENT ON *.* TO 'backup_user'@'localhost';
+   MariaDB> FLUSH PRIVILEGES;
+   MariaDB> EXIT;
+
+3. Configure binary logging for point-in-time recovery:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Binary logging for point-in-time recovery
+   log-bin = /var/lib/mysql/mysql-bin
+   binlog_format = ROW
+   expire_logs_days = 7
+   max_binlog_size = 100M
+   
+   # Server ID for replication
+   server-id = 1
+
+4. Restart MariaDB to enable binary logging:
+   # systemctl restart mariadb
+   # systemctl status mariadb
+
+PART B: CREATE SAMPLE DATA FOR TESTING
+---------------------------------------
+
+1. Create test database with sample data:
+   # mysql -u root -p
+   
+   MariaDB> CREATE DATABASE backup_test;
+   MariaDB> USE backup_test;
+   
+   MariaDB> CREATE TABLE customers (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       name VARCHAR(100) NOT NULL,
+       email VARCHAR(100) UNIQUE,
+       phone VARCHAR(20),
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+   );
+   
+   MariaDB> CREATE TABLE orders (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       customer_id INT,
+       order_date DATE,
+       total_amount DECIMAL(10,2),
+       status ENUM('pending', 'completed', 'cancelled'),
+       FOREIGN KEY (customer_id) REFERENCES customers(id)
+   );
+
+2. Insert sample data:
+   MariaDB> INSERT INTO customers (name, email, phone) VALUES
+   ('John Doe', 'john@example.com', '555-1234'),
+   ('Jane Smith', 'jane@example.com', '555-5678'),
+   ('Bob Johnson', 'bob@example.com', '555-9012'),
+   ('Alice Brown', 'alice@example.com', '555-3456'),
+   ('Charlie Wilson', 'charlie@example.com', '555-7890');
+   
+   MariaDB> INSERT INTO orders (customer_id, order_date, total_amount, status) VALUES
+   (1, '2024-01-15', 150.00, 'completed'),
+   (2, '2024-01-16', 75.50, 'completed'),
+   (3, '2024-01-17', 200.00, 'pending'),
+   (4, '2024-01-18', 125.75, 'completed'),
+   (5, '2024-01-19', 300.00, 'pending');
+
+3. Create stored procedures and triggers:
+   MariaDB> DELIMITER //
+   MariaDB> CREATE PROCEDURE GetCustomerOrders(IN customer_id INT)
+   BEGIN
+       SELECT * FROM orders WHERE customer_id = customer_id;
+   END //
+   MariaDB> DELIMITER ;
+   
+   MariaDB> CREATE TRIGGER update_timestamp 
+   BEFORE UPDATE ON customers
+   FOR EACH ROW 
+   SET NEW.created_at = CURRENT_TIMESTAMP;
+   
+   MariaDB> EXIT;
+
+PART C: IMPLEMENT FULL BACKUP PROCEDURES
+-----------------------------------------
+
+1. Create full backup script:
+   # vim /usr/local/bin/mysql-full-backup.sh
+   
+   #!/bin/bash
+   # MySQL full backup script
+   
+   BACKUP_DIR="/var/backups/mysql/full"
+   DB_USER="backup_user"
+   DB_PASS="BackupUser123!"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   BACKUP_FILE="full_backup_$DATE.sql"
+   
+   echo "Starting full backup at $(date)"
+   
+   # Create full backup with all databases
+   mysqldump -u$DB_USER -p$DB_PASS \
+             --all-databases \
+             --single-transaction \
+             --routines \
+             --triggers \
+             --events \
+             --flush-logs \
+             --master-data=2 \
+             --hex-blob > $BACKUP_DIR/$BACKUP_FILE
+   
+   if [ $? -eq 0 ]; then
+       echo "Full backup completed successfully"
+       
+       # Compress the backup
+       gzip $BACKUP_DIR/$BACKUP_FILE
+       
+       # Create checksum
+       sha256sum $BACKUP_DIR/$BACKUP_FILE.gz > $BACKUP_DIR/$BACKUP_FILE.gz.sha256
+       
+       # Log backup information
+       echo "$(date): Full backup created - $BACKUP_FILE.gz" >> /var/log/mysql-backup.log
+       
+       # Remove old backups (keep 7 days)
+       find $BACKUP_DIR -name "full_backup_*.sql.gz" -mtime +7 -delete
+       find $BACKUP_DIR -name "*.sha256" -mtime +7 -delete
+       
+       echo "Backup file: $BACKUP_DIR/$BACKUP_FILE.gz"
+   else
+       echo "Full backup failed!"
+       echo "$(date): Full backup FAILED" >> /var/log/mysql-backup.log
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/mysql-full-backup.sh
+
+2. Create database-specific backup script:
+   # vim /usr/local/bin/mysql-db-backup.sh
+   
+   #!/bin/bash
+   # MySQL database-specific backup script
+   
+   DATABASE="$1"
+   BACKUP_DIR="/var/backups/mysql/full"
+   DB_USER="backup_user"
+   DB_PASS="BackupUser123!"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   if [ -z "$DATABASE" ]; then
+       echo "Usage: $0 <database_name>"
+       exit 1
+   fi
+   
+   BACKUP_FILE="${DATABASE}_backup_$DATE.sql"
+   
+   echo "Starting backup of database: $DATABASE"
+   
+   mysqldump -u$DB_USER -p$DB_PASS \
+             --single-transaction \
+             --routines \
+             --triggers \
+             --events \
+             --flush-logs \
+             --master-data=2 \
+             $DATABASE > $BACKUP_DIR/$BACKUP_FILE
+   
+   if [ $? -eq 0 ]; then
+       gzip $BACKUP_DIR/$BACKUP_FILE
+       sha256sum $BACKUP_DIR/$BACKUP_FILE.gz > $BACKUP_DIR/$BACKUP_FILE.gz.sha256
+       echo "Database backup completed: $BACKUP_DIR/$BACKUP_FILE.gz"
+   else
+       echo "Database backup failed!"
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/mysql-db-backup.sh
+
+PART D: IMPLEMENT INCREMENTAL BACKUP PROCEDURES
+------------------------------------------------
+
+1. Create binary log backup script:
+   # vim /usr/local/bin/mysql-binlog-backup.sh
+   
+   #!/bin/bash
+   # MySQL binary log backup script
+   
+   BACKUP_DIR="/var/backups/mysql/incremental"
+   BINLOG_DIR="/var/lib/mysql"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   echo "Starting binary log backup at $(date)"
+   
+   # Flush logs to create a new binary log file
+   mysql -u root -p -e "FLUSH LOGS;"
+   
+   # Find binary log files that are not currently being written to
+   BINLOG_FILES=$(mysql -u root -p -e "SHOW BINARY LOGS;" | awk 'NR>1 {print $1}' | head -n -1)
+   
+   if [ -n "$BINLOG_FILES" ]; then
+       # Create backup directory for this session
+       SESSION_DIR="$BACKUP_DIR/binlog_$DATE"
+       mkdir -p $SESSION_DIR
+       
+       # Copy binary log files
+       for binlog in $BINLOG_FILES; do
+           if [ -f "$BINLOG_DIR/$binlog" ]; then
+               cp "$BINLOG_DIR/$binlog" "$SESSION_DIR/"
+               echo "Backed up: $binlog"
+           fi
+       done
+       
+       # Create index of backed up files
+       ls -la $SESSION_DIR/ > $SESSION_DIR/binlog_index.txt
+       
+       # Compress the backup
+       tar -czf $BACKUP_DIR/binlog_$DATE.tar.gz -C $BACKUP_DIR binlog_$DATE
+       rm -rf $SESSION_DIR
+       
+       echo "Binary log backup completed: $BACKUP_DIR/binlog_$DATE.tar.gz"
+       
+       # Remove old incremental backups (keep 3 days)
+       find $BACKUP_DIR -name "binlog_*.tar.gz" -mtime +3 -delete
+   else
+       echo "No binary logs to backup"
+   fi
+   
+   # chmod +x /usr/local/bin/mysql-binlog-backup.sh
+
+2. Create point-in-time backup script:
+   # vim /usr/local/bin/mysql-pit-backup.sh
+   
+   #!/bin/bash
+   # MySQL point-in-time backup preparation
+   
+   BACKUP_DIR="/var/backups/mysql"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   echo "=== Point-in-Time Backup Information ==="
+   echo "Backup Date: $(date)"
+   echo
+   
+   # Record current binary log position
+   mysql -u root -p -e "SHOW MASTER STATUS;" > $BACKUP_DIR/master_status_$DATE.txt
+   
+   # Record current binary logs
+   mysql -u root -p -e "SHOW BINARY LOGS;" > $BACKUP_DIR/binary_logs_$DATE.txt
+   
+   # Create full backup with binary log position
+   /usr/local/bin/mysql-full-backup.sh
+   
+   # Backup current binary logs
+   /usr/local/bin/mysql-binlog-backup.sh
+   
+   echo "Point-in-time backup preparation completed"
+   echo "Master status saved to: $BACKUP_DIR/master_status_$DATE.txt"
+   
+   # chmod +x /usr/local/bin/mysql-pit-backup.sh
+
+PART E: IMPLEMENT RESTORE PROCEDURES
+-------------------------------------
+
+1. Create full restore script:
+   # vim /usr/local/bin/mysql-full-restore.sh
+   
+   #!/bin/bash
+   # MySQL full restore script
+   
+   BACKUP_FILE="$1"
+   
+   if [ -z "$BACKUP_FILE" ]; then
+       echo "Usage: $0 <backup_file.sql.gz>"
+       echo "Available backups:"
+       ls -la /var/backups/mysql/full/full_backup_*.sql.gz
+       exit 1
+   fi
+   
+   if [ ! -f "$BACKUP_FILE" ]; then
+       echo "Backup file not found: $BACKUP_FILE"
+       exit 1
+   fi
+   
+   echo "WARNING: This will restore all databases from backup!"
+   echo "Backup file: $BACKUP_FILE"
+   echo "This operation will overwrite existing data!"
+   read -p "Are you sure you want to continue? (yes/no): " confirm
+   
+   if [ "$confirm" != "yes" ]; then
+       echo "Restore cancelled"
+       exit 0
+   fi
+   
+   echo "Starting full restore at $(date)"
+   
+   # Verify checksum if available
+   if [ -f "$BACKUP_FILE.sha256" ]; then
+       echo "Verifying backup integrity..."
+       if sha256sum -c "$BACKUP_FILE.sha256"; then
+           echo "Backup integrity verified"
+       else
+           echo "Backup integrity check failed!"
+           exit 1
+       fi
+   fi
+   
+   # Stop applications that might be using the database
+   echo "Stopping applications..."
+   # systemctl stop httpd  # Uncomment if web server uses the database
+   
+   # Restore from backup
+   echo "Restoring databases..."
+   zcat "$BACKUP_FILE" | mysql -u root -p
+   
+   if [ $? -eq 0 ]; then
+       echo "Full restore completed successfully at $(date)"
+       echo "$(date): Full restore completed from $BACKUP_FILE" >> /var/log/mysql-restore.log
+       
+       # Restart applications
+       # systemctl start httpd  # Uncomment if web server uses the database
+   else
+       echo "Full restore failed!"
+       echo "$(date): Full restore FAILED from $BACKUP_FILE" >> /var/log/mysql-restore.log
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/mysql-full-restore.sh
+
+2. Create database-specific restore script:
+   # vim /usr/local/bin/mysql-db-restore.sh
+   
+   #!/bin/bash
+   # MySQL database-specific restore script
+   
+   DATABASE="$1"
+   BACKUP_FILE="$2"
+   
+   if [ $# -ne 2 ]; then
+       echo "Usage: $0 <database_name> <backup_file.sql.gz>"
+       exit 1
+   fi
+   
+   if [ ! -f "$BACKUP_FILE" ]; then
+       echo "Backup file not found: $BACKUP_FILE"
+       exit 1
+   fi
+   
+   echo "Restoring database: $DATABASE"
+   echo "From backup: $BACKUP_FILE"
+   read -p "Continue? (yes/no): " confirm
+   
+   if [ "$confirm" != "yes" ]; then
+       echo "Restore cancelled"
+       exit 0
+   fi
+   
+   # Create database if it doesn't exist
+   mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS $DATABASE;"
+   
+   # Restore database
+   zcat "$BACKUP_FILE" | mysql -u root -p $DATABASE
+   
+   if [ $? -eq 0 ]; then
+       echo "Database restore completed successfully"
+   else
+       echo "Database restore failed!"
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/mysql-db-restore.sh
+
+PART F: IMPLEMENT POINT-IN-TIME RECOVERY
+-----------------------------------------
+
+1. Create point-in-time recovery script:
+   # vim /usr/local/bin/mysql-pit-recovery.sh
+   
+   #!/bin/bash
+   # MySQL point-in-time recovery script
+   
+   BACKUP_FILE="$1"
+   RECOVERY_TIME="$2"
+   
+   if [ $# -ne 2 ]; then
+       echo "Usage: $0 <backup_file.sql.gz> <recovery_time>"
+       echo "Recovery time format: 'YYYY-MM-DD HH:MM:SS'"
+       echo "Example: $0 /var/backups/mysql/full/full_backup_20240115_120000.sql.gz '2024-01-15 14:30:00'"
+       exit 1
+   fi
+   
+   if [ ! -f "$BACKUP_FILE" ]; then
+       echo "Backup file not found: $BACKUP_FILE"
+       exit 1
+   fi
+   
+   echo "=== Point-in-Time Recovery ==="
+   echo "Backup file: $BACKUP_FILE"
+   echo "Recovery time: $RECOVERY_TIME"
+   echo
+   
+   read -p "This will restore to the specified point in time. Continue? (yes/no): " confirm
+   if [ "$confirm" != "yes" ]; then
+       echo "Recovery cancelled"
+       exit 0
+   fi
+   
+   # Step 1: Restore from full backup
+   echo "Step 1: Restoring from full backup..."
+   zcat "$BACKUP_FILE" | mysql -u root -p
+   
+   if [ $? -ne 0 ]; then
+       echo "Full backup restore failed!"
+       exit 1
+   fi
+   
+   # Step 2: Apply binary logs up to recovery time
+   echo "Step 2: Applying binary logs up to $RECOVERY_TIME..."
+   
+   # Find binary log files to apply
+   BINLOG_DIR="/var/lib/mysql"
+   TEMP_DIR="/tmp/pit_recovery_$$"
+   mkdir -p $TEMP_DIR
+   
+   # Extract binary log position from backup
+   BINLOG_FILE=$(zcat "$BACKUP_FILE" | grep "CHANGE MASTER TO" | head -1 | sed -n "s/.*MASTER_LOG_FILE='\\([^']*\\)'.*/\\1/p")
+   BINLOG_POS=$(zcat "$BACKUP_FILE" | grep "CHANGE MASTER TO" | head -1 | sed -n "s/.*MASTER_LOG_POS=\\([0-9]*\\).*/\\1/p")
+   
+   echo "Starting from binary log: $BINLOG_FILE, position: $BINLOG_POS"
+   
+   # Apply binary logs
+   mysqlbinlog --start-position=$BINLOG_POS \
+               --stop-datetime="$RECOVERY_TIME" \
+               $BINLOG_DIR/mysql-bin.* > $TEMP_DIR/recovery.sql
+   
+   if [ -s $TEMP_DIR/recovery.sql ]; then
+       mysql -u root -p < $TEMP_DIR/recovery.sql
+       
+       if [ $? -eq 0 ]; then
+           echo "Point-in-time recovery completed successfully"
+           echo "$(date): PIT recovery completed to $RECOVERY_TIME" >> /var/log/mysql-restore.log
+       else
+           echo "Binary log application failed!"
+           exit 1
+       fi
+   else
+       echo "No binary log changes to apply"
+   fi
+   
+   # Cleanup
+   rm -rf $TEMP_DIR
+   
+   echo "Recovery completed to point: $RECOVERY_TIME"
+   
+   # chmod +x /usr/local/bin/mysql-pit-recovery.sh
+
+PART G: SCHEDULE AUTOMATED BACKUPS
+-----------------------------------
+
+1. Create backup scheduling script:
+   # vim /usr/local/bin/schedule-backups.sh
+   
+   #!/bin/bash
+   # Schedule MySQL backups
+   
+   # Add to crontab
+   (crontab -l 2>/dev/null; echo "# MySQL Full Backup - Daily at 2 AM") | crontab -
+   (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/mysql-full-backup.sh") | crontab -
+   
+   (crontab -l 2>/dev/null; echo "# MySQL Binary Log Backup - Every 6 hours") | crontab -
+   (crontab -l 2>/dev/null; echo "0 */6 * * * /usr/local/bin/mysql-binlog-backup.sh") | crontab -
+   
+   (crontab -l 2>/dev/null; echo "# MySQL Backup Cleanup - Weekly") | crontab -
+   (crontab -l 2>/dev/null; echo "0 3 * * 0 find /var/backups/mysql -name '*.gz' -mtime +30 -delete") | crontab -
+   
+   echo "Backup schedule configured:"
+   crontab -l | grep mysql
+   
+   # chmod +x /usr/local/bin/schedule-backups.sh
+
+2. Create backup monitoring script:
+   # vim /usr/local/bin/monitor-backups.sh
+   
+   #!/bin/bash
+   # Monitor MySQL backup status
+   
+   BACKUP_DIR="/var/backups/mysql"
+   LOG_FILE="/var/log/mysql-backup.log"
+   
+   echo "=== MySQL Backup Status ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Check latest full backup
+   LATEST_FULL=$(ls -t $BACKUP_DIR/full/full_backup_*.sql.gz 2>/dev/null | head -1)
+   if [ -n "$LATEST_FULL" ]; then
+       BACKUP_AGE=$(find "$LATEST_FULL" -mtime +1 2>/dev/null)
+       if [ -n "$BACKUP_AGE" ]; then
+           echo "WARNING: Latest full backup is older than 24 hours"
+           echo "Latest backup: $LATEST_FULL"
+       else
+           echo "✓ Recent full backup available: $(basename $LATEST_FULL)"
+       fi
+   else
+       echo "✗ No full backups found!"
+   fi
+   
+   # Check binary log backups
+   LATEST_BINLOG=$(ls -t $BACKUP_DIR/incremental/binlog_*.tar.gz 2>/dev/null | head -1)
+   if [ -n "$LATEST_BINLOG" ]; then
+       echo "✓ Latest binary log backup: $(basename $LATEST_BINLOG)"
+   else
+       echo "✗ No binary log backups found!"
+   fi
+   
+   # Check backup log for errors
+   if [ -f "$LOG_FILE" ]; then
+       ERROR_COUNT=$(grep -c "FAILED" "$LOG_FILE")
+       if [ $ERROR_COUNT -gt 0 ]; then
+           echo "⚠ $ERROR_COUNT backup failures found in log"
+           echo "Recent failures:"
+           grep "FAILED" "$LOG_FILE" | tail -5
+       else
+           echo "✓ No backup failures in log"
+       fi
+   fi
+   
+   # Check disk space
+   BACKUP_SIZE=$(du -sh $BACKUP_DIR 2>/dev/null | cut -f1)
+   echo "Backup directory size: $BACKUP_SIZE"
+   
+   # chmod +x /usr/local/bin/monitor-backups.sh
+
+PART H: TEST BACKUP AND RESTORE PROCEDURES
+-------------------------------------------
+
+1. Test full backup:
+   # /usr/local/bin/mysql-full-backup.sh
+   # ls -la /var/backups/mysql/full/
+
+2. Test database-specific backup:
+   # /usr/local/bin/mysql-db-backup.sh backup_test
+   # ls -la /var/backups/mysql/full/backup_test_*
+
+3. Test binary log backup:
+   # /usr/local/bin/mysql-binlog-backup.sh
+   # ls -la /var/backups/mysql/incremental/
+
+4. Create test data for recovery testing:
+   # mysql -u root -p backup_test
+   MariaDB> INSERT INTO customers (name, email, phone) VALUES 
+   ('Test User', 'test@recovery.com', '555-TEST');
+   MariaDB> SELECT * FROM customers WHERE name = 'Test User';
+   MariaDB> EXIT;
+
+5. Test point-in-time recovery:
+   # RECOVERY_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+   # echo "Recovery time: $RECOVERY_TIME"
+   # sleep 60
+   # mysql -u root -p backup_test -e "DELETE FROM customers WHERE name = 'Test User';"
+   # BACKUP_FILE=$(ls -t /var/backups/mysql/full/full_backup_*.sql.gz | head -1)
+   # /usr/local/bin/mysql-pit-recovery.sh "$BACKUP_FILE" "$RECOVERY_TIME"
+
+PART I: BACKUP VALIDATION AND TESTING
+---------------------------------------
+
+1. Create backup validation script:
+   # vim /usr/local/bin/validate-backup.sh
+   
+   #!/bin/bash
+   # Validate MySQL backup integrity
+   
+   BACKUP_FILE="$1"
+   
+   if [ -z "$BACKUP_FILE" ]; then
+       echo "Usage: $0 <backup_file.sql.gz>"
+       exit 1
+   fi
+   
+   if [ ! -f "$BACKUP_FILE" ]; then
+       echo "Backup file not found: $BACKUP_FILE"
+       exit 1
+   fi
+   
+   echo "=== Backup Validation ==="
+   echo "File: $BACKUP_FILE"
+   echo
+   
+   # Check file integrity
+   if [ -f "$BACKUP_FILE.sha256" ]; then
+       echo "Checking file integrity..."
+       if sha256sum -c "$BACKUP_FILE.sha256"; then
+           echo "✓ File integrity check passed"
+       else
+           echo "✗ File integrity check failed"
+           exit 1
+       fi
+   else
+       echo "⚠ No checksum file found"
+   fi
+   
+   # Check if file can be decompressed
+   echo "Testing decompression..."
+   if zcat "$BACKUP_FILE" | head -10 > /dev/null 2>&1; then
+       echo "✓ File decompresses successfully"
+   else
+       echo "✗ File decompression failed"
+       exit 1
+   fi
+   
+   # Check SQL syntax
+   echo "Checking SQL syntax..."
+   TEMP_FILE="/tmp/backup_test_$$.sql"
+   zcat "$BACKUP_FILE" | head -100 > $TEMP_FILE
+   
+   if mysql -u root -p --execute="source $TEMP_FILE" test_validation 2>/dev/null; then
+       echo "✓ SQL syntax appears valid"
+   else
+       echo "⚠ SQL syntax check inconclusive"
+   fi
+   
+   rm -f $TEMP_FILE
+   
+   # Show backup information
+   echo
+   echo "Backup Information:"
+   echo "Size: $(ls -lh $BACKUP_FILE | awk '{print $5}')"
+   echo "Date: $(ls -l $BACKUP_FILE | awk '{print $6, $7, $8}')"
+   
+   # chmod +x /usr/local/bin/validate-backup.sh
+
+2. Schedule backup validation:
+   # crontab -e
+   # Add: 0 4 * * * /usr/local/bin/validate-backup.sh $(ls -t /var/backups/mysql/full/full_backup_*.sql.gz | head -1)
+
+PART J: BACKUP DOCUMENTATION AND MONITORING
+--------------------------------------------
+
+1. Create backup documentation:
+   # vim /var/backups/mysql/BACKUP_PROCEDURES.txt
+   
+   MySQL Backup and Restore Procedures
+   ===================================
+   
+   BACKUP SCHEDULE:
+   - Full backup: Daily at 2:00 AM
+   - Binary log backup: Every 6 hours
+   - Backup retention: 7 days for full, 3 days for incremental
+   
+   BACKUP LOCATIONS:
+   - Full backups: /var/backups/mysql/full/
+   - Incremental: /var/backups/mysql/incremental/
+   - Archive: /var/backups/mysql/archive/
+   
+   RESTORE PROCEDURES:
+   1. Full restore: /usr/local/bin/mysql-full-restore.sh <backup_file>
+   2. Database restore: /usr/local/bin/mysql-db-restore.sh <db> <backup_file>
+   3. Point-in-time: /usr/local/bin/mysql-pit-recovery.sh <backup_file> <time>
+   
+   MONITORING:
+   - Check backup status: /usr/local/bin/monitor-backups.sh
+   - Validate backups: /usr/local/bin/validate-backup.sh <backup_file>
+   - Backup logs: /var/log/mysql-backup.log
+   
+   EMERGENCY CONTACTS:
+   - Database Administrator: admin@example.com
+   - System Administrator: sysadmin@example.com
+
+2. Test all backup procedures:
+   # /usr/local/bin/schedule-backups.sh
+   # /usr/local/bin/monitor-backups.sh
+   # crontab -l | grep mysql
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# tail -f /var/log/mysql-backup.log
+# tail -f /var/log/mysql-restore.log
+# mysql -u root -p -e "SHOW MASTER STATUS;"
+# mysql -u root -p -e "SHOW BINARY LOGS;"
+# du -sh /var/backups/mysql/*
+# ls -la /var/backups/mysql/full/
+
+EXPECTED RESULTS:
+-----------------
+- Automated full and incremental backups working
+- Backup validation and integrity checking functional
+- Full restore procedures operational
+- Point-in-time recovery capability available
+- Backup monitoring and alerting active
+
+VALIDATION CHECKLIST:
+---------------------
+□ Full backup script working
+□ Incremental backup script working
+□ Restore procedures tested
+□ Point-in-time recovery functional
+□ Backup scheduling configured
+□ Backup validation working
+□ Monitoring scripts operational
+□ Documentation complete
+
+CLEANUP:
+--------
+# crontab -e  # Remove backup scheduling entries
+# rm /usr/local/bin/mysql-*-backup.sh
+# rm /usr/local/bin/mysql-*-restore.sh
+# rm /usr/local/bin/mysql-pit-*.sh
+# rm /usr/local/bin/schedule-backups.sh
+# rm /usr/local/bin/monitor-backups.sh
+# rm /usr/local/bin/validate-backup.sh

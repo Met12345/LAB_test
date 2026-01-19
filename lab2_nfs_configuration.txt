@@ -1,0 +1,183 @@
+RHCE RH254 HANDS-ON LAB: NETWORK FILE SYSTEM (NFS) SERVER AND CLIENT
+====================================================================
+
+LAB OBJECTIVE:
+Configure NFS server to share directories and NFS client to mount shared filesystems
+
+PREREQUISITES:
+- RHEL 7/8 systems with root access
+- Network connectivity between systems
+- Basic understanding of file permissions
+
+LAB SCENARIO:
+Configure server1 as NFS server sharing /shared and /home directories.
+Configure server2 as NFS client mounting these shares.
+
+EQUIPMENT NEEDED:
+- 2 RHEL systems (server1: 192.168.1.10, server2: 192.168.1.20)
+- Additional storage for shared directories
+
+LAB TASKS:
+
+PART A: CONFIGURE NFS SERVER (server1)
+---------------------------------------
+
+1. Install NFS packages:
+   # yum install nfs-utils -y
+   # systemctl enable nfs-server rpcbind
+
+               to 
+
+   # systemctl enable --now nfs-server
+   # systemctl enable --now rpcbind.socket
+
+
+2. Create shared directories:
+   # mkdir -p /shared/public
+   # mkdir -p /shared/private
+   # chmod 755 /shared/public
+   # chmod 750 /shared/private
+   # chown nfsnobody:nfsnobody /shared/public
+                  to 
+
+   chown nobody:nobody /shared/public
+
+3. Configure NFS exports (/etc/exports):
+   # vim /etc/exports
+   
+   Add these lines:
+   /shared/public 20.192.254.212(rw,sync,no_root_squash) use your server 2  ip
+   /shared/private 20.192.254.212(rw,sync,root_squash)   use your server 2 ip
+   /home 20.192.254.212(rw,sync,no_root_squash)        use your server 2 ip
+
+4. Configure firewall:
+   
+   #install firewall 
+   
+   yum install firewalld
+   systemctl enable --now firewalld
+
+
+   # firewall-cmd --permanent --add-service=nfs
+   # firewall-cmd --permanent --add-service=rpc-bind
+   # firewall-cmd --permanent --add-service=mountd
+   # firewall-cmd --reload
+
+5. Start NFS services:
+   
+   # systemctl status nfs-server
+
+6. Export the filesystems:
+   # exportfs -av
+   # exportfs -v
+
+PART B: CONFIGURE NFS CLIENT (server2)
+---------------------------------------
+
+1. Install NFS client packages:
+   # yum install nfs-utils -y
+   # systemctl enable rpcbind
+               to 
+
+   # systemctl enable --now rpcbind.socket
+
+
+2. Create mount points:
+   # mkdir -p /mnt/shared-public
+   # mkdir -p /mnt/shared-private
+   # mkdir -p /mnt/nfs-home
+
+3. Test NFS connectivity:
+   # showmount -e 20.192.240.157 use your severver 1 ip 
+   # rpcinfo -p 20.192.240.157  use your severver 1 ip 
+
+4. Mount NFS shares manually:
+   # mount -t nfs 20.192.240.157:/shared/public /mnt/shared-public  (use your severver 1 ip)
+   # mount -t nfs 20.192.240.157:/shared/private /mnt/shared-private  (use your severver 1 ip)
+   # mount -t nfs 20.192.240.157:/home /mnt/nfs-home  (use your severver 1 ip)
+
+5. Configure persistent mounts (/etc/fstab):
+   # vim /etc/fstab
+   
+   Add these lines:
+   20.192.240.157:/shared/public /mnt/shared-public nfs defaults 0 0    (use your severver 1 ip)
+   20.192.240.157:/shared/private /mnt/shared-private nfs defaults 0 0  (use your severver 1 ip)
+   20.192.240.157:/home /mnt/nfs-home nfs defaults 0 0                  (use your severver 1 ip)
+
+6. Test fstab configuration:
+   # umount /mnt/shared-public /mnt/shared-private /mnt/nfs-home
+   # mount -a
+   # df -h
+
+PART C: TESTING AND VERIFICATION
+---------------------------------
+
+1. Test write permissions on server2:
+   # echo "Test file from client" > /mnt/shared-public/test.txt
+   # ls -la /mnt/shared-public/
+
+2. Verify on server1:
+   # ls -la /shared/public/
+   # cat /shared/public/test.txt
+
+3. Test root squash behavior:
+   # touch /mnt/shared-private/root-test.txt
+   # ls -la /mnt/shared-private/root-test.txt
+
+4. Monitor NFS statistics:
+   # nfsstat -s (on server 1)
+   # nfsstat -c (on server 2)
+
+5. Test NFS performance: 
+   # time dd if=/dev/zero of=/mnt/shared-public/testfile bs=1M count=100 (on server 2)
+
+PART D: ADVANCED CONFIGURATION
+-------------------------------
+
+1. Configure NFS with Kerberos security in server 1:
+   # vim /etc/exports
+   /shared/secure 20.192.254.212(rw,sync,sec=krb5p)  (Use server2 ip )
+
+2. Set up AutoFS for automatic mounting server 2:
+   # yum install autofs -y
+   # vim /etc/auto.master
+   /mnt/auto /etc/auto.nfs --timeout=60
+
+   # vim /etc/auto.nfs
+   shared-public -rw,soft,intr 20.192.240.157:/shared/public  (Use server1 ip )
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# exportfs -v
+# showmount -e localhost
+# rpcinfo -p
+# systemctl status nfs-server
+# tail -f /var/log/messages
+# netstat -tulpn | grep :2049
+
+EXPECTED RESULTS:
+-----------------
+- NFS server exports directories successfully
+- Client can mount and access shared directories
+- File operations work correctly across network
+- Mounts persist after reboot
+
+VALIDATION CHECKLIST:
+---------------------
+□ NFS server service running   done
+□ Exports configured correctly  done
+□ Firewall allows NFS traffic   Done
+□ Client can mount shares       Done 
+□ File permissions work as expected  Done
+□ Persistent mounts in /etc/fstab    Done
+
+CLEANUP:
+--------
+# umount /mnt/shared-public /mnt/shared-private /mnt/nfs-home
+# systemctl stop nfs-server
+# systemctl disable nfs-server
+# rm /etc/exports
+
+
+
+done

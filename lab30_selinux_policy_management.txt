@@ -1,0 +1,571 @@
+RHCE RH254 HANDS-ON LAB: SELINUX POLICY MANAGEMENT
+===================================================
+
+LAB OBJECTIVE:
+Configure and manage SELinux policies, contexts, and booleans for enhanced system security
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- SELinux enabled system
+- Understanding of SELinux concepts
+
+LAB SCENARIO:
+Configure SELinux policies for web server, database, and custom applications while maintaining system security.
+
+EQUIPMENT NEEDED:
+- RHEL system with SELinux enabled
+- Web server and database services
+- Custom applications for policy testing
+
+LAB TASKS:
+
+PART A: UNDERSTAND SELINUX STATUS AND MODES
+--------------------------------------------
+
+1. Check current SELinux status:
+   # getenforce
+   # sestatus
+   # cat /etc/selinux/config
+
+2. View SELinux mode and policy:
+   # sestatus -v
+   # seinfo --stats
+   # semanage login -l
+
+3. Check SELinux denials:
+   # ausearch -m AVC -ts recent
+   # sealert -a /var/log/audit/audit.log
+
+PART B: CONFIGURE SELINUX MODES
+--------------------------------
+
+1. Set SELinux to enforcing mode:
+   # setenforce 1
+   # getenforce
+
+2. Set SELinux to permissive mode (for testing):
+   # setenforce 0
+   # getenforce
+
+3. Configure permanent SELinux mode:
+   # vim /etc/selinux/config
+   
+   SELINUX=enforcing
+   SELINUXTYPE=targeted
+
+4. Reboot to apply permanent changes:
+   # reboot
+   # sestatus
+
+PART C: MANAGE SELINUX CONTEXTS
+--------------------------------
+
+1. View file contexts:
+   # ls -Z /var/www/html/
+   # ls -Z /etc/httpd/
+   # ls -Z /home/
+
+2. View process contexts:
+   # ps auxZ | grep httpd
+   # ps auxZ | grep mysqld
+   # ps auxZ | grep sshd
+
+3. Set file contexts manually:
+   # chcon -t httpd_exec_t /usr/local/bin/webapp
+   # chcon -R -t httpd_config_t /etc/webapp/
+
+4. Restore default contexts:
+   # restorecon /usr/local/bin/webapp
+   # restorecon -R /var/www/html/
+
+PART D: CONFIGURE SELINUX POLICIES FOR WEB SERVER
+--------------------------------------------------
+
+1. Install web server and check contexts:
+   # yum install httpd -y
+   # systemctl start httpd
+   # ps auxZ | grep httpd
+
+2. Create custom web directory:
+   # mkdir -p /srv/webapp
+   # echo "<h1>Custom Web App</h1>" > /srv/webapp/index.html
+
+3. Set proper SELinux context:
+   # semanage fcontext -a -t httpd_exec_t "/srv/webapp(/.*)?"
+   # restorecon -R /srv/webapp
+   # ls -Z /srv/webapp/
+
+4. Configure Apache to use custom directory:
+   # vim /etc/httpd/conf.d/webapp.conf
+   
+   <Directory "/srv/webapp">
+       Options Indexes FollowSymLinks
+       AllowOverride None
+       Require all granted
+   </Directory>
+   
+   Alias /webapp /srv/webapp
+
+5. Test web server access:
+   # systemctl restart httpd
+   # curl http://localhost/webapp/
+
+PART E: CONFIGURE SELINUX BOOLEANS
+-----------------------------------
+
+1. List available SELinux booleans:
+   # getsebool -a | head -20
+   # semanage boolean -l | head -20
+
+2. Configure web server booleans:
+   # setsebool -P httpd_can_network_connect on
+   # setsebool -P httpd_can_network_connect_db on
+   # setsebool -P httpd_enable_homedirs on
+   # setsebool -P httpd_execmem on
+
+3. Configure database booleans:
+   # setsebool -P mysql_connect_any on
+   # setsebool -P allow_mysqld_connect on
+
+4. Configure SSH booleans:
+   # setsebool -P ssh_chroot_rw_homedirs on
+   # setsebool -P ssh_sysadm_login on
+
+5. Verify boolean settings:
+   # getsebool httpd_can_network_connect
+   # getsebool mysql_connect_any
+
+PART F: CREATE CUSTOM SELINUX POLICIES
+---------------------------------------
+
+1. Create custom application:
+   # mkdir -p /opt/customapp
+   # vim /opt/customapp/myapp.py
+   
+   #!/usr/bin/python3
+   import socket
+   import time
+   
+   def main():
+       # Create socket server
+       sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+       sock.bind(('localhost', 9999))
+       sock.listen(5)
+       
+       print("Custom app listening on port 9999")
+       
+       while True:
+           conn, addr = sock.accept()
+           conn.send(b"Hello from custom app\n")
+           conn.close()
+   
+   if __name__ == "__main__":
+       main()
+   
+   # chmod +x /opt/customapp/myapp.py
+
+2. Run application and check for denials:
+   # /opt/customapp/myapp.py &
+   # ausearch -m AVC -ts recent
+
+3. Generate SELinux policy module:
+   # ausearch -m AVC -ts recent | audit2allow -M mycustomapp
+   # cat mycustomapp.te
+
+4. Install custom policy module:
+   # semodule -i mycustomapp.pp
+   # semodule -l | grep mycustomapp
+
+5. Create systemd service for custom app:
+   # vim /etc/systemd/system/customapp.service
+   
+   [Unit]
+   Description=Custom Application
+   After=network.target
+   
+   [Service]
+   Type=simple
+   ExecStart=/opt/customapp/myapp.py
+   Restart=always
+   User=nobody
+   Group=nobody
+   
+   [Install]
+   WantedBy=multi-user.target
+
+6. Set SELinux context for service:
+   # semanage fcontext -a -t bin_t "/opt/customapp/myapp.py"
+   # restorecon /opt/customapp/myapp.py
+   # systemctl daemon-reload
+   # systemctl start customapp
+
+PART G: MANAGE SELINUX USERS AND ROLES
+---------------------------------------
+
+1. List SELinux users:
+   # semanage user -l
+
+2. Create custom SELinux user:
+   # semanage user -a -R "staff_r system_r" -r s0-s0:c0.c1023 webapp_u
+
+3. Map Linux user to SELinux user:
+   # useradd webdev
+   # semanage login -a -s webapp_u webdev
+
+4. Configure user roles:
+   # semanage user -m -R "staff_r webadm_r" webapp_u
+
+5. Test user context:
+   # su - webdev
+   $ id -Z
+   $ exit
+
+PART H: CONFIGURE SELINUX FOR DATABASE
+---------------------------------------
+
+1. Install and start MariaDB:
+   # yum install mariadb-server -y
+   # systemctl start mariadb
+   # ps auxZ | grep mysqld
+
+2. Create custom database directory:
+   # mkdir -p /srv/mysql-data
+   # chown mysql:mysql /srv/mysql-data
+
+3. Set SELinux context for database:
+   # semanage fcontext -a -t mysqld_db_t "/srv/mysql-data(/.*)?"
+   # restorecon -R /srv/mysql-data
+   # ls -Z /srv/mysql-data/
+
+4. Configure MariaDB to use custom directory:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   datadir = /srv/mysql-data
+   socket = /srv/mysql-data/mysql.sock
+   
+   [client]
+   socket = /srv/mysql-data/mysql.sock
+
+5. Initialize database in new location:
+   # systemctl stop mariadb
+   # mysql_install_db --datadir=/srv/mysql-data --user=mysql
+   # systemctl start mariadb
+
+PART I: TROUBLESHOOT SELINUX ISSUES
+------------------------------------
+
+1. Create SELinux troubleshooting script:
+   # vim /usr/local/bin/selinux-troubleshoot.sh
+   
+   #!/bin/bash
+   # SELinux troubleshooting script
+   
+   echo "=== SELinux Troubleshooting Report ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Check SELinux status
+   echo "SELinux Status:"
+   sestatus
+   echo
+   
+   # Check recent denials
+   echo "Recent SELinux Denials (last 10):"
+   ausearch -m AVC -ts recent | tail -20
+   echo
+   
+   # Check for common issues
+   echo "Common SELinux Issues Check:"
+   
+   # Check web server contexts
+   echo "Web server file contexts:"
+   ls -Z /var/www/html/ | head -5
+   
+   # Check database contexts
+   echo "Database file contexts:"
+   ls -Z /var/lib/mysql/ | head -5
+   
+   # Check process contexts
+   echo "Process contexts:"
+   ps auxZ | grep -E "(httpd|mysqld|sshd)" | head -5
+   
+   # Check boolean settings
+   echo "Critical boolean settings:"
+   getsebool httpd_can_network_connect
+   getsebool mysql_connect_any
+   getsebool ssh_sysadm_login
+   
+   # chmod +x /usr/local/bin/selinux-troubleshoot.sh
+
+2. Create SELinux denial analyzer:
+   # vim /usr/local/bin/analyze-selinux-denials.sh
+   
+   #!/bin/bash
+   # Analyze SELinux denials and suggest fixes
+   
+   AUDIT_LOG="/var/log/audit/audit.log"
+   
+   echo "=== SELinux Denial Analysis ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Get recent denials
+   DENIALS=$(ausearch -m AVC -ts recent 2>/dev/null)
+   
+   if [ -n "$DENIALS" ]; then
+       echo "Recent SELinux denials found:"
+       echo "$DENIALS" | grep "denied"
+       echo
+       
+       echo "Suggested policy modules:"
+       echo "$DENIALS" | audit2allow -M suggested_policy 2>/dev/null
+       
+       if [ -f "suggested_policy.te" ]; then
+           echo "Generated policy module:"
+           cat suggested_policy.te
+           echo
+           echo "To install this policy:"
+           echo "semodule -i suggested_policy.pp"
+       fi
+   else
+       echo "No recent SELinux denials found"
+   fi
+   
+   # chmod +x /usr/local/bin/analyze-selinux-denials.sh
+
+3. Create context restoration script:
+   # vim /usr/local/bin/restore-selinux-contexts.sh
+   
+   #!/bin/bash
+   # Restore SELinux contexts for common directories
+   
+   echo "Restoring SELinux contexts..."
+   
+   # Web server contexts
+   echo "Restoring web server contexts..."
+   restorecon -R /var/www/
+   restorecon -R /etc/httpd/
+   
+   # Database contexts
+   echo "Restoring database contexts..."
+   restorecon -R /var/lib/mysql/
+   
+   # SSH contexts
+   echo "Restoring SSH contexts..."
+   restorecon -R /etc/ssh/
+   restorecon -R /home/*/.ssh/
+   
+   # System contexts
+   echo "Restoring system contexts..."
+   restorecon -R /etc/
+   restorecon -R /usr/local/bin/
+   
+   echo "Context restoration completed"
+   
+   # chmod +x /usr/local/bin/restore-selinux-contexts.sh
+
+PART J: MONITOR SELINUX ACTIVITY
+---------------------------------
+
+1. Create SELinux monitoring script:
+   # vim /usr/local/bin/monitor-selinux.sh
+   
+   #!/bin/bash
+   # Monitor SELinux activity
+   
+   LOG_FILE="/var/log/selinux-monitor.log"
+   
+   {
+       echo "=== SELinux Monitor - $(date) ==="
+       
+       # Check for new denials
+       DENIAL_COUNT=$(ausearch -m AVC -ts today 2>/dev/null | grep -c "denied")
+       echo "Denials today: $DENIAL_COUNT"
+       
+       # Check mode
+       echo "Current mode: $(getenforce)"
+       
+       # Check policy version
+       echo "Policy version: $(sestatus | grep "Policy version" | awk '{print $3}')"
+       
+       # Check loaded modules
+       MODULE_COUNT=$(semodule -l | wc -l)
+       echo "Loaded modules: $MODULE_COUNT"
+       
+       echo "----------------------------------------"
+       
+   } >> $LOG_FILE
+   
+   # Alert if too many denials
+   if [ $DENIAL_COUNT -gt 50 ]; then
+       echo "High SELinux denial count: $DENIAL_COUNT" | \
+       mail -s "SELinux Alert" admin@example.com
+   fi
+   
+   # chmod +x /usr/local/bin/monitor-selinux.sh
+
+2. Create SELinux audit log analyzer:
+   # vim /usr/local/bin/selinux-audit-summary.sh
+   
+   #!/bin/bash
+   # SELinux audit log summary
+   
+   AUDIT_LOG="/var/log/audit/audit.log"
+   
+   echo "=== SELinux Audit Summary ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Count denials by service
+   echo "Denials by service:"
+   ausearch -m AVC -ts today 2>/dev/null | \
+   grep "denied" | \
+   sed 's/.*comm="\([^"]*\)".*/\1/' | \
+   sort | uniq -c | sort -nr | head -10
+   
+   echo
+   echo "Denials by target type:"
+   ausearch -m AVC -ts today 2>/dev/null | \
+   grep "denied" | \
+   sed 's/.*tcontext=.*:\([^:]*\):.*/\1/' | \
+   sort | uniq -c | sort -nr | head -10
+   
+   echo
+   echo "Most active source contexts:"
+   ausearch -m AVC -ts today 2>/dev/null | \
+   grep "denied" | \
+   sed 's/.*scontext=\([^[:space:]]*\).*/\1/' | \
+   sort | uniq -c | sort -nr | head -10
+   
+   # chmod +x /usr/local/bin/selinux-audit-summary.sh
+
+PART K: CONFIGURE SELINUX FOR CUSTOM PORTS
+-------------------------------------------
+
+1. Configure custom port for web service:
+   # semanage port -a -t http_port_t -p tcp 8080
+   # semanage port -l | grep http_port_t
+
+2. Configure custom port for database:
+   # semanage port -a -t mysqld_port_t -p tcp 3307
+   # semanage port -l | grep mysqld_port_t
+
+3. Test custom port access:
+   # vim /etc/httpd/conf.d/custom-port.conf
+   Listen 8080
+   
+   # systemctl restart httpd
+   # curl http://localhost:8080
+
+PART L: BACKUP AND RESTORE SELINUX POLICIES
+--------------------------------------------
+
+1. Create SELinux backup script:
+   # vim /usr/local/bin/backup-selinux.sh
+   
+   #!/bin/bash
+   # Backup SELinux configuration
+   
+   BACKUP_DIR="/var/backups/selinux"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   mkdir -p $BACKUP_DIR
+   
+   echo "Backing up SELinux configuration..."
+   
+   # Backup policy modules
+   semodule -l > $BACKUP_DIR/modules_$DATE.txt
+   
+   # Backup file contexts
+   semanage fcontext -l > $BACKUP_DIR/fcontexts_$DATE.txt
+   
+   # Backup port contexts
+   semanage port -l > $BACKUP_DIR/ports_$DATE.txt
+   
+   # Backup boolean settings
+   getsebool -a > $BACKUP_DIR/booleans_$DATE.txt
+   
+   # Backup user mappings
+   semanage login -l > $BACKUP_DIR/users_$DATE.txt
+   
+   # Backup SELinux config
+   cp /etc/selinux/config $BACKUP_DIR/selinux_config_$DATE.txt
+   
+   echo "SELinux backup completed: $BACKUP_DIR"
+   
+   # chmod +x /usr/local/bin/backup-selinux.sh
+
+2. Schedule SELinux monitoring:
+   # crontab -e
+   # Add: */30 * * * * /usr/local/bin/monitor-selinux.sh
+   # Add: 0 2 * * * /usr/local/bin/backup-selinux.sh
+
+PART M: TESTING AND VALIDATION
+-------------------------------
+
+1. Test SELinux configuration:
+   # /usr/local/bin/selinux-troubleshoot.sh
+
+2. Test web server with SELinux:
+   # curl http://localhost/webapp/
+   # systemctl status httpd
+
+3. Test database with SELinux:
+   # systemctl status mariadb
+   # mysql -e "SELECT 1;"
+
+4. Test custom application:
+   # systemctl status customapp
+   # telnet localhost 9999
+
+5. Analyze SELinux activity:
+   # /usr/local/bin/analyze-selinux-denials.sh
+   # /usr/local/bin/selinux-audit-summary.sh
+
+6. Backup configuration:
+   # /usr/local/bin/backup-selinux.sh
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# getenforce
+# sestatus -v
+# ausearch -m AVC -ts recent
+# sealert -a /var/log/audit/audit.log
+# semanage fcontext -l | grep httpd
+# getsebool -a | grep httpd
+# restorecon -R /path/to/directory
+
+EXPECTED RESULTS:
+-----------------
+- SELinux enforcing mode active
+- Web server and database working with SELinux
+- Custom policies installed and functional
+- File contexts properly set
+- Booleans configured appropriately
+- Monitoring and alerting operational
+
+VALIDATION CHECKLIST:
+---------------------
+□ SELinux in enforcing mode
+□ Web server contexts correct
+□ Database contexts configured
+□ Custom policies installed
+□ Booleans set appropriately
+□ Port contexts configured
+□ Monitoring scripts working
+□ Backup procedures functional
+
+CLEANUP:
+--------
+# semodule -r mycustomapp
+# systemctl stop customapp
+# systemctl disable customapp
+# rm /etc/systemd/system/customapp.service
+# rm -rf /opt/customapp
+# rm /usr/local/bin/selinux-*.sh
+# rm /usr/local/bin/analyze-*.sh
+# rm /usr/local/bin/restore-*.sh
+# rm /usr/local/bin/monitor-*.sh
+# rm /usr/local/bin/backup-*.sh
+# crontab -e  # Remove monitoring entries

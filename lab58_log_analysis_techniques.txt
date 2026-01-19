@@ -1,0 +1,717 @@
+RHCE RH254 HANDS-ON LAB: LOG ANALYSIS TECHNIQUES
+===============================================
+
+LAB OBJECTIVE:
+Master comprehensive log analysis techniques including centralized logging, automated log parsing, pattern recognition, security event detection, and performance correlation using native Linux tools and advanced analysis methods
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of system logging concepts
+- Knowledge of regular expressions and text processing
+- Familiarity with journald and rsyslog
+
+LAB SCENARIO:
+Analyze system logs to identify security incidents, performance issues, system errors, and operational patterns using automated tools and manual analysis techniques for enterprise troubleshooting and monitoring.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20) - Primary log analysis system
+- Log sources from multiple systems
+- Log analysis tools and utilities
+- Pattern recognition databases
+
+LAB TASKS:
+
+PART A: LOG ANALYSIS FRAMEWORK
+-------------------------------
+
+1. Create log analysis structure:
+   # mkdir -p /opt/log-analysis/{scripts,logs,reports,patterns,archives}
+   # mkdir -p /opt/log-analysis/analysis/{security,performance,errors,trends}
+
+2. Create master log analyzer:
+   # vim /opt/log-analysis/scripts/log-analyzer.sh
+   
+   #!/bin/bash
+   #
+   # Master Log Analysis Tool
+   #
+   
+   LOG_ANALYSIS_ROOT="/opt/log-analysis"
+   ANALYSIS_LOG="$LOG_ANALYSIS_ROOT/logs/analysis.log"
+   
+   log_message() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$ANALYSIS_LOG"
+   }
+   
+   # Gather system logs
+   gather_system_logs() {
+       local days_back="${1:-7}"
+       
+       log_message "INFO" "Gathering system logs for last $days_back days"
+       
+       # Journal logs
+       journalctl --since="$days_back days ago" --no-pager > "$LOG_ANALYSIS_ROOT/logs/journal-${days_back}days.log"
+       
+       # System logs
+       find /var/log -name "*.log" -mtime -"$days_back" -exec cp {} "$LOG_ANALYSIS_ROOT/logs/" \;
+       
+       # Security logs
+       cp /var/log/secure "$LOG_ANALYSIS_ROOT/logs/secure.log" 2>/dev/null
+       cp /var/log/audit/audit.log "$LOG_ANALYSIS_ROOT/logs/audit.log" 2>/dev/null
+       
+       # Application logs
+       cp /var/log/httpd/* "$LOG_ANALYSIS_ROOT/logs/" 2>/dev/null
+       cp /var/log/nginx/* "$LOG_ANALYSIS_ROOT/logs/" 2>/dev/null
+       
+       log_message "INFO" "Log gathering completed"
+   }
+   
+   # Basic log statistics
+   generate_log_statistics() {
+       log_message "INFO" "Generating log statistics"
+       
+       local stats_file="$LOG_ANALYSIS_ROOT/reports/log-statistics.txt"
+       
+       cat > "$stats_file" << EOF
+   Log Analysis Statistics
+   Generated: $(date)
+   
+   EOF
+       
+       # Count log entries by type
+       echo "=== Log Entry Counts ===" >> "$stats_file"
+       for logfile in "$LOG_ANALYSIS_ROOT/logs"/*.log; do
+           if [ -f "$logfile" ]; then
+               local count=$(wc -l < "$logfile")
+               local filename=$(basename "$logfile")
+               echo "$filename: $count lines" >> "$stats_file"
+           fi
+       done
+       
+       # Error counts
+       echo -e "\n=== Error Counts ===" >> "$stats_file"
+       grep -i error "$LOG_ANALYSIS_ROOT/logs"/*.log 2>/dev/null | wc -l | xargs echo "Total errors:" >> "$stats_file"
+       grep -i warning "$LOG_ANALYSIS_ROOT/logs"/*.log 2>/dev/null | wc -l | xargs echo "Total warnings:" >> "$stats_file"
+       
+       log_message "INFO" "Log statistics generated: $stats_file"
+   }
+
+3. Create log pattern database:
+   # vim /opt/log-analysis/patterns/security-patterns.txt
+   
+   # Security Log Patterns
+   
+   # Failed login attempts
+   PATTERN_FAILED_LOGIN="Failed password for.*from.*port"
+   PATTERN_INVALID_USER="Invalid user.*from"
+   PATTERN_ROOT_LOGIN="Accepted password for root"
+   
+   # Suspicious activities
+   PATTERN_SUDO_FAIL="sudo.*authentication failure"
+   PATTERN_SU_FAIL="su.*authentication failure"
+   PATTERN_PRIVILEGE_ESCALATION="COMMAND=.*sudo"
+   
+   # Network security
+   PATTERN_PORT_SCAN="Connection from.*on illegal port"
+   PATTERN_FIREWALL_DROP="DROPPED.*SRC="
+   PATTERN_INTRUSION="possible break-in attempt"
+   
+   # vim /opt/log-analysis/patterns/performance-patterns.txt
+   
+   # Performance Log Patterns
+   
+   # High load indicators
+   PATTERN_HIGH_LOAD="load average.*[5-9]\.[0-9]"
+   PATTERN_OOM_KILLER="Out of memory.*Killed process"
+   PATTERN_DISK_FULL="No space left on device"
+   
+   # Service issues
+   PATTERN_SERVICE_TIMEOUT="timeout.*service"
+   PATTERN_CONNECTION_REFUSED="Connection refused"
+   PATTERN_SLOW_QUERY="slow query"
+
+PART B: AUTOMATED LOG PARSING
+------------------------------
+
+1. Create log parser:
+   # vim /opt/log-analysis/scripts/log-parser.sh
+   
+   #!/bin/bash
+   #
+   # Automated Log Parser
+   #
+   
+   # Parse security events
+   parse_security_events() {
+       local logfile="${1:-$LOG_ANALYSIS_ROOT/logs/secure.log}"
+       local output_file="$LOG_ANALYSIS_ROOT/analysis/security/security-events.txt"
+       
+       log_message "INFO" "Parsing security events from $logfile"
+       
+       cat > "$output_file" << EOF
+   Security Event Analysis
+   Generated: $(date)
+   Source: $logfile
+   
+   EOF
+       
+       # Failed login attempts
+       echo "=== Failed Login Attempts ===" >> "$output_file"
+       grep -i "failed password" "$logfile" | head -20 >> "$output_file"
+       
+       # Invalid users
+       echo -e "\n=== Invalid User Attempts ===" >> "$output_file"
+       grep -i "invalid user" "$logfile" | head -20 >> "$output_file"
+       
+       # Root login attempts
+       echo -e "\n=== Root Login Events ===" >> "$output_file"
+       grep -i "root.*password" "$logfile" | head -10 >> "$output_file"
+       
+       # Sudo activities
+       echo -e "\n=== Sudo Activities ===" >> "$output_file"
+       grep -i "sudo" "$logfile" | head -20 >> "$output_file"
+       
+       log_message "INFO" "Security event parsing completed: $output_file"
+   }
+   
+   # Parse system errors
+   parse_system_errors() {
+       local logfile="${1:-$LOG_ANALYSIS_ROOT/logs/messages.log}"
+       local output_file="$LOG_ANALYSIS_ROOT/analysis/errors/system-errors.txt"
+       
+       log_message "INFO" "Parsing system errors from $logfile"
+       
+       cat > "$output_file" << EOF
+   System Error Analysis
+   Generated: $(date)
+   Source: $logfile
+   
+   EOF
+       
+       # Critical errors
+       echo "=== Critical Errors ===" >> "$output_file"
+       grep -i "critical\|fatal\|panic" "$logfile" | head -20 >> "$output_file"
+       
+       # Hardware errors
+       echo -e "\n=== Hardware Errors ===" >> "$output_file"
+       grep -i "hardware\|disk\|memory" "$logfile" | grep -i error | head -20 >> "$output_file"
+       
+       # Service failures
+       echo -e "\n=== Service Failures ===" >> "$output_file"
+       grep -i "failed\|failure" "$logfile" | grep -i service | head -20 >> "$output_file"
+       
+       log_message "INFO" "System error parsing completed: $output_file"
+   }
+   
+   # Parse performance issues
+   parse_performance_issues() {
+       local logfile="${1:-$LOG_ANALYSIS_ROOT/logs/journal-7days.log}"
+       local output_file="$LOG_ANALYSIS_ROOT/analysis/performance/performance-issues.txt"
+       
+       log_message "INFO" "Parsing performance issues from $logfile"
+       
+       cat > "$output_file" << EOF
+   Performance Issue Analysis
+   Generated: $(date)
+   Source: $logfile
+   
+   EOF
+       
+       # High load events
+       echo "=== High Load Events ===" >> "$output_file"
+       grep -i "load average" "$logfile" | head -10 >> "$output_file"
+       
+       # Memory issues
+       echo -e "\n=== Memory Issues ===" >> "$output_file"
+       grep -i "out of memory\|oom\|killed process" "$logfile" | head -10 >> "$output_file"
+       
+       # Disk issues
+       echo -e "\n=== Disk Issues ===" >> "$output_file"
+       grep -i "no space\|disk full\|i/o error" "$logfile" | head -10 >> "$output_file"
+       
+       log_message "INFO" "Performance issue parsing completed: $output_file"
+   }
+2. Create advanced pattern matcher:
+   # vim /opt/log-analysis/scripts/pattern-matcher.sh
+   
+   #!/bin/bash
+   #
+   # Advanced Pattern Matching Tool
+   #
+   
+   # Load pattern definitions
+   load_patterns() {
+       local pattern_file="$1"
+       
+       if [ -f "$pattern_file" ]; then
+           source "$pattern_file"
+           log_message "INFO" "Loaded patterns from: $pattern_file"
+       else
+           log_message "ERROR" "Pattern file not found: $pattern_file"
+           return 1
+       fi
+   }
+   
+   # Search for security patterns
+   search_security_patterns() {
+       local logfile="$1"
+       local output_file="$LOG_ANALYSIS_ROOT/analysis/security/pattern-matches.txt"
+       
+       log_message "INFO" "Searching for security patterns in $logfile"
+       
+       # Load security patterns
+       load_patterns "$LOG_ANALYSIS_ROOT/patterns/security-patterns.txt"
+       
+       cat > "$output_file" << EOF
+   Security Pattern Analysis
+   Generated: $(date)
+   Source: $logfile
+   
+   EOF
+       
+       # Search for each pattern
+       echo "=== Failed Login Pattern Matches ===" >> "$output_file"
+       grep -E "$PATTERN_FAILED_LOGIN" "$logfile" | wc -l | xargs echo "Count:" >> "$output_file"
+       grep -E "$PATTERN_FAILED_LOGIN" "$logfile" | head -5 >> "$output_file"
+       
+       echo -e "\n=== Invalid User Pattern Matches ===" >> "$output_file"
+       grep -E "$PATTERN_INVALID_USER" "$logfile" | wc -l | xargs echo "Count:" >> "$output_file"
+       grep -E "$PATTERN_INVALID_USER" "$logfile" | head -5 >> "$output_file"
+       
+       echo -e "\n=== Root Login Pattern Matches ===" >> "$output_file"
+       grep -E "$PATTERN_ROOT_LOGIN" "$logfile" | wc -l | xargs echo "Count:" >> "$output_file"
+       grep -E "$PATTERN_ROOT_LOGIN" "$logfile" | head -5 >> "$output_file"
+       
+       log_message "INFO" "Security pattern search completed: $output_file"
+   }
+   
+   # Custom pattern search
+   custom_pattern_search() {
+       local logfile="$1"
+       local pattern="$2"
+       local description="$3"
+       
+       log_message "INFO" "Searching for custom pattern: $description"
+       
+       local matches=$(grep -c "$pattern" "$logfile" 2>/dev/null)
+       echo "Pattern: $description" >> "$LOG_ANALYSIS_ROOT/analysis/custom-patterns.txt"
+       echo "Matches: $matches" >> "$LOG_ANALYSIS_ROOT/analysis/custom-patterns.txt"
+       
+       if [ "$matches" -gt 0 ]; then
+           echo "Sample matches:" >> "$LOG_ANALYSIS_ROOT/analysis/custom-patterns.txt"
+           grep "$pattern" "$logfile" | head -3 >> "$LOG_ANALYSIS_ROOT/analysis/custom-patterns.txt"
+       fi
+       
+       echo "---" >> "$LOG_ANALYSIS_ROOT/analysis/custom-patterns.txt"
+   }
+
+PART C: SECURITY LOG ANALYSIS
+------------------------------
+
+1. Create security analyzer:
+   # vim /opt/log-analysis/scripts/security-analyzer.sh
+   
+   #!/bin/bash
+   #
+   # Security Log Analyzer
+   #
+   
+   # Analyze authentication events
+   analyze_authentication_events() {
+       local logfile="${1:-$LOG_ANALYSIS_ROOT/logs/secure.log}"
+       local output_file="$LOG_ANALYSIS_ROOT/analysis/security/authentication-analysis.txt"
+       
+       log_message "INFO" "Analyzing authentication events"
+       
+       cat > "$output_file" << EOF
+   Authentication Event Analysis
+   Generated: $(date)
+   
+   EOF
+       
+       # Failed login statistics
+       echo "=== Failed Login Statistics ===" >> "$output_file"
+       grep "Failed password" "$logfile" | awk '{print $9}' | sort | uniq -c | sort -nr | head -10 >> "$output_file"
+       
+       # Login success/failure ratio
+       local failed_logins=$(grep -c "Failed password" "$logfile")
+       local successful_logins=$(grep -c "Accepted password" "$logfile")
+       echo -e "\nFailed logins: $failed_logins" >> "$output_file"
+       echo "Successful logins: $successful_logins" >> "$output_file"
+       
+       # Brute force detection
+       echo -e "\n=== Potential Brute Force Attacks ===" >> "$output_file"
+       grep "Failed password" "$logfile" | awk '{print $11}' | sort | uniq -c | awk '$1 > 10 {print}' >> "$output_file"
+       
+       log_message "INFO" "Authentication analysis completed: $output_file"
+   }
+   
+   # Analyze privilege escalation
+   analyze_privilege_escalation() {
+       local logfile="${1:-$LOG_ANALYSIS_ROOT/logs/secure.log}"
+       local output_file="$LOG_ANALYSIS_ROOT/analysis/security/privilege-escalation.txt"
+       
+       log_message "INFO" "Analyzing privilege escalation events"
+       
+       cat > "$output_file" << EOF
+   Privilege Escalation Analysis
+   Generated: $(date)
+   
+   EOF
+       
+       # Sudo usage analysis
+       echo "=== Sudo Usage Statistics ===" >> "$output_file"
+       grep "sudo" "$logfile" | awk '{print $5}' | sort | uniq -c | sort -nr >> "$output_file"
+       
+       # Root access attempts
+       echo -e "\n=== Root Access Attempts ===" >> "$output_file"
+       grep -E "su.*root|sudo.*root" "$logfile" | head -10 >> "$output_file"
+       
+       # Failed sudo attempts
+       echo -e "\n=== Failed Sudo Attempts ===" >> "$output_file"
+       grep "sudo.*authentication failure" "$logfile" | head -10 >> "$output_file"
+       
+       log_message "INFO" "Privilege escalation analysis completed: $output_file"
+   }
+   
+   # Generate security summary
+   generate_security_summary() {
+       local summary_file="$LOG_ANALYSIS_ROOT/reports/security-summary.txt"
+       
+       log_message "INFO" "Generating security summary"
+       
+       cat > "$summary_file" << EOF
+   Security Analysis Summary
+   Generated: $(date)
+   
+   EOF
+       
+       # Count security events
+       local failed_logins=$(find "$LOG_ANALYSIS_ROOT/logs" -name "*.log" -exec grep -h "Failed password" {} \; | wc -l)
+       local invalid_users=$(find "$LOG_ANALYSIS_ROOT/logs" -name "*.log" -exec grep -h "Invalid user" {} \; | wc -l)
+       local sudo_events=$(find "$LOG_ANALYSIS_ROOT/logs" -name "*.log" -exec grep -h "sudo" {} \; | wc -l)
+       
+       echo "Failed login attempts: $failed_logins" >> "$summary_file"
+       echo "Invalid user attempts: $invalid_users" >> "$summary_file"
+       echo "Sudo events: $sudo_events" >> "$summary_file"
+       
+       # Risk assessment
+       echo -e "\n=== Risk Assessment ===" >> "$summary_file"
+       if [ "$failed_logins" -gt 100 ]; then
+           echo "HIGH RISK: Excessive failed login attempts detected" >> "$summary_file"
+       elif [ "$failed_logins" -gt 50 ]; then
+           echo "MEDIUM RISK: Moderate failed login attempts" >> "$summary_file"
+       else
+           echo "LOW RISK: Normal authentication activity" >> "$summary_file"
+       fi
+       
+       log_message "INFO" "Security summary generated: $summary_file"
+   }
+
+PART D: PERFORMANCE LOG CORRELATION
+------------------------------------
+
+1. Create performance correlator:
+   # vim /opt/log-analysis/scripts/performance-correlator.sh
+   
+   #!/bin/bash
+   #
+   # Performance Log Correlator
+   #
+   
+   # Correlate system events with performance
+   correlate_performance_events() {
+       local logfile="${1:-$LOG_ANALYSIS_ROOT/logs/journal-7days.log}"
+       local output_file="$LOG_ANALYSIS_ROOT/analysis/performance/correlation-analysis.txt"
+       
+       log_message "INFO" "Correlating performance events"
+       
+       cat > "$output_file" << EOF
+   Performance Correlation Analysis
+   Generated: $(date)
+   
+   EOF
+       
+       # Memory pressure events
+       echo "=== Memory Pressure Events ===" >> "$output_file"
+       grep -i "memory\|oom" "$logfile" | while read -r line; do
+           local timestamp=$(echo "$line" | awk '{print $1, $2, $3}')
+           echo "Time: $timestamp" >> "$output_file"
+           echo "Event: $line" >> "$output_file"
+           echo "---" >> "$output_file"
+       done
+       
+       # Disk I/O issues
+       echo -e "\n=== Disk I/O Issues ===" >> "$output_file"
+       grep -i "i/o\|disk" "$logfile" | grep -i "error\|timeout" | head -10 >> "$output_file"
+       
+       log_message "INFO" "Performance correlation completed: $output_file"
+   }
+   
+   # Analyze service restart patterns
+   analyze_service_restarts() {
+       local logfile="${1:-$LOG_ANALYSIS_ROOT/logs/journal-7days.log}"
+       local output_file="$LOG_ANALYSIS_ROOT/analysis/performance/service-restarts.txt"
+       
+       log_message "INFO" "Analyzing service restart patterns"
+       
+       cat > "$output_file" << EOF
+   Service Restart Pattern Analysis
+   Generated: $(date)
+   
+   EOF
+       
+       # Service restart frequency
+       echo "=== Service Restart Frequency ===" >> "$output_file"
+       grep -i "started\|stopped\|restarted" "$logfile" | awk '{print $6}' | sort | uniq -c | sort -nr >> "$output_file"
+       
+       # Failed service starts
+       echo -e "\n=== Failed Service Starts ===" >> "$output_file"
+       grep -i "failed.*start" "$logfile" | head -10 >> "$output_file"
+       
+       log_message "INFO" "Service restart analysis completed: $output_file"
+   }
+
+PART E: AUTOMATED ALERTING SYSTEM
+----------------------------------
+
+1. Create alert system:
+   # vim /opt/log-analysis/scripts/alert-system.sh
+   
+   #!/bin/bash
+   #
+   # Automated Log Alert System
+   #
+   
+   # Check for critical events
+   check_critical_events() {
+       local logfile="$1"
+       local alert_file="$LOG_ANALYSIS_ROOT/reports/alerts.txt"
+       
+       log_message "INFO" "Checking for critical events in $logfile"
+       
+       local alerts_found=0
+       
+       # Security alerts
+       local failed_logins=$(grep -c "Failed password" "$logfile" 2>/dev/null)
+       if [ "$failed_logins" -gt 50 ]; then
+           echo "SECURITY ALERT: $failed_logins failed login attempts detected" >> "$alert_file"
+           alerts_found=$((alerts_found + 1))
+       fi
+       
+       # System alerts
+       local oom_events=$(grep -c "Out of memory" "$logfile" 2>/dev/null)
+       if [ "$oom_events" -gt 0 ]; then
+           echo "SYSTEM ALERT: $oom_events OOM killer events detected" >> "$alert_file"
+           alerts_found=$((alerts_found + 1))
+       fi
+       
+       # Disk alerts
+       local disk_errors=$(grep -c "I/O error" "$logfile" 2>/dev/null)
+       if [ "$disk_errors" -gt 0 ]; then
+           echo "DISK ALERT: $disk_errors I/O errors detected" >> "$alert_file"
+           alerts_found=$((alerts_found + 1))
+       fi
+       
+       return $alerts_found
+   }
+   
+   # Real-time log monitoring
+   realtime_monitoring() {
+       local logfile="${1:-/var/log/messages}"
+       local alert_threshold="${2:-5}"
+       
+       log_message "INFO" "Starting real-time monitoring of $logfile"
+       
+       tail -f "$logfile" | while read -r line; do
+           # Check for error patterns
+           if echo "$line" | grep -qi "error\|fail\|critical"; then
+               log_message "ALERT" "Critical event detected: $line"
+           fi
+           
+           # Check for security events
+           if echo "$line" | grep -qi "failed password\|invalid user"; then
+               log_message "SECURITY" "Security event detected: $line"
+           fi
+       done
+   }
+
+PART F: COMPREHENSIVE LOG ANALYSIS
+-----------------------------------
+
+1. Create master log analysis script:
+   # vim /opt/log-analysis/scripts/master-log-analysis.sh
+   
+   #!/bin/bash
+   #
+   # Master Log Analysis Script
+   #
+   
+   # Run comprehensive log analysis
+   run_comprehensive_analysis() {
+       local days_back="${1:-7}"
+       
+       log_message "INFO" "Starting comprehensive log analysis for last $days_back days"
+       
+       # Gather logs
+       /opt/log-analysis/scripts/log-analyzer.sh gather_system_logs "$days_back"
+       
+       # Generate statistics
+       /opt/log-analysis/scripts/log-analyzer.sh generate_log_statistics
+       
+       # Parse different log types
+       /opt/log-analysis/scripts/log-parser.sh parse_security_events
+       /opt/log-analysis/scripts/log-parser.sh parse_system_errors
+       /opt/log-analysis/scripts/log-parser.sh parse_performance_issues
+       
+       # Security analysis
+       /opt/log-analysis/scripts/security-analyzer.sh analyze_authentication_events
+       /opt/log-analysis/scripts/security-analyzer.sh analyze_privilege_escalation
+       /opt/log-analysis/scripts/security-analyzer.sh generate_security_summary
+       
+       # Performance correlation
+       /opt/log-analysis/scripts/performance-correlator.sh correlate_performance_events
+       /opt/log-analysis/scripts/performance-correlator.sh analyze_service_restarts
+       
+       # Generate final report
+       generate_comprehensive_report
+       
+       log_message "INFO" "Comprehensive log analysis completed"
+   }
+   
+   # Generate comprehensive report
+   generate_comprehensive_report() {
+       local report_file="$LOG_ANALYSIS_ROOT/reports/comprehensive-report-$(date +%Y%m%d_%H%M%S).html"
+       
+       cat > "$report_file" << 'EOF'
+   <!DOCTYPE html>
+   <html>
+   <head>
+       <title>Comprehensive Log Analysis Report</title>
+       <style>
+           body { font-family: Arial, sans-serif; margin: 20px; }
+           .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
+           .alert { background-color: #ffebee; border-left: 4px solid #f44336; }
+           .warning { background-color: #fff3e0; border-left: 4px solid #ff9800; }
+           .info { background-color: #e3f2fd; border-left: 4px solid #2196f3; }
+           pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+           table { border-collapse: collapse; width: 100%; }
+           th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+           th { background-color: #f2f2f2; }
+       </style>
+   </head>
+   <body>
+       <h1>Comprehensive Log Analysis Report</h1>
+   EOF
+       
+       echo "<p>Generated: $(date)</p>" >> "$report_file"
+       
+       # Executive summary
+       echo "<div class='section info'><h2>Executive Summary</h2>" >> "$report_file"
+       if [ -f "$LOG_ANALYSIS_ROOT/reports/security-summary.txt" ]; then
+           echo "<pre>" >> "$report_file"
+           cat "$LOG_ANALYSIS_ROOT/reports/security-summary.txt" >> "$report_file"
+           echo "</pre>" >> "$report_file"
+       fi
+       echo "</div>" >> "$report_file"
+       
+       # Security analysis
+       echo "<div class='section alert'><h2>Security Analysis</h2>" >> "$report_file"
+       if [ -f "$LOG_ANALYSIS_ROOT/analysis/security/authentication-analysis.txt" ]; then
+           echo "<pre>" >> "$report_file"
+           head -20 "$LOG_ANALYSIS_ROOT/analysis/security/authentication-analysis.txt" >> "$report_file"
+           echo "</pre>" >> "$report_file"
+       fi
+       echo "</div>" >> "$report_file"
+       
+       # Performance analysis
+       echo "<div class='section warning'><h2>Performance Analysis</h2>" >> "$report_file"
+       if [ -f "$LOG_ANALYSIS_ROOT/analysis/performance/correlation-analysis.txt" ]; then
+           echo "<pre>" >> "$report_file"
+           head -20 "$LOG_ANALYSIS_ROOT/analysis/performance/correlation-analysis.txt" >> "$report_file"
+           echo "</pre>" >> "$report_file"
+       fi
+       echo "</div>" >> "$report_file"
+       
+       echo "</body></html>" >> "$report_file"
+       
+       log_message "INFO" "Comprehensive report generated: $report_file"
+   }
+
+PART G: TESTING AND AUTOMATION
+-------------------------------
+
+1. Test log analysis framework:
+   # chmod +x /opt/log-analysis/scripts/*.sh
+   # /opt/log-analysis/scripts/log-analyzer.sh gather_system_logs 3
+   # /opt/log-analysis/scripts/log-analyzer.sh generate_log_statistics
+
+2. Test parsing and analysis:
+   # /opt/log-analysis/scripts/log-parser.sh parse_security_events
+   # /opt/log-analysis/scripts/security-analyzer.sh analyze_authentication_events
+
+3. Run comprehensive analysis:
+   # /opt/log-analysis/scripts/master-log-analysis.sh run_comprehensive_analysis 7
+
+4. Create log analysis service:
+   # vim /etc/systemd/system/log-analyzer.service
+   
+   [Unit]
+   Description=Log Analysis Service
+   After=rsyslog.service
+   
+   [Service]
+   Type=oneshot
+   ExecStart=/opt/log-analysis/scripts/master-log-analysis.sh run_comprehensive_analysis 1
+   
+   [Install]
+   WantedBy=multi-user.target
+
+5. Create automated analysis schedule:
+   # vim /etc/cron.d/log-analysis
+   
+   # Log analysis automation
+   0 6 * * * root /opt/log-analysis/scripts/master-log-analysis.sh run_comprehensive_analysis 1
+   0 */4 * * * root /opt/log-analysis/scripts/alert-system.sh check_critical_events /var/log/messages
+   */30 * * * * root /opt/log-analysis/scripts/security-analyzer.sh analyze_authentication_events
+
+6. Test alert system:
+   # /opt/log-analysis/scripts/alert-system.sh check_critical_events /var/log/secure
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# journalctl -f
+# tail -f /var/log/messages
+# grep -i error /var/log/messages
+# awk '{print $1}' /var/log/secure | sort | uniq -c
+# sed -n '1,100p' /var/log/audit/audit.log
+# find /var/log -name "*.log" -mtime -1
+# logrotate -d /etc/logrotate.conf
+# rsyslog -N1
+
+EXPECTED RESULTS:
+-----------------
+- Log analysis framework operational
+- Automated log parsing working
+- Security event detection functional
+- Performance correlation active
+- Pattern matching identifying issues
+- Comprehensive reporting available
+- Automated alerting system working
+
+VALIDATION CHECKLIST:
+---------------------
+□ Log analysis framework created
+□ Log gathering and statistics working
+□ Security analysis functional
+□ Performance correlation operational
+□ Pattern matching active
+□ Alert system working
+□ Comprehensive reporting available
+□ Automated analysis scheduled
+
+CLEANUP:
+--------
+# rm -rf /opt/log-analysis
+# rm /etc/systemd/system/log-analyzer.service
+# rm /etc/cron.d/log-analysis

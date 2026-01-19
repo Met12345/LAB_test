@@ -1,0 +1,721 @@
+RHCE RH254 HANDS-ON LAB: RESOURCE USAGE TRACKING
+===============================================
+
+LAB OBJECTIVE:
+Configure comprehensive resource usage tracking systems to monitor CPU, memory, disk, network, and system resources with historical data collection and analysis
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of system resource concepts
+- Basic knowledge of data collection and analysis
+- Familiarity with system performance metrics
+
+LAB SCENARIO:
+Implement enterprise resource usage tracking system with automated data collection, historical analysis, trend monitoring, and capacity planning capabilities.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20)
+- Storage for historical data collection
+- Test applications for resource consumption
+
+LAB TASKS:
+
+PART A: CONFIGURE SYSTEM RESOURCE TRACKING
+-------------------------------------------
+
+1. Install resource tracking tools:
+   # dnf install sysstat sar iostat vmstat -y
+   # dnf install collectd collectd-utils -y
+   # dnf install rrdtool rrdtool-devel -y
+
+2. Configure sysstat for detailed tracking:
+   # vim /etc/sysconfig/sysstat
+   
+   # History length in days
+   HISTORY=30
+   # Compress files older than
+   COMPRESSAFTER=31
+   # Collection interval (minutes)
+   SADC_OPTIONS="-S DISK,INT,IPV6,POWER,SNMP,XDISK,ALL"
+
+3. Enable comprehensive data collection:
+   # systemctl enable sysstat
+   # systemctl start sysstat
+
+4. Configure cron for frequent collection:
+   # vim /etc/cron.d/sysstat-detailed
+   
+   # Collect data every 2 minutes
+   */2 * * * * root /usr/lib64/sa/sa1 1 1
+   # Generate daily reports
+   53 23 * * * root /usr/lib64/sa/sa2 -A
+
+PART B: CREATE CPU RESOURCE TRACKING
+-------------------------------------
+
+1. Create CPU usage tracker:
+   # vim /usr/local/bin/cpu-resource-tracker.sh
+   
+   #!/bin/bash
+   LOGDIR="/var/log/resource-tracking"
+   LOGFILE="$LOGDIR/cpu-usage-$(date +%Y%m%d).log"
+   
+   mkdir -p $LOGDIR
+   
+   echo "$(date +%Y-%m-%d\ %H:%M:%S),$(sar -u 1 1 | grep Average | awk '{print $3","$4","$5","$6","$8}')" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/cpu-resource-tracker.sh
+
+2. Create CPU trend analyzer:
+   # vim /usr/local/bin/cpu-trend-analyzer.sh
+   
+   #!/bin/bash
+   DAYS=${1:-7}
+   REPORT_FILE="/var/log/cpu-trend-analysis-$(date +%Y%m%d).log"
+   
+   echo "=== CPU Trend Analysis (Last $DAYS days) - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Daily CPU averages
+   echo "DAILY CPU AVERAGES:" >> $REPORT_FILE
+   for i in $(seq 1 $DAYS); do
+       DATE=$(date -d "$i days ago" +%d)
+       if [ -f /var/log/sa/sa$DATE ]; then
+           echo -n "$(date -d "$i days ago" +%Y-%m-%d): " >> $REPORT_FILE
+           sar -u -f /var/log/sa/sa$DATE | grep Average | awk '{printf "User: %s%%, System: %s%%, Idle: %s%%\n", $3, $5, $8}' >> $REPORT_FILE
+       fi
+   done
+   echo >> $REPORT_FILE
+   
+   # Peak CPU usage times
+   echo "PEAK CPU USAGE PERIODS:" >> $REPORT_FILE
+   for i in $(seq 1 $DAYS); do
+       DATE=$(date -d "$i days ago" +%d)
+       if [ -f /var/log/sa/sa$DATE ]; then
+           echo "$(date -d "$i days ago" +%Y-%m-%d):" >> $REPORT_FILE
+           sar -u -f /var/log/sa/sa$DATE | grep -v Average | grep -v "^$" | sort -k8 -n | head -5 >> $REPORT_FILE
+           echo >> $REPORT_FILE
+       fi
+   done
+   
+   echo "CPU trend analysis saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/cpu-trend-analyzer.sh
+PART C: CREATE MEMORY RESOURCE TRACKING
+----------------------------------------
+
+1. Create memory usage tracker:
+   # vim /usr/local/bin/memory-resource-tracker.sh
+   
+   #!/bin/bash
+   LOGDIR="/var/log/resource-tracking"
+   LOGFILE="$LOGDIR/memory-usage-$(date +%Y%m%d).log"
+   
+   mkdir -p $LOGDIR
+   
+   # Get memory statistics
+   TOTAL=$(free -m | grep Mem | awk '{print $2}')
+   USED=$(free -m | grep Mem | awk '{print $3}')
+   FREE=$(free -m | grep Mem | awk '{print $4}')
+   AVAILABLE=$(free -m | grep Mem | awk '{print $7}')
+   SWAP_USED=$(free -m | grep Swap | awk '{print $3}')
+   
+   echo "$(date +%Y-%m-%d\ %H:%M:%S),$TOTAL,$USED,$FREE,$AVAILABLE,$SWAP_USED" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/memory-resource-tracker.sh
+
+2. Create memory trend analyzer:
+   # vim /usr/local/bin/memory-trend-analyzer.sh
+   
+   #!/bin/bash
+   DAYS=${1:-7}
+   REPORT_FILE="/var/log/memory-trend-analysis-$(date +%Y%m%d).log"
+   
+   echo "=== Memory Trend Analysis (Last $DAYS days) - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Daily memory averages
+   echo "DAILY MEMORY AVERAGES:" >> $REPORT_FILE
+   for i in $(seq 1 $DAYS); do
+       DATE=$(date -d "$i days ago" +%d)
+       if [ -f /var/log/sa/sa$DATE ]; then
+           echo -n "$(date -d "$i days ago" +%Y-%m-%d): " >> $REPORT_FILE
+           sar -r -f /var/log/sa/sa$DATE | grep Average | awk '{printf "Used: %s%%, Available: %sMB, Swap Used: %s%%\n", $4, $6, $10}' >> $REPORT_FILE
+       fi
+   done
+   echo >> $REPORT_FILE
+   
+   # Memory usage patterns
+   echo "MEMORY USAGE PATTERNS:" >> $REPORT_FILE
+   LOGFILE="/var/log/resource-tracking/memory-usage-$(date +%Y%m%d).log"
+   if [ -f "$LOGFILE" ]; then
+       echo "Today's memory usage statistics:" >> $REPORT_FILE
+       awk -F',' 'NR>1 {total+=$3; count++} END {printf "Average used: %.0fMB\n", total/count}' $LOGFILE >> $REPORT_FILE
+       awk -F',' 'NR>1 {if($3>max) max=$3} END {printf "Peak used: %sMB\n", max}' $LOGFILE >> $REPORT_FILE
+   fi
+   
+   echo "Memory trend analysis saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/memory-trend-analyzer.sh
+
+PART D: CREATE DISK RESOURCE TRACKING
+--------------------------------------
+
+1. Create disk usage tracker:
+   # vim /usr/local/bin/disk-resource-tracker.sh
+   
+   #!/bin/bash
+   LOGDIR="/var/log/resource-tracking"
+   LOGFILE="$LOGDIR/disk-usage-$(date +%Y%m%d).log"
+   
+   mkdir -p $LOGDIR
+   
+   # Track disk space usage
+   df -h | grep -E '^/dev/' | while read line; do
+       FILESYSTEM=$(echo $line | awk '{print $1}')
+       SIZE=$(echo $line | awk '{print $2}')
+       USED=$(echo $line | awk '{print $3}')
+       AVAIL=$(echo $line | awk '{print $4}')
+       PERCENT=$(echo $line | awk '{print $5}')
+       MOUNT=$(echo $line | awk '{print $6}')
+       
+       echo "$(date +%Y-%m-%d\ %H:%M:%S),$FILESYSTEM,$SIZE,$USED,$AVAIL,$PERCENT,$MOUNT" >> $LOGFILE
+   done
+   
+   # chmod +x /usr/local/bin/disk-resource-tracker.sh
+
+2. Create disk I/O tracker:
+   # vim /usr/local/bin/disk-io-tracker.sh
+   
+   #!/bin/bash
+   LOGDIR="/var/log/resource-tracking"
+   LOGFILE="$LOGDIR/disk-io-$(date +%Y%m%d).log"
+   
+   mkdir -p $LOGDIR
+   
+   # Get I/O statistics
+   iostat -x 1 1 | grep -E '^(sd|nvme)' | while read line; do
+       DEVICE=$(echo $line | awk '{print $1}')
+       READS=$(echo $line | awk '{print $4}')
+       WRITES=$(echo $line | awk '{print $5}')
+       READ_KB=$(echo $line | awk '{print $6}')
+       WRITE_KB=$(echo $line | awk '{print $7}')
+       UTIL=$(echo $line | awk '{print $10}')
+       
+       echo "$(date +%Y-%m-%d\ %H:%M:%S),$DEVICE,$READS,$WRITES,$READ_KB,$WRITE_KB,$UTIL" >> $LOGFILE
+   done
+   
+   # chmod +x /usr/local/bin/disk-io-tracker.sh
+
+3. Create disk trend analyzer:
+   # vim /usr/local/bin/disk-trend-analyzer.sh
+   
+   #!/bin/bash
+   DAYS=${1:-7}
+   REPORT_FILE="/var/log/disk-trend-analysis-$(date +%Y%m%d).log"
+   
+   echo "=== Disk Trend Analysis (Last $DAYS days) - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Disk space growth analysis
+   echo "DISK SPACE GROWTH ANALYSIS:" >> $REPORT_FILE
+   for mount in / /home /var /tmp; do
+       if mountpoint -q $mount 2>/dev/null; then
+           echo "Mount point: $mount" >> $REPORT_FILE
+           for i in $(seq $DAYS -1 1); do
+               LOGFILE="/var/log/resource-tracking/disk-usage-$(date -d "$i days ago" +%Y%m%d).log"
+               if [ -f "$LOGFILE" ]; then
+                   USAGE=$(grep "$mount$" $LOGFILE | tail -1 | cut -d',' -f5)
+                   echo "  $(date -d "$i days ago" +%Y-%m-%d): $USAGE" >> $REPORT_FILE
+               fi
+           done
+           echo >> $REPORT_FILE
+       fi
+   done
+   
+   # I/O performance trends
+   echo "DISK I/O PERFORMANCE TRENDS:" >> $REPORT_FILE
+   for i in $(seq 1 $DAYS); do
+       DATE=$(date -d "$i days ago" +%d)
+       if [ -f /var/log/sa/sa$DATE ]; then
+           echo "$(date -d "$i days ago" +%Y-%m-%d):" >> $REPORT_FILE
+           sar -d -f /var/log/sa/sa$DATE | grep Average >> $REPORT_FILE
+           echo >> $REPORT_FILE
+       fi
+   done
+   
+   echo "Disk trend analysis saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/disk-trend-analyzer.sh
+
+PART E: CREATE NETWORK RESOURCE TRACKING
+-----------------------------------------
+
+1. Create network usage tracker:
+   # vim /usr/local/bin/network-resource-tracker.sh
+   
+   #!/bin/bash
+   LOGDIR="/var/log/resource-tracking"
+   LOGFILE="$LOGDIR/network-usage-$(date +%Y%m%d).log"
+   INTERFACE=${1:-eth0}
+   
+   mkdir -p $LOGDIR
+   
+   # Get network statistics
+   RX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes 2>/dev/null || echo 0)
+   TX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes 2>/dev/null || echo 0)
+   RX_PACKETS=$(cat /sys/class/net/$INTERFACE/statistics/rx_packets 2>/dev/null || echo 0)
+   TX_PACKETS=$(cat /sys/class/net/$INTERFACE/statistics/tx_packets 2>/dev/null || echo 0)
+   RX_ERRORS=$(cat /sys/class/net/$INTERFACE/statistics/rx_errors 2>/dev/null || echo 0)
+   TX_ERRORS=$(cat /sys/class/net/$INTERFACE/statistics/tx_errors 2>/dev/null || echo 0)
+   
+   echo "$(date +%Y-%m-%d\ %H:%M:%S),$INTERFACE,$RX_BYTES,$TX_BYTES,$RX_PACKETS,$TX_PACKETS,$RX_ERRORS,$TX_ERRORS" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/network-resource-tracker.sh
+
+2. Create network trend analyzer:
+   # vim /usr/local/bin/network-trend-analyzer.sh
+   
+   #!/bin/bash
+   DAYS=${1:-7}
+   INTERFACE=${2:-eth0}
+   REPORT_FILE="/var/log/network-trend-analysis-$(date +%Y%m%d).log"
+   
+   echo "=== Network Trend Analysis - $INTERFACE (Last $DAYS days) - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Daily network averages
+   echo "DAILY NETWORK AVERAGES:" >> $REPORT_FILE
+   for i in $(seq 1 $DAYS); do
+       DATE=$(date -d "$i days ago" +%d)
+       if [ -f /var/log/sa/sa$DATE ]; then
+           echo "$(date -d "$i days ago" +%Y-%m-%d):" >> $REPORT_FILE
+           sar -n DEV -f /var/log/sa/sa$DATE | grep $INTERFACE | grep Average >> $REPORT_FILE
+           echo >> $REPORT_FILE
+       fi
+   done
+   
+   # Network usage patterns
+   echo "NETWORK USAGE PATTERNS:" >> $REPORT_FILE
+   LOGFILE="/var/log/resource-tracking/network-usage-$(date +%Y%m%d).log"
+   if [ -f "$LOGFILE" ]; then
+       echo "Today's network statistics for $INTERFACE:" >> $REPORT_FILE
+       FIRST_LINE=$(head -2 $LOGFILE | tail -1)
+       LAST_LINE=$(tail -1 $LOGFILE)
+       
+       if [ -n "$FIRST_LINE" ] && [ -n "$LAST_LINE" ]; then
+           FIRST_RX=$(echo $FIRST_LINE | cut -d',' -f3)
+           FIRST_TX=$(echo $FIRST_LINE | cut -d',' -f4)
+           LAST_RX=$(echo $LAST_LINE | cut -d',' -f3)
+           LAST_TX=$(echo $LAST_LINE | cut -d',' -f4)
+           
+           RX_DIFF=$((LAST_RX - FIRST_RX))
+           TX_DIFF=$((LAST_TX - FIRST_TX))
+           
+           echo "Total RX bytes: $RX_DIFF" >> $REPORT_FILE
+           echo "Total TX bytes: $TX_DIFF" >> $REPORT_FILE
+       fi
+   fi
+   
+   echo "Network trend analysis saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/network-trend-analyzer.sh
+
+PART F: CREATE COMPREHENSIVE RESOURCE DASHBOARD
+------------------------------------------------
+
+1. Create resource dashboard:
+   # vim /usr/local/bin/resource-dashboard.sh
+   
+   #!/bin/bash
+   REPORT_FILE="/var/log/resource-dashboard-$(date +%Y%m%d_%H%M%S).log"
+   
+   echo "=== SYSTEM RESOURCE DASHBOARD - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # System information
+   echo "SYSTEM INFORMATION:" >> $REPORT_FILE
+   echo "Hostname: $(hostname)" >> $REPORT_FILE
+   echo "Uptime: $(uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')" >> $REPORT_FILE
+   echo "Load Average: $(uptime | awk -F'load average: ' '{print $2}')" >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # CPU usage
+   echo "CPU USAGE:" >> $REPORT_FILE
+   sar -u 1 1 | grep Average >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Memory usage
+   echo "MEMORY USAGE:" >> $REPORT_FILE
+   free -h >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Disk usage
+   echo "DISK USAGE:" >> $REPORT_FILE
+   df -h | grep -E '^/dev/' >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Network usage
+   echo "NETWORK USAGE:" >> $REPORT_FILE
+   sar -n DEV 1 1 | grep -E "(Average|eth0|ens)" >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Top processes
+   echo "TOP PROCESSES (CPU):" >> $REPORT_FILE
+   ps aux --sort=-%cpu | head -10 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   echo "TOP PROCESSES (MEMORY):" >> $REPORT_FILE
+   ps aux --sort=-%mem | head -10 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # System services status
+   echo "CRITICAL SERVICES STATUS:" >> $REPORT_FILE
+   for service in sshd httpd mysqld postfix chronyd; do
+       if systemctl list-unit-files | grep -q "^$service.service"; then
+           STATUS=$(systemctl is-active $service 2>/dev/null || echo "not-installed")
+           echo "$service: $STATUS" >> $REPORT_FILE
+       fi
+   done
+   
+   echo "Resource dashboard saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/resource-dashboard.sh
+
+2. Create resource capacity planner:
+   # vim /usr/local/bin/resource-capacity-planner.sh
+   
+   #!/bin/bash
+   DAYS=${1:-30}
+   REPORT_FILE="/var/log/capacity-planning-$(date +%Y%m%d).log"
+   
+   echo "=== RESOURCE CAPACITY PLANNING (Last $DAYS days) - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # CPU capacity analysis
+   echo "CPU CAPACITY ANALYSIS:" >> $REPORT_FILE
+   CPU_SAMPLES=0
+   CPU_TOTAL=0
+   for i in $(seq 1 $DAYS); do
+       DATE=$(date -d "$i days ago" +%d)
+       if [ -f /var/log/sa/sa$DATE ]; then
+           CPU_USAGE=$(sar -u -f /var/log/sa/sa$DATE | grep Average | awk '{print 100-$8}')
+           if [ -n "$CPU_USAGE" ]; then
+               CPU_TOTAL=$(echo "$CPU_TOTAL + $CPU_USAGE" | bc)
+               CPU_SAMPLES=$((CPU_SAMPLES + 1))
+           fi
+       fi
+   done
+   
+   if [ $CPU_SAMPLES -gt 0 ]; then
+       CPU_AVG=$(echo "scale=2; $CPU_TOTAL / $CPU_SAMPLES" | bc)
+       echo "Average CPU usage: ${CPU_AVG}%" >> $REPORT_FILE
+       
+       if (( $(echo "$CPU_AVG > 80" | bc -l) )); then
+           echo "WARNING: CPU usage is high. Consider CPU upgrade." >> $REPORT_FILE
+       elif (( $(echo "$CPU_AVG > 60" | bc -l) )); then
+           echo "CAUTION: CPU usage is moderate. Monitor closely." >> $REPORT_FILE
+       else
+           echo "INFO: CPU usage is within normal range." >> $REPORT_FILE
+       fi
+   fi
+   echo >> $REPORT_FILE
+   
+   # Memory capacity analysis
+   echo "MEMORY CAPACITY ANALYSIS:" >> $REPORT_FILE
+   TOTAL_MEM=$(free -m | grep Mem | awk '{print $2}')
+   LOGFILE="/var/log/resource-tracking/memory-usage-$(date +%Y%m%d).log"
+   if [ -f "$LOGFILE" ]; then
+       AVG_USED=$(awk -F',' 'NR>1 {total+=$3; count++} END {printf "%.0f", total/count}' $LOGFILE)
+       USAGE_PERCENT=$(echo "scale=2; $AVG_USED * 100 / $TOTAL_MEM" | bc)
+       echo "Total memory: ${TOTAL_MEM}MB" >> $REPORT_FILE
+       echo "Average used: ${AVG_USED}MB (${USAGE_PERCENT}%)" >> $REPORT_FILE
+       
+       if (( $(echo "$USAGE_PERCENT > 85" | bc -l) )); then
+           echo "WARNING: Memory usage is high. Consider memory upgrade." >> $REPORT_FILE
+       elif (( $(echo "$USAGE_PERCENT > 70" | bc -l) )); then
+           echo "CAUTION: Memory usage is moderate. Monitor closely." >> $REPORT_FILE
+       else
+           echo "INFO: Memory usage is within normal range." >> $REPORT_FILE
+       fi
+   fi
+   echo >> $REPORT_FILE
+   
+   # Disk capacity analysis
+   echo "DISK CAPACITY ANALYSIS:" >> $REPORT_FILE
+   df -h | grep -E '^/dev/' | while read line; do
+       FILESYSTEM=$(echo $line | awk '{print $1}')
+       PERCENT=$(echo $line | awk '{print $5}' | tr -d '%')
+       MOUNT=$(echo $line | awk '{print $6}')
+       
+       echo "$MOUNT ($FILESYSTEM): ${PERCENT}% used" >> $REPORT_FILE
+       
+       if [ $PERCENT -gt 90 ]; then
+           echo "  WARNING: Disk usage is critical. Immediate action required." >> $REPORT_FILE
+       elif [ $PERCENT -gt 80 ]; then
+           echo "  CAUTION: Disk usage is high. Plan for expansion." >> $REPORT_FILE
+       else
+           echo "  INFO: Disk usage is within normal range." >> $REPORT_FILE
+       fi
+   done
+   
+   echo "Capacity planning report saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/resource-capacity-planner.sh
+PART G: CREATE AUTOMATED RESOURCE COLLECTION
+---------------------------------------------
+
+1. Create master resource collector:
+   # vim /usr/local/bin/resource-collector.sh
+   
+   #!/bin/bash
+   LOGDIR="/var/log/resource-tracking"
+   
+   # Ensure log directory exists
+   mkdir -p $LOGDIR
+   
+   # Collect all resource data
+   /usr/local/bin/cpu-resource-tracker.sh
+   /usr/local/bin/memory-resource-tracker.sh
+   /usr/local/bin/disk-resource-tracker.sh
+   /usr/local/bin/network-resource-tracker.sh eth0
+   
+   # Additional interfaces if they exist
+   for interface in eth1 ens3 ens4; do
+       if [ -d /sys/class/net/$interface ]; then
+           /usr/local/bin/network-resource-tracker.sh $interface
+       fi
+   done
+   
+   # chmod +x /usr/local/bin/resource-collector.sh
+
+2. Create resource alert system:
+   # vim /usr/local/bin/resource-alerts.sh
+   
+   #!/bin/bash
+   ALERT_LOG="/var/log/resource-alerts.log"
+   
+   # Thresholds
+   CPU_THRESHOLD=85
+   MEMORY_THRESHOLD=90
+   DISK_THRESHOLD=85
+   LOAD_THRESHOLD=3.0
+   
+   # Check CPU usage
+   CPU_USAGE=$(sar -u 1 1 | grep Average | awk '{print 100-$8}' | cut -d. -f1)
+   if [ $CPU_USAGE -gt $CPU_THRESHOLD ]; then
+       echo "$(date): ALERT - High CPU usage: ${CPU_USAGE}%" >> $ALERT_LOG
+   fi
+   
+   # Check memory usage
+   MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
+   if [ $MEMORY_USAGE -gt $MEMORY_THRESHOLD ]; then
+       echo "$(date): ALERT - High memory usage: ${MEMORY_USAGE}%" >> $ALERT_LOG
+   fi
+   
+   # Check disk usage
+   df -h | grep -E '^/dev/' | while read line; do
+       USAGE=$(echo $line | awk '{print $5}' | cut -d'%' -f1)
+       FILESYSTEM=$(echo $line | awk '{print $6}')
+       if [ $USAGE -gt $DISK_THRESHOLD ]; then
+           echo "$(date): ALERT - High disk usage: $FILESYSTEM ${USAGE}%" >> $ALERT_LOG
+       fi
+   done
+   
+   # Check load average
+   LOAD_1MIN=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}' | tr -d ' ')
+   if (( $(echo "$LOAD_1MIN > $LOAD_THRESHOLD" | bc -l) )); then
+       echo "$(date): ALERT - High load average: $LOAD_1MIN" >> $ALERT_LOG
+   fi
+   
+   # chmod +x /usr/local/bin/resource-alerts.sh
+
+3. Schedule resource tracking:
+   # vim /etc/cron.d/resource-tracking
+   
+   # Collect resource data every 5 minutes
+   */5 * * * * root /usr/local/bin/resource-collector.sh
+   
+   # Check for alerts every 2 minutes
+   */2 * * * * root /usr/local/bin/resource-alerts.sh
+   
+   # Generate daily dashboard
+   0 1 * * * root /usr/local/bin/resource-dashboard.sh
+   
+   # Generate trend analysis daily
+   30 1 * * * root /usr/local/bin/cpu-trend-analyzer.sh 7
+   35 1 * * * root /usr/local/bin/memory-trend-analyzer.sh 7
+   40 1 * * * root /usr/local/bin/disk-trend-analyzer.sh 7
+   45 1 * * * root /usr/local/bin/network-trend-analyzer.sh 7
+   
+   # Generate capacity planning report weekly
+   0 2 * * 0 root /usr/local/bin/resource-capacity-planner.sh 30
+
+PART H: CREATE RESOURCE USAGE REPORTS
+--------------------------------------
+
+1. Create daily resource report:
+   # vim /usr/local/bin/daily-resource-report.sh
+   
+   #!/bin/bash
+   REPORT_FILE="/var/log/daily-resource-report-$(date +%Y%m%d).log"
+   
+   echo "=== DAILY RESOURCE USAGE REPORT - $(date +%Y-%m-%d) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # CPU usage summary
+   echo "CPU USAGE SUMMARY:" >> $REPORT_FILE
+   LOGFILE="/var/log/resource-tracking/cpu-usage-$(date +%Y%m%d).log"
+   if [ -f "$LOGFILE" ]; then
+       echo "Samples collected: $(wc -l < $LOGFILE)" >> $REPORT_FILE
+       awk -F',' '{if(NR>1) {user+=$2; system+=$3; idle+=$5; count++}} END {printf "Average - User: %.1f%%, System: %.1f%%, Idle: %.1f%%\n", user/count, system/count, idle/count}' $LOGFILE >> $REPORT_FILE
+       awk -F',' '{if(NR>1 && $5<min_idle) min_idle=$5} END {printf "Minimum idle: %.1f%%\n", min_idle}' $LOGFILE >> $REPORT_FILE
+   fi
+   echo >> $REPORT_FILE
+   
+   # Memory usage summary
+   echo "MEMORY USAGE SUMMARY:" >> $REPORT_FILE
+   LOGFILE="/var/log/resource-tracking/memory-usage-$(date +%Y%m%d).log"
+   if [ -f "$LOGFILE" ]; then
+       echo "Samples collected: $(wc -l < $LOGFILE)" >> $REPORT_FILE
+       awk -F',' '{if(NR>1) {total+=$2; used+=$3; available+=$5; count++}} END {printf "Average - Total: %.0fMB, Used: %.0fMB, Available: %.0fMB\n", total/count, used/count, available/count}' $LOGFILE >> $REPORT_FILE
+       awk -F',' '{if(NR>1 && $3>max_used) max_used=$3} END {printf "Peak memory used: %.0fMB\n", max_used}' $LOGFILE >> $REPORT_FILE
+   fi
+   echo >> $REPORT_FILE
+   
+   # Disk I/O summary
+   echo "DISK I/O SUMMARY:" >> $REPORT_FILE
+   LOGFILE="/var/log/resource-tracking/disk-io-$(date +%Y%m%d).log"
+   if [ -f "$LOGFILE" ]; then
+       echo "Top devices by utilization:" >> $REPORT_FILE
+       awk -F',' '{if(NR>1) print $2, $7}' $LOGFILE | sort -k2 -nr | head -5 >> $REPORT_FILE
+   fi
+   echo >> $REPORT_FILE
+   
+   # Network usage summary
+   echo "NETWORK USAGE SUMMARY:" >> $REPORT_FILE
+   LOGFILE="/var/log/resource-tracking/network-usage-$(date +%Y%m%d).log"
+   if [ -f "$LOGFILE" ]; then
+       echo "Network interfaces activity:" >> $REPORT_FILE
+       awk -F',' '{print $2}' $LOGFILE | sort | uniq | while read interface; do
+           echo "Interface: $interface" >> $REPORT_FILE
+           FIRST=$(grep "$interface" $LOGFILE | head -1)
+           LAST=$(grep "$interface" $LOGFILE | tail -1)
+           if [ -n "$FIRST" ] && [ -n "$LAST" ]; then
+               FIRST_RX=$(echo $FIRST | cut -d',' -f3)
+               LAST_RX=$(echo $LAST | cut -d',' -f3)
+               FIRST_TX=$(echo $FIRST | cut -d',' -f4)
+               LAST_TX=$(echo $LAST | cut -d',' -f4)
+               RX_DIFF=$((LAST_RX - FIRST_RX))
+               TX_DIFF=$((LAST_TX - FIRST_TX))
+               echo "  RX: $RX_DIFF bytes, TX: $TX_DIFF bytes" >> $REPORT_FILE
+           fi
+       done
+   fi
+   
+   echo "Daily resource report saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/daily-resource-report.sh
+
+2. Create resource cleanup script:
+   # vim /usr/local/bin/resource-cleanup.sh
+   
+   #!/bin/bash
+   RETENTION_DAYS=30
+   LOGDIR="/var/log/resource-tracking"
+   
+   echo "Starting resource tracking cleanup - $(date)"
+   
+   # Clean old tracking files
+   find $LOGDIR -name "*.log" -mtime +$RETENTION_DAYS -delete
+   
+   # Clean old reports
+   find /var/log -name "*resource*report*.log" -mtime +$RETENTION_DAYS -delete
+   find /var/log -name "*trend-analysis*.log" -mtime +$RETENTION_DAYS -delete
+   find /var/log -name "*capacity-planning*.log" -mtime +$RETENTION_DAYS -delete
+   find /var/log -name "*dashboard*.log" -mtime +$RETENTION_DAYS -delete
+   
+   # Compress old files
+   find $LOGDIR -name "*.log" -mtime +7 -exec gzip {} \;
+   
+   echo "Resource tracking cleanup completed - $(date)"
+   
+   # chmod +x /usr/local/bin/resource-cleanup.sh
+
+PART I: TESTING AND VALIDATION
+-------------------------------
+
+1. Test resource tracking scripts:
+   # /usr/local/bin/cpu-resource-tracker.sh
+   # /usr/local/bin/memory-resource-tracker.sh
+   # /usr/local/bin/disk-resource-tracker.sh
+   # /usr/local/bin/network-resource-tracker.sh eth0
+
+2. Test trend analysis:
+   # /usr/local/bin/cpu-trend-analyzer.sh 3
+   # /usr/local/bin/memory-trend-analyzer.sh 3
+   # /usr/local/bin/disk-trend-analyzer.sh 3
+
+3. Test dashboard and reporting:
+   # /usr/local/bin/resource-dashboard.sh
+   # /usr/local/bin/daily-resource-report.sh
+
+4. Test capacity planning:
+   # /usr/local/bin/resource-capacity-planner.sh 7
+
+5. Test alert system:
+   # /usr/local/bin/resource-alerts.sh
+   # tail -f /var/log/resource-alerts.log
+
+6. Generate test load and verify tracking:
+   # stress --cpu 2 --vm 1 --vm-bytes 512M --timeout 300s &
+   # sleep 60
+   # /usr/local/bin/resource-collector.sh
+   # /usr/local/bin/resource-dashboard.sh
+
+7. Verify data collection:
+   # ls -la /var/log/resource-tracking/
+   # head -5 /var/log/resource-tracking/cpu-usage-$(date +%Y%m%d).log
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status sysstat
+# sar -A
+# iostat -x 1 5
+# vmstat 1 5
+# free -h
+# df -h
+# ss -tuln
+# ps aux --sort=-%cpu
+
+EXPECTED RESULTS:
+-----------------
+- Comprehensive resource tracking operational
+- Historical data collection working
+- Trend analysis providing insights
+- Capacity planning reports generated
+- Alert system detecting thresholds
+- Automated collection scheduled
+- Dashboard providing real-time view
+
+VALIDATION CHECKLIST:
+---------------------
+□ Resource tracking scripts operational
+□ Data collection automated
+□ Trend analysis working
+□ Dashboard reports generated
+□ Alert system configured
+□ Capacity planning functional
+□ Historical data preserved
+□ Cleanup procedures scheduled
+
+CLEANUP:
+--------
+# rm /etc/cron.d/resource-tracking
+# rm /etc/cron.d/sysstat-detailed
+# rm /usr/local/bin/*resource*.sh
+# rm /usr/local/bin/*trend*.sh
+# rm /usr/local/bin/*capacity*.sh
+# rm /usr/local/bin/daily-*.sh
+# rm -rf /var/log/resource-tracking
+# systemctl stop sysstat

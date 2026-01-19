@@ -1,0 +1,663 @@
+RHCE RH254 HANDS-ON LAB: LOG FILE ANALYSIS AND MANAGEMENT
+========================================================
+
+LAB OBJECTIVE:
+Configure comprehensive log file analysis and management using rsyslog, journald, logrotate, and custom log analysis tools for system monitoring and troubleshooting
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of logging concepts
+- Basic knowledge of regular expressions
+- Familiarity with system services
+
+LAB SCENARIO:
+Implement enterprise log management system with centralized logging, automated analysis, log rotation, and alerting for system events and security monitoring.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20)
+- Log server (192.168.1.10) for centralized logging
+- Storage for log files and archives
+
+LAB TASKS:
+
+PART A: CONFIGURE RSYSLOG FOR ADVANCED LOGGING
+-----------------------------------------------
+
+1. Install and configure rsyslog:
+   # dnf install rsyslog rsyslog-relp -y
+   # systemctl enable rsyslog
+   # systemctl start rsyslog
+
+2. Configure advanced rsyslog settings:
+   # vim /etc/rsyslog.conf
+   
+   # Global directives
+   $ModLoad imuxsock
+   $ModLoad imjournal
+   $ModLoad imklog
+   $ModLoad immark
+   
+   # Work directory
+   $WorkDirectory /var/lib/rsyslog
+   
+   # Include all config files in /etc/rsyslog.d/
+   $IncludeConfig /etc/rsyslog.d/*.conf
+   
+   # High precision timestamps
+   $ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat
+   
+   # Log message reduction
+   $RepeatedMsgReduction on
+   
+   # Custom log files
+   local0.*    /var/log/custom-app.log
+   local1.*    /var/log/security-events.log
+   local2.*    /var/log/performance.log
+   
+   # Separate authentication logs
+   auth,authpriv.*    /var/log/auth.log
+   
+   # Emergency messages to all users
+   *.emerg    :omusrmsg:*
+
+3. Configure custom log facilities:
+   # vim /etc/rsyslog.d/custom-logs.conf
+   
+   # Application-specific logging
+   if $programname == 'httpd' then /var/log/httpd-custom.log
+   if $programname == 'sshd' then /var/log/ssh-custom.log
+   if $programname == 'mysqld' then /var/log/mysql-custom.log
+   
+   # Filter by message content
+   :msg, contains, "FAILED" /var/log/failed-events.log
+   :msg, contains, "ERROR" /var/log/error-events.log
+   :msg, contains, "WARNING" /var/log/warning-events.log
+   
+   # Stop processing after custom rules
+   & stop
+
+4. Configure remote logging:
+   # vim /etc/rsyslog.d/remote-logging.conf
+   
+   # Send logs to remote server
+   *.* @@192.168.1.10:514
+   
+   # Receive logs from remote clients (on log server)
+   $ModLoad imudp
+   $UDPServerRun 514
+   $UDPServerAddress 0.0.0.0
+   
+   # Template for remote logs
+   $template RemoteHost,"/var/log/remote/%HOSTNAME%/%$YEAR%-%$MONTH%-%$DAY%.log"
+   *.* ?RemoteHost
+
+5. Restart rsyslog:
+   # systemctl restart rsyslog
+   # systemctl status rsyslog
+
+PART B: CONFIGURE JOURNALD INTEGRATION
+---------------------------------------
+
+1. Configure systemd-journald:
+   # vim /etc/systemd/journald.conf
+   
+   [Journal]
+   Storage=persistent
+   Compress=yes
+   SplitMode=uid
+   SyncIntervalSec=5m
+   RateLimitInterval=30s
+   RateLimitBurst=1000
+   SystemMaxUse=4G
+   SystemKeepFree=15%
+   SystemMaxFileSize=128M
+   RuntimeMaxUse=4G
+   RuntimeKeepFree=15%
+   RuntimeMaxFileSize=128M
+   MaxRetentionSec=1month
+   MaxFileSec=1week
+   ForwardToSyslog=yes
+   ForwardToKMsg=no
+   ForwardToConsole=no
+   ForwardToWall=yes
+
+2. Configure journal forwarding to rsyslog:
+   # vim /etc/rsyslog.d/journal.conf
+   
+   # Forward journal to rsyslog
+   $ModLoad imjournal
+   $IMJournalStateFile imjournal.state
+   $IMJournalRatelimitInterval 600
+   $IMJournalRatelimitBurst 20000
+
+3. Restart journald:
+   # systemctl restart systemd-journald
+   # systemctl status systemd-journald
+
+PART C: CONFIGURE LOG ROTATION
+-------------------------------
+
+1. Configure logrotate for system logs:
+   # vim /etc/logrotate.d/custom-logs
+   
+   /var/log/custom-app.log {
+       daily
+       missingok
+       rotate 30
+       compress
+       delaycompress
+       notifempty
+       create 644 root root
+       postrotate
+           /bin/systemctl reload rsyslog > /dev/null 2>&1 || true
+       endscript
+   }
+   
+   /var/log/security-events.log {
+       weekly
+       missingok
+       rotate 52
+       compress
+       delaycompress
+       notifempty
+       create 600 root root
+       postrotate
+           /bin/systemctl reload rsyslog > /dev/null 2>&1 || true
+       endscript
+   }
+   
+   /var/log/httpd-custom.log /var/log/ssh-custom.log {
+       daily
+       missingok
+       rotate 14
+       compress
+       delaycompress
+       notifempty
+       create 644 root root
+       sharedscripts
+       postrotate
+           /bin/systemctl reload rsyslog > /dev/null 2>&1 || true
+       endscript
+   }
+
+2. Configure application-specific log rotation:
+   # vim /etc/logrotate.d/application-logs
+   
+   /var/log/failed-events.log /var/log/error-events.log {
+       hourly
+       missingok
+       rotate 168
+       compress
+       delaycompress
+       notifempty
+       create 644 root root
+       size 100M
+   }
+
+3. Test logrotate configuration:
+   # logrotate -d /etc/logrotate.conf
+   # logrotate -f /etc/logrotate.d/custom-logs
+
+PART D: CREATE LOG ANALYSIS TOOLS
+----------------------------------
+
+1. Create security log analyzer:
+   # vim /usr/local/bin/security-log-analyzer.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/auth.log"
+   REPORT_FILE="/var/log/security-analysis-$(date +%Y%m%d).log"
+   
+   echo "=== Security Log Analysis - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Failed SSH attempts
+   echo "FAILED SSH ATTEMPTS:" >> $REPORT_FILE
+   grep "Failed password" $LOGFILE | awk '{print $1, $2, $3, $11}' | sort | uniq -c | sort -nr >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Successful SSH logins
+   echo "SUCCESSFUL SSH LOGINS:" >> $REPORT_FILE
+   grep "Accepted password" $LOGFILE | awk '{print $1, $2, $3, $9, $11}' | sort | uniq -c >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Root login attempts
+   echo "ROOT LOGIN ATTEMPTS:" >> $REPORT_FILE
+   grep "root" $LOGFILE | grep -E "(Failed|Accepted)" | wc -l >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Invalid users
+   echo "INVALID USER ATTEMPTS:" >> $REPORT_FILE
+   grep "Invalid user" $LOGFILE | awk '{print $8}' | sort | uniq -c | sort -nr >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Sudo usage
+   echo "SUDO USAGE:" >> $REPORT_FILE
+   grep "sudo:" $LOGFILE | awk '{print $1, $2, $3, $5}' | sort | uniq -c >> $REPORT_FILE
+   
+   echo "Security analysis saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/security-log-analyzer.sh
+
+2. Create system error analyzer:
+   # vim /usr/local/bin/error-log-analyzer.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/messages"
+   ERROR_LOG="/var/log/error-events.log"
+   REPORT_FILE="/var/log/error-analysis-$(date +%Y%m%d).log"
+   
+   echo "=== System Error Analysis - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Critical errors
+   echo "CRITICAL ERRORS:" >> $REPORT_FILE
+   grep -i "critical\|fatal\|panic" $LOGFILE | tail -20 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Service failures
+   echo "SERVICE FAILURES:" >> $REPORT_FILE
+   grep -i "failed\|failure" $LOGFILE | grep systemd | tail -20 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Kernel errors
+   echo "KERNEL ERRORS:" >> $REPORT_FILE
+   grep "kernel:" $LOGFILE | grep -i "error\|warning" | tail -20 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Disk errors
+   echo "DISK ERRORS:" >> $REPORT_FILE
+   grep -i "disk\|ata\|scsi" $LOGFILE | grep -i "error\|fail" | tail -10 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Memory errors
+   echo "MEMORY ERRORS:" >> $REPORT_FILE
+   grep -i "memory\|oom" $LOGFILE | tail -10 >> $REPORT_FILE
+   
+   echo "Error analysis saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/error-log-analyzer.sh
+
+3. Create performance log analyzer:
+   # vim /usr/local/bin/performance-log-analyzer.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/messages"
+   REPORT_FILE="/var/log/performance-analysis-$(date +%Y%m%d).log"
+   
+   echo "=== Performance Log Analysis - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # High load warnings
+   echo "HIGH LOAD EVENTS:" >> $REPORT_FILE
+   grep -i "load" $LOGFILE | grep -E "[5-9]\.[0-9]|[0-9][0-9]\." | tail -10 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Out of memory events
+   echo "OUT OF MEMORY EVENTS:" >> $REPORT_FILE
+   grep -i "out of memory\|oom-killer" $LOGFILE | tail -10 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Disk space warnings
+   echo "DISK SPACE WARNINGS:" >> $REPORT_FILE
+   grep -i "no space left\|disk full" $LOGFILE | tail -10 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Network timeouts
+   echo "NETWORK TIMEOUT EVENTS:" >> $REPORT_FILE
+   grep -i "timeout\|connection refused" $LOGFILE | tail -10 >> $REPORT_FILE
+   
+   echo "Performance analysis saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/performance-log-analyzer.sh
+
+PART E: CREATE LOG MONITORING AND ALERTING
+-------------------------------------------
+
+1. Create real-time log monitor:
+   # vim /usr/local/bin/log-monitor.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/messages"
+   ALERT_LOG="/var/log/log-alerts.log"
+   
+   # Keywords to monitor
+   CRITICAL_KEYWORDS="panic|fatal|critical|emergency"
+   ERROR_KEYWORDS="error|failed|failure|denied"
+   SECURITY_KEYWORDS="authentication failure|invalid user|failed password"
+   
+   tail -f $LOGFILE | while read line; do
+       # Check for critical events
+       if echo "$line" | grep -iE "$CRITICAL_KEYWORDS" >/dev/null; then
+           echo "$(date): CRITICAL ALERT - $line" >> $ALERT_LOG
+           echo "CRITICAL: $line" | wall
+       fi
+       
+       # Check for errors
+       if echo "$line" | grep -iE "$ERROR_KEYWORDS" >/dev/null; then
+           echo "$(date): ERROR ALERT - $line" >> $ALERT_LOG
+       fi
+       
+       # Check for security events
+       if echo "$line" | grep -iE "$SECURITY_KEYWORDS" >/dev/null; then
+           echo "$(date): SECURITY ALERT - $line" >> $ALERT_LOG
+       fi
+   done
+   
+   # chmod +x /usr/local/bin/log-monitor.sh
+
+2. Create log threshold monitor:
+   # vim /usr/local/bin/log-threshold-monitor.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/auth.log"
+   THRESHOLD=10
+   TIME_WINDOW=300  # 5 minutes
+   ALERT_LOG="/var/log/threshold-alerts.log"
+   
+   # Count failed login attempts in last 5 minutes
+   FAILED_ATTEMPTS=$(grep "Failed password" $LOGFILE | \
+       awk -v window=$TIME_WINDOW '
+       BEGIN { cmd="date +%s"; cmd | getline now; close(cmd) }
+       {
+           cmd="date -d \"" $1 " " $2 " " $3 "\" +%s 2>/dev/null"; 
+           if((cmd | getline timestamp) > 0 && (now - timestamp) <= window) count++
+           close(cmd)
+       }
+       END { print count+0 }')
+   
+   if [ $FAILED_ATTEMPTS -gt $THRESHOLD ]; then
+       echo "$(date): THRESHOLD ALERT - $FAILED_ATTEMPTS failed login attempts in last 5 minutes" >> $ALERT_LOG
+       echo "High number of failed login attempts detected: $FAILED_ATTEMPTS" | wall
+   fi
+   
+   # chmod +x /usr/local/bin/log-threshold-monitor.sh
+
+3. Create log size monitor:
+   # vim /usr/local/bin/log-size-monitor.sh
+   
+   #!/bin/bash
+   LOG_DIR="/var/log"
+   SIZE_THRESHOLD=100  # MB
+   ALERT_LOG="/var/log/size-alerts.log"
+   
+   find $LOG_DIR -name "*.log" -type f | while read logfile; do
+       SIZE=$(du -m "$logfile" | cut -f1)
+       if [ $SIZE -gt $SIZE_THRESHOLD ]; then
+           echo "$(date): SIZE ALERT - $logfile is ${SIZE}MB" >> $ALERT_LOG
+       fi
+   done
+   
+   # Check total log directory size
+   TOTAL_SIZE=$(du -sm $LOG_DIR | cut -f1)
+   if [ $TOTAL_SIZE -gt 1000 ]; then  # 1GB threshold
+       echo "$(date): TOTAL SIZE ALERT - Log directory is ${TOTAL_SIZE}MB" >> $ALERT_LOG
+   fi
+   
+   # chmod +x /usr/local/bin/log-size-monitor.sh
+
+PART F: CREATE JOURNALCTL ANALYSIS TOOLS
+-----------------------------------------
+
+1. Create journal analyzer:
+   # vim /usr/local/bin/journal-analyzer.sh
+   
+   #!/bin/bash
+   REPORT_FILE="/var/log/journal-analysis-$(date +%Y%m%d).log"
+   
+   echo "=== Journal Analysis - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # System boot analysis
+   echo "SYSTEM BOOT ANALYSIS:" >> $REPORT_FILE
+   journalctl --list-boots | tail -5 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Service failures in last 24 hours
+   echo "SERVICE FAILURES (Last 24 hours):" >> $REPORT_FILE
+   journalctl --since "24 hours ago" --priority=err | grep "systemd" | tail -20 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Kernel messages
+   echo "KERNEL MESSAGES (Last 24 hours):" >> $REPORT_FILE
+   journalctl --since "24 hours ago" -k --priority=warning | tail -20 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Authentication events
+   echo "AUTHENTICATION EVENTS (Last 24 hours):" >> $REPORT_FILE
+   journalctl --since "24 hours ago" -u sshd | grep -E "(Accepted|Failed)" | tail -20 >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Disk usage by journal
+   echo "JOURNAL DISK USAGE:" >> $REPORT_FILE
+   journalctl --disk-usage >> $REPORT_FILE
+   
+   echo "Journal analysis saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/journal-analyzer.sh
+
+2. Create service log extractor:
+   # vim /usr/local/bin/service-log-extractor.sh
+   
+   #!/bin/bash
+   SERVICE=$1
+   HOURS=${2:-24}
+   
+   if [ -z "$SERVICE" ]; then
+       echo "Usage: $0 <service_name> [hours_back]"
+       echo "Example: $0 httpd 48"
+       exit 1
+   fi
+   
+   OUTPUT_FILE="/tmp/${SERVICE}-logs-$(date +%Y%m%d_%H%M%S).log"
+   
+   echo "=== $SERVICE Service Logs (Last $HOURS hours) ===" > $OUTPUT_FILE
+   echo "Generated: $(date)" >> $OUTPUT_FILE
+   echo >> $OUTPUT_FILE
+   
+   journalctl -u $SERVICE --since "${HOURS} hours ago" >> $OUTPUT_FILE
+   
+   echo "Service logs extracted to: $OUTPUT_FILE"
+   
+   # chmod +x /usr/local/bin/service-log-extractor.sh
+
+PART G: CREATE LOG SEARCH AND FILTERING TOOLS
+----------------------------------------------
+
+1. Create advanced log search tool:
+   # vim /usr/local/bin/log-search.sh
+   
+   #!/bin/bash
+   SEARCH_TERM=$1
+   LOG_FILE=${2:-"/var/log/messages"}
+   TIME_RANGE=${3:-"24"}
+   
+   if [ -z "$SEARCH_TERM" ]; then
+       echo "Usage: $0 <search_term> [log_file] [hours_back]"
+       echo "Example: $0 'failed password' /var/log/auth.log 48"
+       exit 1
+   fi
+   
+   RESULT_FILE="/tmp/search-results-$(date +%Y%m%d_%H%M%S).log"
+   
+   echo "=== Log Search Results ===" > $RESULT_FILE
+   echo "Search term: $SEARCH_TERM" >> $RESULT_FILE
+   echo "Log file: $LOG_FILE" >> $RESULT_FILE
+   echo "Time range: Last $TIME_RANGE hours" >> $RESULT_FILE
+   echo "Generated: $(date)" >> $RESULT_FILE
+   echo >> $RESULT_FILE
+   
+   # Search in traditional log files
+   if [ -f "$LOG_FILE" ]; then
+       grep -i "$SEARCH_TERM" $LOG_FILE | tail -100 >> $RESULT_FILE
+   fi
+   
+   # Search in journal
+   echo >> $RESULT_FILE
+   echo "=== Journal Search Results ===" >> $RESULT_FILE
+   journalctl --since "${TIME_RANGE} hours ago" | grep -i "$SEARCH_TERM" | tail -50 >> $RESULT_FILE
+   
+   echo "Search results saved to: $RESULT_FILE"
+   cat $RESULT_FILE
+   
+   # chmod +x /usr/local/bin/log-search.sh
+
+2. Create log statistics generator:
+   # vim /usr/local/bin/log-statistics.sh
+   
+   #!/bin/bash
+   LOGFILE=${1:-"/var/log/messages"}
+   REPORT_FILE="/var/log/log-statistics-$(date +%Y%m%d).log"
+   
+   echo "=== Log Statistics - $(date) ===" > $REPORT_FILE
+   echo "Log file: $LOGFILE" >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   if [ -f "$LOGFILE" ]; then
+       # Total lines
+       echo "TOTAL LINES: $(wc -l < $LOGFILE)" >> $REPORT_FILE
+       echo >> $REPORT_FILE
+       
+       # Top services by log entries
+       echo "TOP SERVICES BY LOG ENTRIES:" >> $REPORT_FILE
+       awk '{print $5}' $LOGFILE | sort | uniq -c | sort -nr | head -10 >> $REPORT_FILE
+       echo >> $REPORT_FILE
+       
+       # Log entries by hour
+       echo "LOG ENTRIES BY HOUR (Today):" >> $REPORT_FILE
+       grep "$(date +%b\ %d)" $LOGFILE | awk '{print $3}' | cut -d: -f1 | sort | uniq -c >> $REPORT_FILE
+       echo >> $REPORT_FILE
+       
+       # Error/Warning counts
+       echo "ERROR/WARNING COUNTS:" >> $REPORT_FILE
+       echo "Errors: $(grep -ci error $LOGFILE)" >> $REPORT_FILE
+       echo "Warnings: $(grep -ci warning $LOGFILE)" >> $REPORT_FILE
+       echo "Critical: $(grep -ci critical $LOGFILE)" >> $REPORT_FILE
+   fi
+   
+   echo "Statistics saved to: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/log-statistics.sh
+
+PART H: CONFIGURE AUTOMATED LOG MANAGEMENT
+-------------------------------------------
+
+1. Create log cleanup script:
+   # vim /usr/local/bin/log-cleanup.sh
+   
+   #!/bin/bash
+   LOG_DIR="/var/log"
+   RETENTION_DAYS=30
+   ARCHIVE_DIR="/var/log/archive"
+   
+   mkdir -p $ARCHIVE_DIR
+   
+   echo "Starting log cleanup - $(date)"
+   
+   # Archive old logs
+   find $LOG_DIR -name "*.log" -mtime +$RETENTION_DAYS -exec mv {} $ARCHIVE_DIR/ \;
+   
+   # Compress archived logs
+   find $ARCHIVE_DIR -name "*.log" -exec gzip {} \;
+   
+   # Remove very old archives
+   find $ARCHIVE_DIR -name "*.gz" -mtime +90 -delete
+   
+   # Clean journal logs
+   journalctl --vacuum-time=30d
+   journalctl --vacuum-size=1G
+   
+   echo "Log cleanup completed - $(date)"
+   
+   # chmod +x /usr/local/bin/log-cleanup.sh
+
+2. Schedule log management tasks:
+   # vim /etc/cron.d/log-management
+   
+   # Run log analysis every hour
+   0 * * * * root /usr/local/bin/security-log-analyzer.sh
+   30 * * * * root /usr/local/bin/error-log-analyzer.sh
+   
+   # Run threshold monitoring every 5 minutes
+   */5 * * * * root /usr/local/bin/log-threshold-monitor.sh
+   
+   # Run size monitoring every 30 minutes
+   */30 * * * * root /usr/local/bin/log-size-monitor.sh
+   
+   # Run journal analysis daily
+   0 2 * * * root /usr/local/bin/journal-analyzer.sh
+   
+   # Run log cleanup weekly
+   0 3 * * 0 root /usr/local/bin/log-cleanup.sh
+   
+   # Generate daily statistics
+   0 1 * * * root /usr/local/bin/log-statistics.sh
+
+PART I: TESTING AND VALIDATION
+-------------------------------
+
+1. Test log generation:
+   # logger -p local0.info "Test message for custom application"
+   # logger -p auth.warning "Test security event"
+   # logger -p local1.error "Test error message"
+
+2. Test log analysis tools:
+   # /usr/local/bin/security-log-analyzer.sh
+   # /usr/local/bin/error-log-analyzer.sh
+   # /usr/local/bin/performance-log-analyzer.sh
+
+3. Test journal analysis:
+   # /usr/local/bin/journal-analyzer.sh
+   # /usr/local/bin/service-log-extractor.sh sshd 24
+
+4. Test log search:
+   # /usr/local/bin/log-search.sh "failed password"
+   # /usr/local/bin/log-statistics.sh /var/log/auth.log
+
+5. Test monitoring:
+   # /usr/local/bin/log-threshold-monitor.sh
+   # /usr/local/bin/log-size-monitor.sh
+
+6. Verify log rotation:
+   # logrotate -f /etc/logrotate.d/custom-logs
+   # ls -la /var/log/
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status rsyslog
+# journalctl -u rsyslog -f
+# tail -f /var/log/messages
+# journalctl --verify
+# logrotate -d /etc/logrotate.conf
+# rsyslogd -N1
+
+EXPECTED RESULTS:
+-----------------
+- Advanced logging configuration operational
+- Log analysis tools generating reports
+- Real-time monitoring and alerting working
+- Log rotation configured and functional
+- Journal integration working properly
+- Automated log management active
+
+VALIDATION CHECKLIST:
+---------------------
+□ Rsyslog configured with custom facilities
+□ Journald integration working
+□ Log rotation policies active
+□ Analysis tools generating reports
+□ Monitoring and alerting functional
+□ Search and filtering tools operational
+□ Automated management scheduled
+□ Remote logging configured
+
+CLEANUP:
+--------
+# systemctl stop rsyslog
+# rm /etc/rsyslog.d/custom-logs.conf
+# rm /etc/rsyslog.d/remote-logging.conf
+# rm /etc/logrotate.d/custom-logs
+# rm /etc/cron.d/log-management
+# rm /usr/local/bin/*-analyzer.sh
+# rm /usr/local/bin/log-*.sh
+# rm -rf /var/log/archive

@@ -1,0 +1,233 @@
+RHCE RH254 HANDS-ON LAB: NETWORK INTERFACE BONDING AND TEAMING
+==============================================================
+
+LAB OBJECTIVE:
+Configure network interface bonding and teaming for high availability and load balancing
+
+PREREQUISITES:
+- RHEL 7/8 system with multiple network interfaces
+- Root access
+- Understanding of network configuration
+
+LAB SCENARIO:
+Configure network bonding for redundancy and teaming for load balancing using multiple network interfaces.
+
+EQUIPMENT NEEDED:
+- RHEL system with at least 2 network interfaces (eth1, eth2)
+- Network switch supporting bonding/teaming
+- Network connectivity for testing
+
+LAB TASKS:
+
+PART A: NETWORK INTERFACE BONDING CONFIGURATION
+------------------------------------------------
+
+1. Install required packages:
+   # yum install NetworkManager-team -y
+
+2. Identify available network interfaces:
+   # ip link show
+   # nmcli device status
+   # lspci | grep -i ethernet
+
+3. Create bonding configuration (Method 1 - Traditional):
+   # vim /etc/sysconfig/network-scripts/ifcfg-bond0
+   
+   DEVICE=bond0
+   BONDING_OPTS="mode=active-backup miimon=100"
+   TYPE=Bond
+   BONDING_MASTER=yes
+   BOOTPROTO=static
+   IPADDR=192.168.1.100
+   NETMASK=255.255.255.0
+   GATEWAY=192.168.1.1
+   DNS1=8.8.8.8
+   ONBOOT=yes
+
+4. Configure slave interfaces:
+   # vim /etc/sysconfig/network-scripts/ifcfg-eth1
+   
+   DEVICE=eth1
+   TYPE=Ethernet
+   SLAVE=yes
+   MASTER=bond0
+   ONBOOT=yes
+   
+   # vim /etc/sysconfig/network-scripts/ifcfg-eth2
+   
+   DEVICE=eth2
+   TYPE=Ethernet
+   SLAVE=yes
+   MASTER=bond0
+   ONBOOT=yes
+
+5. Load bonding module:
+   # modprobe bonding
+   # echo "bonding" >> /etc/modules-load.d/bonding.conf
+
+6. Restart network services:
+   # systemctl restart network
+   # systemctl restart NetworkManager
+
+PART B: NETWORK TEAMING CONFIGURATION (RHEL 7/8)
+--------------------------------------------------
+
+1. Create team interface using nmcli:
+   # nmcli connection add type team con-name team0 ifname team0 \
+     config '{"runner": {"name": "activebackup"}}'
+
+2. Configure IP address for team interface:
+   # nmcli connection modify team0 ipv4.addresses 192.168.1.101/24
+   # nmcli connection modify team0 ipv4.gateway 192.168.1.1
+   # nmcli connection modify team0 ipv4.dns 8.8.8.8
+   # nmcli connection modify team0 ipv4.method manual
+
+3. Add slave interfaces to team:
+   # nmcli connection add type team-slave con-name team0-eth1 \
+     ifname eth1 master team0
+   # nmcli connection add type team-slave con-name team0-eth2 \
+     ifname eth2 master team0
+
+4. Activate team connections:
+   # nmcli connection up team0
+   # nmcli connection up team0-eth1
+   # nmcli connection up team0-eth2
+
+PART C: ADVANCED BONDING MODES CONFIGURATION
+---------------------------------------------
+
+1. Configure Load Balancing (mode=balance-rr):
+   # vim /etc/sysconfig/network-scripts/ifcfg-bond1
+   
+   DEVICE=bond1
+   BONDING_OPTS="mode=balance-rr miimon=100"
+   TYPE=Bond
+   BONDING_MASTER=yes
+   BOOTPROTO=static
+   IPADDR=192.168.1.102
+   NETMASK=255.255.255.0
+   ONBOOT=yes
+
+2. Configure 802.3ad LACP bonding:
+   # vim /etc/sysconfig/network-scripts/ifcfg-bond2
+   
+   DEVICE=bond2
+   BONDING_OPTS="mode=802.3ad miimon=100 lacp_rate=1"
+   TYPE=Bond
+   BONDING_MASTER=yes
+   BOOTPROTO=static
+   IPADDR=192.168.1.103
+   NETMASK=255.255.255.0
+   ONBOOT=yes
+
+3. Configure team with load balancing:
+   # nmcli connection add type team con-name team1 ifname team1 \
+     config '{"runner": {"name": "loadbalance"}}'
+
+4. Configure team with LACP:
+   # nmcli connection add type team con-name team2 ifname team2 \
+     config '{"runner": {"name": "lacp"}}'
+
+PART D: TESTING AND VERIFICATION
+---------------------------------
+
+1. Check bonding status:
+   # cat /proc/net/bonding/bond0
+   # ip addr show bond0
+   # ethtool bond0
+
+2. Check team status:
+   # teamdctl team0 state
+   # teamnl team0 ports
+   # ip addr show team0
+
+3. Test failover (bonding):
+   # ip link set eth1 down
+   # cat /proc/net/bonding/bond0
+   # ping -c 5 192.168.1.1
+   # ip link set eth1 up
+
+4. Test failover (teaming):
+   # teamdctl team0 port remove eth1
+   # ping -c 5 192.168.1.1
+   # teamdctl team0 port add eth1
+
+5. Monitor network traffic:
+   # iftop -i bond0
+   # iftop -i team0
+   # watch -n 1 'cat /proc/net/dev | grep -E "(bond0|team0)"'
+
+PART E: PERFORMANCE TESTING
+----------------------------
+
+1. Test bandwidth with iperf3:
+   # yum install iperf3 -y
+   # iperf3 -s  # On server
+   # iperf3 -c 192.168.1.100 -t 60  # On client
+
+2. Test with different bonding modes:
+   # echo "balance-rr" > /sys/class/net/bond0/bonding/mode
+   # iperf3 -c 192.168.1.100 -t 30
+   
+   # echo "active-backup" > /sys/class/net/bond0/bonding/mode
+   # iperf3 -c 192.168.1.100 -t 30
+
+3. Monitor interface statistics:
+   # watch -n 1 'cat /proc/net/dev'
+   # sar -n DEV 1 10
+
+PART F: TROUBLESHOOTING AND MONITORING
+---------------------------------------
+
+1. Check interface status:
+   # nmcli device status
+   # nmcli connection show
+   # ip link show
+
+2. Monitor bonding events:
+   # tail -f /var/log/messages | grep bond
+   # dmesg | grep -i bond
+
+3. Check team runner status:
+   # teamdctl team0 state view
+   # teamdctl team0 config dump
+
+4. Network connectivity testing:
+   # ping -I bond0 192.168.1.1
+   # ping -I team0 192.168.1.1
+   # traceroute -i bond0 8.8.8.8
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# nmcli device status
+# cat /proc/net/bonding/bond0
+# teamdctl team0 state
+# ip addr show
+# systemctl status NetworkManager
+# tail -f /var/log/messages
+
+EXPECTED RESULTS:
+-----------------
+- Bonded interfaces provide redundancy
+- Team interfaces provide load balancing
+- Failover works automatically
+- Network performance improved
+- Configuration persists after reboot
+
+VALIDATION CHECKLIST:
+---------------------
+□ Bonding interface created and active
+□ Team interface created and active
+□ Slave interfaces properly configured
+□ IP connectivity working
+□ Failover testing successful
+□ Performance improvement verified
+□ Configuration persistent
+
+CLEANUP:
+--------
+# nmcli connection delete team0 team0-eth1 team0-eth2
+# nmcli connection delete bond0
+# rm /etc/sysconfig/network-scripts/ifcfg-bond*
+# rm /etc/sysconfig/network-scripts/ifcfg-team*
+# systemctl restart NetworkManager

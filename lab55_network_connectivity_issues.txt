@@ -1,0 +1,738 @@
+RHCE RH254 HANDS-ON LAB: NETWORK CONNECTIVITY ISSUES
+====================================================
+
+LAB OBJECTIVE:
+Master comprehensive network troubleshooting techniques including connectivity diagnosis, DNS resolution issues, routing problems, firewall conflicts, and network service failures in enterprise Linux environments
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of TCP/IP networking concepts
+- Knowledge of network configuration tools
+- Familiarity with network services and protocols
+
+LAB SCENARIO:
+Diagnose and resolve various network connectivity issues that prevent systems from communicating properly, including physical layer problems, configuration errors, DNS failures, and service-related network issues.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20) - Primary test system
+- Secondary system (192.168.1.21) - Remote test target
+- Network infrastructure (switch, router)
+- Network monitoring tools
+
+LAB TASKS:
+
+PART A: NETWORK DIAGNOSTICS FRAMEWORK
+--------------------------------------
+
+1. Create network diagnostics structure:
+   # mkdir -p /opt/network-diagnostics/{scripts,logs,configs,tools}
+   # mkdir -p /opt/network-diagnostics/scenarios/{connectivity,dns,routing,firewall}
+
+2. Create network analyzer tool:
+   # vim /opt/network-diagnostics/scripts/network-analyzer.sh
+   
+   #!/bin/bash
+   #
+   # Network Connectivity Analyzer
+   #
+   
+   DIAG_ROOT="/opt/network-diagnostics"
+   LOG_FILE="$DIAG_ROOT/logs/network-analysis.log"
+   
+   log_message() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
+   }
+   
+   # Basic network information gathering
+   gather_network_info() {
+       log_message "INFO" "Gathering network information"
+       
+       # Network interfaces
+       ip addr show > "$DIAG_ROOT/logs/interfaces.txt"
+       ip link show > "$DIAG_ROOT/logs/link-status.txt"
+       
+       # Routing table
+       ip route show > "$DIAG_ROOT/logs/routing-table.txt"
+       
+       # ARP table
+       ip neigh show > "$DIAG_ROOT/logs/arp-table.txt"
+       
+       # Network statistics
+       ss -tuln > "$DIAG_ROOT/logs/listening-ports.txt"
+       ss -tun > "$DIAG_ROOT/logs/active-connections.txt"
+       
+       # Network configuration files
+       cat /etc/resolv.conf > "$DIAG_ROOT/logs/resolv-conf.txt"
+       ls -la /etc/sysconfig/network-scripts/ > "$DIAG_ROOT/logs/network-scripts.txt"
+       
+       log_message "INFO" "Network information gathered"
+   }
+   
+   # Test basic connectivity
+   test_basic_connectivity() {
+       local target="${1:-8.8.8.8}"
+       
+       log_message "INFO" "Testing basic connectivity to $target"
+       
+       # Ping test
+       if ping -c 4 "$target" > "$DIAG_ROOT/logs/ping-test.txt" 2>&1; then
+           log_message "INFO" "Ping to $target successful"
+       else
+           log_message "ERROR" "Ping to $target failed"
+       fi
+       
+       # Traceroute
+       traceroute "$target" > "$DIAG_ROOT/logs/traceroute-test.txt" 2>&1
+       
+       # MTU discovery
+       ping -M do -s 1472 -c 1 "$target" > "$DIAG_ROOT/logs/mtu-test.txt" 2>&1
+       
+       log_message "INFO" "Basic connectivity tests completed"
+   }
+   
+   # Analyze network performance
+   analyze_network_performance() {
+       log_message "INFO" "Analyzing network performance"
+       
+       # Interface statistics
+       cat /proc/net/dev > "$DIAG_ROOT/logs/interface-stats.txt"
+       
+       # Network errors
+       netstat -i > "$DIAG_ROOT/logs/interface-errors.txt"
+       
+       # Bandwidth test preparation
+       cat > "$DIAG_ROOT/tools/bandwidth-test.sh" << 'EOF'
+   #!/bin/bash
+   # Simple bandwidth test using dd and nc
+   
+   TARGET_HOST="$1"
+   TARGET_PORT="${2:-12345}"
+   
+   if [ -z "$TARGET_HOST" ]; then
+       echo "Usage: $0 <target_host> [port]"
+       exit 1
+   fi
+   
+   echo "Testing bandwidth to $TARGET_HOST:$TARGET_PORT"
+   
+   # Send test data
+   dd if=/dev/zero bs=1M count=100 2>/dev/null | \
+   pv -r | \
+   nc "$TARGET_HOST" "$TARGET_PORT"
+   EOF
+       
+       chmod +x "$DIAG_ROOT/tools/bandwidth-test.sh"
+       
+       log_message "INFO" "Network performance analysis completed"
+   }
+
+3. Create connectivity tester:
+   # vim /opt/network-diagnostics/scripts/connectivity-tester.sh
+   
+   #!/bin/bash
+   #
+   # Comprehensive Connectivity Tester
+   #
+   
+   # Test layer 2 connectivity
+   test_layer2_connectivity() {
+       local target_mac="$1"
+       
+       log_message "INFO" "Testing Layer 2 connectivity"
+       
+       # ARP ping
+       if command -v arping >/dev/null 2>&1; then
+           arping -c 4 -I eth0 "$target_mac" > "$DIAG_ROOT/logs/arping-test.txt" 2>&1
+       fi
+       
+       # Check switch connectivity
+       ethtool eth0 > "$DIAG_ROOT/logs/ethtool-eth0.txt" 2>/dev/null
+       
+       log_message "INFO" "Layer 2 connectivity test completed"
+   }
+   
+   # Test layer 3 connectivity
+   test_layer3_connectivity() {
+       local target_ip="$1"
+       
+       log_message "INFO" "Testing Layer 3 connectivity to $target_ip"
+       
+       # ICMP ping
+       ping -c 10 -i 0.2 "$target_ip" > "$DIAG_ROOT/logs/icmp-test-${target_ip}.txt" 2>&1
+       
+       # Different packet sizes
+       for size in 64 512 1024 1500; do
+           ping -c 3 -s "$size" "$target_ip" >> "$DIAG_ROOT/logs/ping-sizes-${target_ip}.txt" 2>&1
+       done
+       
+       log_message "INFO" "Layer 3 connectivity test completed"
+   }
+   
+   # Test layer 4 connectivity
+   test_layer4_connectivity() {
+       local target_host="$1"
+       local target_port="$2"
+       
+       log_message "INFO" "Testing Layer 4 connectivity to $target_host:$target_port"
+       
+       # TCP connection test
+       timeout 10 bash -c "echo >/dev/tcp/$target_host/$target_port" 2>/dev/null
+       if [ $? -eq 0 ]; then
+           log_message "INFO" "TCP connection to $target_host:$target_port successful"
+       else
+           log_message "ERROR" "TCP connection to $target_host:$target_port failed"
+       fi
+       
+       # Telnet test
+       timeout 5 telnet "$target_host" "$target_port" > "$DIAG_ROOT/logs/telnet-${target_host}-${target_port}.txt" 2>&1
+       
+       # Nmap port scan
+       if command -v nmap >/dev/null 2>&1; then
+           nmap -p "$target_port" "$target_host" > "$DIAG_ROOT/logs/nmap-${target_host}-${target_port}.txt" 2>&1
+       fi
+       
+       log_message "INFO" "Layer 4 connectivity test completed"
+   }
+
+PART B: DNS TROUBLESHOOTING
+---------------------------
+
+1. Create DNS diagnostics tool:
+   # vim /opt/network-diagnostics/scripts/dns-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # DNS Resolution Diagnostics
+   #
+   
+   # Test DNS resolution
+   test_dns_resolution() {
+       local hostname="${1:-google.com}"
+       
+       log_message "INFO" "Testing DNS resolution for $hostname"
+       
+       # Basic nslookup
+       nslookup "$hostname" > "$DIAG_ROOT/logs/nslookup-${hostname}.txt" 2>&1
+       
+       # Dig queries
+       dig "$hostname" > "$DIAG_ROOT/logs/dig-${hostname}.txt" 2>&1
+       dig "$hostname" MX >> "$DIAG_ROOT/logs/dig-${hostname}.txt" 2>&1
+       dig "$hostname" NS >> "$DIAG_ROOT/logs/dig-${hostname}.txt" 2>&1
+       
+       # Host command
+       host "$hostname" > "$DIAG_ROOT/logs/host-${hostname}.txt" 2>&1
+       
+       # Test different DNS servers
+       for dns_server in 8.8.8.8 1.1.1.1 208.67.222.222; do
+           dig @"$dns_server" "$hostname" > "$DIAG_ROOT/logs/dig-${hostname}-${dns_server}.txt" 2>&1
+       done
+       
+       log_message "INFO" "DNS resolution test completed"
+   }
+   
+   # Analyze DNS configuration
+   analyze_dns_config() {
+       log_message "INFO" "Analyzing DNS configuration"
+       
+       # Check resolv.conf
+       cat /etc/resolv.conf > "$DIAG_ROOT/logs/resolv-conf-analysis.txt"
+       
+       # Check nsswitch.conf
+       grep hosts /etc/nsswitch.conf > "$DIAG_ROOT/logs/nsswitch-hosts.txt"
+       
+       # Check systemd-resolved
+       if systemctl is-active systemd-resolved >/dev/null 2>&1; then
+           systemd-resolve --status > "$DIAG_ROOT/logs/systemd-resolved-status.txt" 2>&1
+       fi
+       
+       # Check NetworkManager DNS
+       if command -v nmcli >/dev/null 2>&1; then
+           nmcli dev show > "$DIAG_ROOT/logs/networkmanager-dns.txt"
+       fi
+       
+       log_message "INFO" "DNS configuration analysis completed"
+   }
+   
+   # DNS performance testing
+   test_dns_performance() {
+       log_message "INFO" "Testing DNS performance"
+       
+       # DNS lookup timing
+       for i in {1..10}; do
+           time nslookup google.com 2>&1 | grep real
+       done > "$DIAG_ROOT/logs/dns-timing.txt"
+       
+       # DNS cache testing
+       systemctl flush-dns 2>/dev/null || systemd-resolve --flush-caches 2>/dev/null
+       
+       # Test multiple queries
+       for domain in google.com facebook.com amazon.com; do
+           time dig "$domain" >/dev/null 2>&1
+       done
+       
+       log_message "INFO" "DNS performance testing completed"
+   }
+   
+   # Fix common DNS issues
+   fix_dns_issues() {
+       log_message "INFO" "Attempting to fix common DNS issues"
+       
+       # Backup current configuration
+       cp /etc/resolv.conf /etc/resolv.conf.backup
+       
+       # Set fallback DNS servers
+       cat > /etc/resolv.conf << 'EOF'
+   # Fallback DNS configuration
+   nameserver 8.8.8.8
+   nameserver 1.1.1.1
+   search localdomain
+   EOF
+       
+       # Flush DNS cache
+       systemctl restart systemd-resolved 2>/dev/null || true
+       
+       # Test resolution
+       if nslookup google.com >/dev/null 2>&1; then
+           log_message "INFO" "DNS resolution working with fallback servers"
+       else
+           log_message "ERROR" "DNS resolution still failing"
+           # Restore backup
+           mv /etc/resolv.conf.backup /etc/resolv.conf
+       fi
+   }
+
+2. Create DNS scenario simulator:
+   # vim /opt/network-diagnostics/scenarios/dns/dns-scenarios.sh
+   
+   #!/bin/bash
+   # DNS Problem Scenarios
+   
+   # Simulate DNS server failure
+   simulate_dns_failure() {
+       echo "Simulating DNS server failure..."
+       cp /etc/resolv.conf /etc/resolv.conf.backup
+       echo "nameserver 192.168.255.255" > /etc/resolv.conf
+       echo "DNS failure scenario created"
+   }
+   
+   # Simulate DNS timeout
+   simulate_dns_timeout() {
+       echo "Simulating DNS timeout..."
+       cp /etc/resolv.conf /etc/resolv.conf.backup
+       echo -e "nameserver 10.0.0.1\noptions timeout:1 attempts:1" > /etc/resolv.conf
+       echo "DNS timeout scenario created"
+   }
+   
+   # Restore DNS configuration
+   restore_dns_config() {
+       if [ -f /etc/resolv.conf.backup ]; then
+           mv /etc/resolv.conf.backup /etc/resolv.conf
+           echo "DNS configuration restored"
+       fi
+   }
+
+PART C: ROUTING AND GATEWAY TROUBLESHOOTING
+--------------------------------------------
+
+1. Create routing diagnostics tool:
+   # vim /opt/network-diagnostics/scripts/routing-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Routing and Gateway Diagnostics
+   #
+   
+   # Analyze routing table
+   analyze_routing_table() {
+       log_message "INFO" "Analyzing routing table"
+       
+       # Display routing table
+       ip route show table all > "$DIAG_ROOT/logs/routing-table-all.txt"
+       
+       # Check default gateway
+       ip route show default > "$DIAG_ROOT/logs/default-gateway.txt"
+       
+       # Test gateway connectivity
+       local gateway=$(ip route show default | awk '/default/ {print $3}' | head -1)
+       if [ -n "$gateway" ]; then
+           ping -c 5 "$gateway" > "$DIAG_ROOT/logs/gateway-ping.txt" 2>&1
+           log_message "INFO" "Gateway connectivity test: $gateway"
+       else
+           log_message "ERROR" "No default gateway found"
+       fi
+       
+       # Check routing rules
+       ip rule show > "$DIAG_ROOT/logs/routing-rules.txt"
+       
+       log_message "INFO" "Routing table analysis completed"
+   }
+   
+   # Test routing paths
+   test_routing_paths() {
+       local destinations=("8.8.8.8" "1.1.1.1" "192.168.1.1")
+       
+       log_message "INFO" "Testing routing paths"
+       
+       for dest in "${destinations[@]}"; do
+           log_message "INFO" "Testing route to $dest"
+           
+           # Traceroute
+           traceroute "$dest" > "$DIAG_ROOT/logs/traceroute-${dest}.txt" 2>&1
+           
+           # MTR (if available)
+           if command -v mtr >/dev/null 2>&1; then
+               mtr -r -c 10 "$dest" > "$DIAG_ROOT/logs/mtr-${dest}.txt" 2>&1
+           fi
+           
+           # Route lookup
+           ip route get "$dest" > "$DIAG_ROOT/logs/route-lookup-${dest}.txt" 2>&1
+       done
+       
+       log_message "INFO" "Routing path tests completed"
+   }
+   
+   # Fix routing issues
+   fix_routing_issues() {
+       log_message "INFO" "Attempting to fix routing issues"
+       
+       # Check if default gateway is reachable
+       local gateway=$(ip route show default | awk '/default/ {print $3}' | head -1)
+       
+       if [ -n "$gateway" ]; then
+           if ! ping -c 1 -W 5 "$gateway" >/dev/null 2>&1; then
+               log_message "WARN" "Default gateway unreachable: $gateway"
+               
+               # Try to find alternative gateway
+               local network=$(ip route show | grep "$(ip route show default | awk '{print $5}')" | grep -v default | head -1 | awk '{print $1}')
+               if [ -n "$network" ]; then
+                   local alt_gateway=$(echo "$network" | sed 's/\.[0-9]*\/.*/.1/')
+                   log_message "INFO" "Trying alternative gateway: $alt_gateway"
+                   ip route add default via "$alt_gateway" metric 100
+               fi
+           fi
+       else
+           log_message "ERROR" "No default gateway configured"
+           # Attempt to add default gateway
+           local interface=$(ip link show up | grep -E "^[0-9]+: e" | head -1 | cut -d: -f2 | tr -d ' ')
+           if [ -n "$interface" ]; then
+               log_message "INFO" "Attempting to configure default gateway for $interface"
+               dhclient "$interface"
+           fi
+       fi
+   }
+
+PART D: FIREWALL AND SECURITY TROUBLESHOOTING
+----------------------------------------------
+
+1. Create firewall diagnostics tool:
+   # vim /opt/network-diagnostics/scripts/firewall-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Firewall and Security Diagnostics
+   #
+   
+   # Analyze firewall configuration
+   analyze_firewall_config() {
+       log_message "INFO" "Analyzing firewall configuration"
+       
+       # Firewalld status
+       if systemctl is-active firewalld >/dev/null 2>&1; then
+           firewall-cmd --list-all > "$DIAG_ROOT/logs/firewalld-config.txt"
+           firewall-cmd --list-all-zones > "$DIAG_ROOT/logs/firewalld-zones.txt"
+           firewall-cmd --get-active-zones > "$DIAG_ROOT/logs/firewalld-active-zones.txt"
+       fi
+       
+       # Iptables rules
+       iptables -L -n -v > "$DIAG_ROOT/logs/iptables-rules.txt" 2>/dev/null
+       
+       # SELinux status
+       if command -v getenforce >/dev/null 2>&1; then
+           getenforce > "$DIAG_ROOT/logs/selinux-status.txt"
+           sestatus > "$DIAG_ROOT/logs/selinux-details.txt" 2>/dev/null
+       fi
+       
+       # TCP Wrappers
+       if [ -f /etc/hosts.allow ]; then
+           cat /etc/hosts.allow > "$DIAG_ROOT/logs/hosts-allow.txt"
+       fi
+       if [ -f /etc/hosts.deny ]; then
+           cat /etc/hosts.deny > "$DIAG_ROOT/logs/hosts-deny.txt"
+       fi
+       
+       log_message "INFO" "Firewall configuration analysis completed"
+   }
+   
+   # Test firewall rules
+   test_firewall_rules() {
+       local target_host="$1"
+       local target_port="$2"
+       
+       log_message "INFO" "Testing firewall rules for $target_host:$target_port"
+       
+       # Test connection before and after firewall rules
+       timeout 5 bash -c "echo >/dev/tcp/$target_host/$target_port" 2>/dev/null
+       local before_result=$?
+       
+       # Temporarily disable firewall for testing
+       if systemctl is-active firewalld >/dev/null 2>&1; then
+           systemctl stop firewalld
+           timeout 5 bash -c "echo >/dev/tcp/$target_host/$target_port" 2>/dev/null
+           local after_result=$?
+           systemctl start firewalld
+           
+           if [ $before_result -ne 0 ] && [ $after_result -eq 0 ]; then
+               log_message "WARN" "Firewall blocking connection to $target_host:$target_port"
+           fi
+       fi
+       
+       log_message "INFO" "Firewall rule testing completed"
+   }
+   
+   # Create firewall troubleshooting rules
+   create_troubleshooting_rules() {
+       log_message "INFO" "Creating firewall troubleshooting rules"
+       
+       # Backup current configuration
+       firewall-cmd --runtime-to-permanent
+       
+       # Add common troubleshooting ports
+       firewall-cmd --add-service=ssh --permanent
+       firewall-cmd --add-service=http --permanent
+       firewall-cmd --add-service=https --permanent
+       firewall-cmd --add-port=8080/tcp --permanent
+       
+       # Create troubleshooting zone
+       firewall-cmd --new-zone=troubleshooting --permanent
+       firewall-cmd --zone=troubleshooting --add-service=ssh --permanent
+       firewall-cmd --zone=troubleshooting --set-target=ACCEPT --permanent
+       
+       firewall-cmd --reload
+       
+       log_message "INFO" "Firewall troubleshooting rules created"
+   }
+
+PART E: NETWORK SERVICE TROUBLESHOOTING
+----------------------------------------
+
+1. Create service diagnostics tool:
+   # vim /opt/network-diagnostics/scripts/service-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Network Service Diagnostics
+   #
+   
+   # Analyze network services
+   analyze_network_services() {
+       log_message "INFO" "Analyzing network services"
+       
+       # List listening services
+       ss -tlnp > "$DIAG_ROOT/logs/listening-services.txt"
+       
+       # Check common network services
+       local services=("sshd" "httpd" "nginx" "named" "postfix" "smb" "nfs-server")
+       
+       for service in "${services[@]}"; do
+           if systemctl is-enabled "$service" >/dev/null 2>&1; then
+               systemctl status "$service" --no-pager > "$DIAG_ROOT/logs/service-${service}-status.txt"
+               journalctl -u "$service" --no-pager -n 50 > "$DIAG_ROOT/logs/service-${service}-logs.txt"
+           fi
+       done
+       
+       # Check for port conflicts
+       netstat -tlnp > "$DIAG_ROOT/logs/port-usage.txt" 2>/dev/null
+       
+       log_message "INFO" "Network service analysis completed"
+   }
+   
+   # Test service connectivity
+   test_service_connectivity() {
+       local service_name="$1"
+       local service_port="$2"
+       
+       log_message "INFO" "Testing connectivity to service: $service_name"
+       
+       # Check if service is running
+       if systemctl is-active "$service_name" >/dev/null 2>&1; then
+           log_message "INFO" "Service $service_name is active"
+           
+           # Test local connectivity
+           if [ -n "$service_port" ]; then
+               timeout 5 bash -c "echo >/dev/tcp/localhost/$service_port" 2>/dev/null
+               if [ $? -eq 0 ]; then
+                   log_message "INFO" "Local connectivity to $service_name successful"
+               else
+                   log_message "ERROR" "Local connectivity to $service_name failed"
+               fi
+           fi
+       else
+           log_message "ERROR" "Service $service_name is not active"
+       fi
+   }
+   
+   # Fix common service issues
+   fix_service_issues() {
+       local service_name="$1"
+       
+       log_message "INFO" "Attempting to fix issues with service: $service_name"
+       
+       # Restart service
+       systemctl restart "$service_name"
+       
+       # Check if service started successfully
+       if systemctl is-active "$service_name" >/dev/null 2>&1; then
+           log_message "INFO" "Service $service_name restarted successfully"
+       else
+           log_message "ERROR" "Failed to restart service $service_name"
+           
+           # Check for configuration errors
+           systemctl status "$service_name" --no-pager > "$DIAG_ROOT/logs/service-${service_name}-error.txt"
+           
+           # Try to identify the issue
+           journalctl -u "$service_name" --no-pager -n 20 | grep -i error
+       fi
+   }
+
+PART F: COMPREHENSIVE NETWORK TROUBLESHOOTING
+----------------------------------------------
+
+1. Create master troubleshooting script:
+   # vim /opt/network-diagnostics/scripts/network-troubleshooter.sh
+   
+   #!/bin/bash
+   #
+   # Master Network Troubleshooter
+   #
+   
+   # Comprehensive network diagnosis
+   run_full_diagnosis() {
+       log_message "INFO" "Starting comprehensive network diagnosis"
+       
+       # Basic information gathering
+       /opt/network-diagnostics/scripts/network-analyzer.sh gather_network_info
+       
+       # Connectivity tests
+       /opt/network-diagnostics/scripts/connectivity-tester.sh test_layer3_connectivity 8.8.8.8
+       /opt/network-diagnostics/scripts/connectivity-tester.sh test_layer4_connectivity google.com 80
+       
+       # DNS tests
+       /opt/network-diagnostics/scripts/dns-diagnostics.sh test_dns_resolution
+       /opt/network-diagnostics/scripts/dns-diagnostics.sh analyze_dns_config
+       
+       # Routing tests
+       /opt/network-diagnostics/scripts/routing-diagnostics.sh analyze_routing_table
+       /opt/network-diagnostics/scripts/routing-diagnostics.sh test_routing_paths
+       
+       # Firewall analysis
+       /opt/network-diagnostics/scripts/firewall-diagnostics.sh analyze_firewall_config
+       
+       # Service analysis
+       /opt/network-diagnostics/scripts/service-diagnostics.sh analyze_network_services
+       
+       log_message "INFO" "Comprehensive network diagnosis completed"
+   }
+   
+   # Generate troubleshooting report
+   generate_troubleshooting_report() {
+       local report_file="$DIAG_ROOT/logs/network-troubleshooting-report-$(date +%Y%m%d_%H%M%S).html"
+       
+       cat > "$report_file" << 'EOF'
+   <!DOCTYPE html>
+   <html>
+   <head>
+       <title>Network Troubleshooting Report</title>
+   </head>
+   <body>
+       <h1>Network Troubleshooting Report</h1>
+   EOF
+       
+       echo "<p>Generated: $(date)</p>" >> "$report_file"
+       
+       # Add network interface status
+       echo "<h2>Network Interfaces</h2><pre>" >> "$report_file"
+       ip addr show >> "$report_file"
+       echo "</pre>" >> "$report_file"
+       
+       # Add connectivity test results
+       echo "<h2>Connectivity Tests</h2><pre>" >> "$report_file"
+       if [ -f "$DIAG_ROOT/logs/ping-test.txt" ]; then
+           cat "$DIAG_ROOT/logs/ping-test.txt" >> "$report_file"
+       fi
+       echo "</pre>" >> "$report_file"
+       
+       echo "</body></html>" >> "$report_file"
+       
+       log_message "INFO" "Troubleshooting report generated: $report_file"
+   }
+
+PART G: TESTING AND AUTOMATION
+-------------------------------
+
+1. Test network diagnostics framework:
+   # chmod +x /opt/network-diagnostics/scripts/*.sh
+   # /opt/network-diagnostics/scripts/network-analyzer.sh gather_network_info
+   # /opt/network-diagnostics/scripts/network-analyzer.sh test_basic_connectivity
+
+2. Test DNS diagnostics:
+   # /opt/network-diagnostics/scripts/dns-diagnostics.sh test_dns_resolution google.com
+   # /opt/network-diagnostics/scripts/dns-diagnostics.sh analyze_dns_config
+
+3. Test routing diagnostics:
+   # /opt/network-diagnostics/scripts/routing-diagnostics.sh analyze_routing_table
+   # /opt/network-diagnostics/scripts/routing-diagnostics.sh test_routing_paths
+
+4. Test firewall diagnostics:
+   # /opt/network-diagnostics/scripts/firewall-diagnostics.sh analyze_firewall_config
+   # /opt/network-diagnostics/scripts/firewall-diagnostics.sh test_firewall_rules google.com 80
+
+5. Run comprehensive diagnosis:
+   # /opt/network-diagnostics/scripts/network-troubleshooter.sh run_full_diagnosis
+   # /opt/network-diagnostics/scripts/network-troubleshooter.sh generate_troubleshooting_report
+
+6. Create monitoring automation:
+   # vim /etc/cron.d/network-monitoring
+   
+   # Network monitoring automation
+   */15 * * * * root /opt/network-diagnostics/scripts/network-analyzer.sh test_basic_connectivity
+   0 */4 * * * root /opt/network-diagnostics/scripts/dns-diagnostics.sh test_dns_resolution
+   0 2 * * * root /opt/network-diagnostics/scripts/network-troubleshooter.sh run_full_diagnosis
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# ip addr show
+# ip route show
+# ss -tuln
+# ping -c 4 8.8.8.8
+# nslookup google.com
+# traceroute 8.8.8.8
+# firewall-cmd --list-all
+# systemctl status NetworkManager
+# journalctl -u NetworkManager
+
+EXPECTED RESULTS:
+-----------------
+- Network diagnostics framework operational
+- Connectivity testing tools functional
+- DNS troubleshooting working correctly
+- Routing diagnostics identifying issues
+- Firewall analysis detecting blocks
+- Service diagnostics finding problems
+- Comprehensive reporting available
+
+VALIDATION CHECKLIST:
+---------------------
+□ Network diagnostics framework created
+□ Connectivity testing tools working
+□ DNS diagnostics operational
+□ Routing troubleshooting functional
+□ Firewall diagnostics active
+□ Service analysis working
+□ Comprehensive diagnosis running
+□ Automated monitoring scheduled
+
+CLEANUP:
+--------
+# rm -rf /opt/network-diagnostics
+# rm /etc/cron.d/network-monitoring
+# /opt/network-diagnostics/scenarios/dns/dns-scenarios.sh restore_dns_config

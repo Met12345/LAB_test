@@ -1,0 +1,1399 @@
+RHCE RH254 HANDS-ON LAB: SYSTEM RESTORATION PROCEDURES
+====================================================
+
+LAB OBJECTIVE:
+Configure comprehensive system restoration procedures including bare-metal recovery, selective file restoration, system state recovery, and automated restoration workflows
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of backup and recovery concepts
+- Knowledge of system boot processes and filesystems
+- Familiarity with system administration tools
+
+LAB SCENARIO:
+Implement enterprise system restoration capabilities with bare-metal recovery, granular file restoration, system configuration recovery, and automated restoration procedures for complete system recovery scenarios.
+
+EQUIPMENT NEEDED:
+- Primary RHEL system (192.168.1.20)
+- Backup storage with system images
+- Boot media for bare-metal recovery
+- Network access to backup repositories
+
+LAB TASKS:
+
+PART A: BARE-METAL SYSTEM RESTORATION
+--------------------------------------
+
+1. Create bare-metal recovery preparation:
+   # mkdir -p /opt/system-restore/{images,scripts,configs,logs}
+   # chmod 700 /opt/system-restore
+
+2. Create system image for bare-metal recovery:
+   # vim /usr/local/bin/create-bare-metal-image.sh
+   
+   #!/bin/bash
+   IMAGE_TYPE=${1:-"full"}
+   DESTINATION=${2:-"/opt/system-restore/images"}
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/system-restore/logs/bare-metal-image-$TIMESTAMP.log"
+   
+   echo "=== BARE-METAL IMAGE CREATION - $(date) ===" | tee $LOG_FILE
+   echo "Image Type: $IMAGE_TYPE" | tee -a $LOG_FILE
+   echo "Destination: $DESTINATION" | tee -a $LOG_FILE
+   
+   mkdir -p "$DESTINATION"
+   
+   case $IMAGE_TYPE in
+       "full")
+           IMAGE_FILE="$DESTINATION/bare-metal-full-$TIMESTAMP.tar.gz"
+           echo "Creating full bare-metal image..." | tee -a $LOG_FILE
+           
+           # Create comprehensive system image
+           tar --exclude=/proc \
+               --exclude=/sys \
+               --exclude=/dev \
+               --exclude=/run \
+               --exclude=/mnt \
+               --exclude=/media \
+               --exclude=/tmp \
+               --exclude=/var/tmp \
+               --exclude=/opt/system-restore/images \
+               --exclude=/lost+found \
+               --one-file-system \
+               -czf "$IMAGE_FILE" / 2>&1 | tee -a $LOG_FILE
+           ;;
+       "system")
+           IMAGE_FILE="$DESTINATION/bare-metal-system-$TIMESTAMP.tar.gz"
+           echo "Creating system-only bare-metal image..." | tee -a $LOG_FILE
+           
+           # Create system directories image (excluding user data)
+           tar --exclude=/home \
+               --exclude=/proc \
+               --exclude=/sys \
+               --exclude=/dev \
+               --exclude=/run \
+               --exclude=/mnt \
+               --exclude=/media \
+               --exclude=/tmp \
+               --exclude=/var/tmp \
+               --exclude=/opt/system-restore/images \
+               --one-file-system \
+               -czf "$IMAGE_FILE" / 2>&1 | tee -a $LOG_FILE
+           ;;
+       "boot")
+           IMAGE_FILE="$DESTINATION/bare-metal-boot-$TIMESTAMP.tar.gz"
+           echo "Creating boot-only bare-metal image..." | tee -a $LOG_FILE
+           
+           # Create boot and essential system image
+           tar -czf "$IMAGE_FILE" \
+               /boot \
+               /etc \
+               /root \
+               /usr/local \
+               /var/lib/rpm 2>&1 | tee -a $LOG_FILE
+           ;;
+       *)
+           echo "Invalid image type: $IMAGE_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   if [ $? -eq 0 ]; then
+       echo "Bare-metal image created successfully: $IMAGE_FILE" | tee -a $LOG_FILE
+       echo "Image size: $(du -h "$IMAGE_FILE" | cut -f1)" | tee -a $LOG_FILE
+       
+       # Create image metadata
+       cat > "${IMAGE_FILE}.info" << EOF
+   Bare-Metal Recovery Image Information
+   Created: $(date)
+   Hostname: $(hostname)
+   Kernel: $(uname -r)
+   OS Version: $(cat /etc/redhat-release)
+   Image Type: $IMAGE_TYPE
+   Image File: $(basename "$IMAGE_FILE")
+   Image Size: $(du -h "$IMAGE_FILE" | cut -f1)
+   Checksum: $(sha256sum "$IMAGE_FILE" | cut -d' ' -f1)
+   
+   Partition Information:
+   $(lsblk -f)
+   
+   Mount Points:
+   $(mount | grep -E '^/dev/')
+   
+   Package List:
+   $(rpm -qa | sort)
+   EOF
+       
+       # Create checksum
+       sha256sum "$IMAGE_FILE" > "${IMAGE_FILE}.sha256"
+       
+   else
+       echo "Bare-metal image creation failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/create-bare-metal-image.sh
+
+3. Create bare-metal restoration script:
+   # vim /usr/local/bin/bare-metal-restore.sh
+   
+   #!/bin/bash
+   IMAGE_FILE=$1
+   TARGET_DEVICE=${2:-"/dev/sda"}
+   RESTORE_MODE=${3:-"interactive"}
+   
+   if [ -z "$IMAGE_FILE" ]; then
+       echo "Usage: $0 <image_file> [target_device] [restore_mode]"
+       echo "Restore modes: interactive, automatic, verify"
+       exit 1
+   fi
+   
+   if [ ! -f "$IMAGE_FILE" ]; then
+       echo "Image file not found: $IMAGE_FILE"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/system-restore/logs/bare-metal-restore-$TIMESTAMP.log"
+   
+   echo "=== BARE-METAL SYSTEM RESTORATION - $(date) ===" | tee $LOG_FILE
+   echo "Image File: $IMAGE_FILE" | tee -a $LOG_FILE
+   echo "Target Device: $TARGET_DEVICE" | tee -a $LOG_FILE
+   echo "Restore Mode: $RESTORE_MODE" | tee -a $LOG_FILE
+   
+   # Verify image integrity
+   echo "Verifying image integrity..." | tee -a $LOG_FILE
+   if [ -f "${IMAGE_FILE}.sha256" ]; then
+       if sha256sum -c "${IMAGE_FILE}.sha256" >/dev/null 2>&1; then
+           echo "Image integrity verification: PASSED" | tee -a $LOG_FILE
+       else
+           echo "Image integrity verification: FAILED" | tee -a $LOG_FILE
+           exit 1
+       fi
+   else
+       echo "No checksum file found, proceeding without verification" | tee -a $LOG_FILE
+   fi
+   
+   case $RESTORE_MODE in
+       "interactive")
+           echo "=== INTERACTIVE BARE-METAL RESTORE ===" | tee -a $LOG_FILE
+           echo "WARNING: This will completely overwrite the target system!" | tee -a $LOG_FILE
+           echo "Target device: $TARGET_DEVICE" | tee -a $LOG_FILE
+           echo "Continue? (yes/no): "
+           read CONFIRM
+           
+           if [ "$CONFIRM" != "yes" ]; then
+               echo "Restoration cancelled by user" | tee -a $LOG_FILE
+               exit 0
+           fi
+           
+           # Prepare target filesystem
+           echo "Preparing target filesystem..." | tee -a $LOG_FILE
+           
+           # Create partition table (basic single partition)
+           parted -s $TARGET_DEVICE mklabel msdos
+           parted -s $TARGET_DEVICE mkpart primary ext4 1MiB 100%
+           parted -s $TARGET_DEVICE set 1 boot on
+           
+           # Format partition
+           mkfs.ext4 -F ${TARGET_DEVICE}1
+           
+           # Mount target
+           MOUNT_POINT="/mnt/bare-metal-restore"
+           mkdir -p $MOUNT_POINT
+           mount ${TARGET_DEVICE}1 $MOUNT_POINT
+           
+           # Extract image to target
+           echo "Extracting system image to target..." | tee -a $LOG_FILE
+           tar -xzf "$IMAGE_FILE" -C $MOUNT_POINT 2>&1 | tee -a $LOG_FILE
+           
+           # Recreate essential directories
+           mkdir -p $MOUNT_POINT/{proc,sys,dev,run,tmp,var/tmp}
+           
+           # Install bootloader
+           echo "Installing bootloader..." | tee -a $LOG_FILE
+           mount --bind /proc $MOUNT_POINT/proc
+           mount --bind /sys $MOUNT_POINT/sys
+           mount --bind /dev $MOUNT_POINT/dev
+           
+           chroot $MOUNT_POINT grub2-install $TARGET_DEVICE 2>&1 | tee -a $LOG_FILE
+           chroot $MOUNT_POINT grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1 | tee -a $LOG_FILE
+           
+           # Update fstab
+           echo "Updating fstab..." | tee -a $LOG_FILE
+           DEVICE_UUID=$(blkid -s UUID -o value ${TARGET_DEVICE}1)
+           echo "UUID=$DEVICE_UUID / ext4 defaults 1 1" > $MOUNT_POINT/etc/fstab
+           
+           # Cleanup
+           umount $MOUNT_POINT/{proc,sys,dev}
+           umount $MOUNT_POINT
+           
+           echo "Bare-metal restoration completed successfully" | tee -a $LOG_FILE
+           ;;
+       "automatic")
+           echo "Automatic bare-metal restore not implemented for safety" | tee -a $LOG_FILE
+           echo "Use interactive mode for bare-metal restoration" | tee -a $LOG_FILE
+           exit 1
+           ;;
+       "verify")
+           echo "Verifying bare-metal image contents..." | tee -a $LOG_FILE
+           tar -tzf "$IMAGE_FILE" | head -50 | tee -a $LOG_FILE
+           echo "Image verification completed" | tee -a $LOG_FILE
+           ;;
+       *)
+           echo "Invalid restore mode: $RESTORE_MODE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   # chmod +x /usr/local/bin/bare-metal-restore.sh
+
+PART B: SELECTIVE FILE RESTORATION
+-----------------------------------
+
+1. Create selective file restoration system:
+   # vim /usr/local/bin/selective-restore.sh
+   
+   #!/bin/bash
+   BACKUP_SOURCE=$1
+   RESTORE_TARGET=${2:-"/"}
+   RESTORE_MODE=${3:-"interactive"}
+   
+   if [ -z "$BACKUP_SOURCE" ]; then
+       echo "Usage: $0 <backup_source> [restore_target] [restore_mode]"
+       echo "Restore modes: interactive, list, specific, pattern"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/system-restore/logs/selective-restore-$TIMESTAMP.log"
+   
+   echo "=== SELECTIVE FILE RESTORATION - $(date) ===" | tee $LOG_FILE
+   echo "Backup Source: $BACKUP_SOURCE" | tee -a $LOG_FILE
+   echo "Restore Target: $RESTORE_TARGET" | tee -a $LOG_FILE
+   echo "Restore Mode: $RESTORE_MODE" | tee -a $LOG_FILE
+   
+   # Verify backup source
+   if [ -f "$BACKUP_SOURCE" ]; then
+       echo "Backup source is a file (archive)" | tee -a $LOG_FILE
+       SOURCE_TYPE="archive"
+   elif [ -d "$BACKUP_SOURCE" ]; then
+       echo "Backup source is a directory" | tee -a $LOG_FILE
+       SOURCE_TYPE="directory"
+   else
+       echo "Backup source not found or invalid: $BACKUP_SOURCE" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   case $RESTORE_MODE in
+       "interactive")
+           echo "=== INTERACTIVE FILE RESTORATION ===" | tee -a $LOG_FILE
+           
+           if [ "$SOURCE_TYPE" = "archive" ]; then
+               echo "Available files in archive:" | tee -a $LOG_FILE
+               tar -tzf "$BACKUP_SOURCE" | head -20 | tee -a $LOG_FILE
+               echo "... (showing first 20 entries)" | tee -a $LOG_FILE
+               
+               echo "Enter files/directories to restore (one per line, empty line to finish):"
+               while read -r file_to_restore; do
+                   [ -z "$file_to_restore" ] && break
+                   
+                   echo "Restoring: $file_to_restore" | tee -a $LOG_FILE
+                   
+                   # Create target directory if needed
+                   TARGET_DIR="$RESTORE_TARGET/$(dirname "$file_to_restore")"
+                   mkdir -p "$TARGET_DIR"
+                   
+                   # Extract specific file
+                   tar -xzf "$BACKUP_SOURCE" -C "$RESTORE_TARGET" "$file_to_restore" 2>&1 | tee -a $LOG_FILE
+                   
+                   if [ $? -eq 0 ]; then
+                       echo "Successfully restored: $file_to_restore" | tee -a $LOG_FILE
+                   else
+                       echo "Failed to restore: $file_to_restore" | tee -a $LOG_FILE
+                   fi
+               done
+           else
+               echo "Available files in directory:" | tee -a $LOG_FILE
+               find "$BACKUP_SOURCE" -type f | head -20 | tee -a $LOG_FILE
+               echo "... (showing first 20 entries)" | tee -a $LOG_FILE
+               
+               echo "Enter files/directories to restore (one per line, empty line to finish):"
+               while read -r file_to_restore; do
+                   [ -z "$file_to_restore" ] && break
+                   
+                   SOURCE_FILE="$BACKUP_SOURCE/$file_to_restore"
+                   TARGET_FILE="$RESTORE_TARGET/$file_to_restore"
+                   
+                   if [ -e "$SOURCE_FILE" ]; then
+                       echo "Restoring: $file_to_restore" | tee -a $LOG_FILE
+                       
+                       # Create target directory
+                       mkdir -p "$(dirname "$TARGET_FILE")"
+                       
+                       # Copy file with attributes
+                       cp -a "$SOURCE_FILE" "$TARGET_FILE" 2>&1 | tee -a $LOG_FILE
+                       
+                       if [ $? -eq 0 ]; then
+                           echo "Successfully restored: $file_to_restore" | tee -a $LOG_FILE
+                       else
+                           echo "Failed to restore: $file_to_restore" | tee -a $LOG_FILE
+                       fi
+                   else
+                       echo "File not found in backup: $file_to_restore" | tee -a $LOG_FILE
+                   fi
+               done
+           fi
+           ;;
+       "list")
+           echo "=== LISTING BACKUP CONTENTS ===" | tee -a $LOG_FILE
+           
+           if [ "$SOURCE_TYPE" = "archive" ]; then
+               echo "Archive contents:" | tee -a $LOG_FILE
+               tar -tzf "$BACKUP_SOURCE" | tee -a $LOG_FILE
+           else
+               echo "Directory contents:" | tee -a $LOG_FILE
+               find "$BACKUP_SOURCE" -type f | tee -a $LOG_FILE
+           fi
+           ;;
+       "specific")
+           echo "Enter specific file path to restore: "
+           read SPECIFIC_FILE
+           
+           if [ -n "$SPECIFIC_FILE" ]; then
+               echo "Restoring specific file: $SPECIFIC_FILE" | tee -a $LOG_FILE
+               
+               if [ "$SOURCE_TYPE" = "archive" ]; then
+                   tar -xzf "$BACKUP_SOURCE" -C "$RESTORE_TARGET" "$SPECIFIC_FILE" 2>&1 | tee -a $LOG_FILE
+               else
+                   SOURCE_FILE="$BACKUP_SOURCE/$SPECIFIC_FILE"
+                   TARGET_FILE="$RESTORE_TARGET/$SPECIFIC_FILE"
+                   
+                   if [ -e "$SOURCE_FILE" ]; then
+                       mkdir -p "$(dirname "$TARGET_FILE")"
+                       cp -a "$SOURCE_FILE" "$TARGET_FILE" 2>&1 | tee -a $LOG_FILE
+                   else
+                       echo "File not found: $SPECIFIC_FILE" | tee -a $LOG_FILE
+                       exit 1
+                   fi
+               fi
+               
+               if [ $? -eq 0 ]; then
+                   echo "Successfully restored: $SPECIFIC_FILE" | tee -a $LOG_FILE
+               else
+                   echo "Failed to restore: $SPECIFIC_FILE" | tee -a $LOG_FILE
+                   exit 1
+               fi
+           fi
+           ;;
+       "pattern")
+           echo "Enter file pattern to restore (e.g., '*.conf'): "
+           read FILE_PATTERN
+           
+           if [ -n "$FILE_PATTERN" ]; then
+               echo "Restoring files matching pattern: $FILE_PATTERN" | tee -a $LOG_FILE
+               
+               if [ "$SOURCE_TYPE" = "archive" ]; then
+                   # Extract files matching pattern
+                   tar -tzf "$BACKUP_SOURCE" | grep "$FILE_PATTERN" | while read matching_file; do
+                       echo "Restoring: $matching_file" | tee -a $LOG_FILE
+                       tar -xzf "$BACKUP_SOURCE" -C "$RESTORE_TARGET" "$matching_file" 2>&1 | tee -a $LOG_FILE
+                   done
+               else
+                   # Copy files matching pattern
+                   find "$BACKUP_SOURCE" -name "$FILE_PATTERN" -type f | while read matching_file; do
+                       RELATIVE_PATH=${matching_file#$BACKUP_SOURCE/}
+                       TARGET_FILE="$RESTORE_TARGET/$RELATIVE_PATH"
+                       
+                       echo "Restoring: $RELATIVE_PATH" | tee -a $LOG_FILE
+                       mkdir -p "$(dirname "$TARGET_FILE")"
+                       cp -a "$matching_file" "$TARGET_FILE" 2>&1 | tee -a $LOG_FILE
+                   done
+               fi
+           fi
+           ;;
+       *)
+           echo "Invalid restore mode: $RESTORE_MODE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   echo "Selective file restoration completed" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/selective-restore.sh
+2. Create configuration restoration system:
+   # vim /usr/local/bin/config-restore.sh
+   
+   #!/bin/bash
+   CONFIG_BACKUP=$1
+   RESTORE_TYPE=${2:-"system"}
+   
+   if [ -z "$CONFIG_BACKUP" ]; then
+       echo "Usage: $0 <config_backup> [restore_type]"
+       echo "Restore types: system, network, services, users, all"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/system-restore/logs/config-restore-$TIMESTAMP.log"
+   
+   echo "=== CONFIGURATION RESTORATION - $(date) ===" | tee $LOG_FILE
+   echo "Config Backup: $CONFIG_BACKUP" | tee -a $LOG_FILE
+   echo "Restore Type: $RESTORE_TYPE" | tee -a $LOG_FILE
+   
+   # Create backup of current configuration
+   CURRENT_BACKUP="/tmp/current-config-backup-$TIMESTAMP.tar.gz"
+   echo "Creating backup of current configuration..." | tee -a $LOG_FILE
+   tar -czf "$CURRENT_BACKUP" /etc /root/.ssh /home/*/.ssh 2>/dev/null
+   echo "Current config backed up to: $CURRENT_BACKUP" | tee -a $LOG_FILE
+   
+   case $RESTORE_TYPE in
+       "system")
+           echo "Restoring system configuration..." | tee -a $LOG_FILE
+           
+           # Restore system configuration files
+           SYSTEM_CONFIGS="/etc/fstab /etc/hosts /etc/hostname /etc/resolv.conf /etc/sysctl.conf"
+           
+           for config in $SYSTEM_CONFIGS; do
+               if tar -tzf "$CONFIG_BACKUP" | grep -q "^${config#/}$"; then
+                   echo "Restoring: $config" | tee -a $LOG_FILE
+                   tar -xzf "$CONFIG_BACKUP" -C / "${config#/}" 2>&1 | tee -a $LOG_FILE
+               else
+                   echo "Config not found in backup: $config" | tee -a $LOG_FILE
+               fi
+           done
+           ;;
+       "network")
+           echo "Restoring network configuration..." | tee -a $LOG_FILE
+           
+           # Restore network configuration
+           NETWORK_CONFIGS="/etc/sysconfig/network-scripts /etc/NetworkManager /etc/hosts /etc/resolv.conf"
+           
+           for config in $NETWORK_CONFIGS; do
+               if tar -tzf "$CONFIG_BACKUP" | grep -q "^${config#/}"; then
+                   echo "Restoring: $config" | tee -a $LOG_FILE
+                   tar -xzf "$CONFIG_BACKUP" -C / "${config#/}" 2>&1 | tee -a $LOG_FILE
+               fi
+           done
+           
+           # Restart network services
+           echo "Restarting network services..." | tee -a $LOG_FILE
+           systemctl restart NetworkManager 2>&1 | tee -a $LOG_FILE
+           ;;
+       "services")
+           echo "Restoring service configurations..." | tee -a $LOG_FILE
+           
+           # Restore service configuration directories
+           SERVICE_CONFIGS="/etc/httpd /etc/nginx /etc/mysql /etc/postfix /etc/samba"
+           
+           for config in $SERVICE_CONFIGS; do
+               if tar -tzf "$CONFIG_BACKUP" | grep -q "^${config#/}"; then
+                   echo "Restoring: $config" | tee -a $LOG_FILE
+                   tar -xzf "$CONFIG_BACKUP" -C / "${config#/}" 2>&1 | tee -a $LOG_FILE
+               fi
+           done
+           ;;
+       "users")
+           echo "Restoring user configurations..." | tee -a $LOG_FILE
+           
+           # Restore user configuration files
+           USER_CONFIGS="/etc/passwd /etc/shadow /etc/group /etc/gshadow /home"
+           
+           for config in $USER_CONFIGS; do
+               if tar -tzf "$CONFIG_BACKUP" | grep -q "^${config#/}"; then
+                   echo "Restoring: $config" | tee -a $LOG_FILE
+                   tar -xzf "$CONFIG_BACKUP" -C / "${config#/}" 2>&1 | tee -a $LOG_FILE
+               fi
+           done
+           ;;
+       "all")
+           echo "Restoring all configurations..." | tee -a $LOG_FILE
+           
+           # Restore entire /etc directory
+           if tar -tzf "$CONFIG_BACKUP" | grep -q "^etc/"; then
+               echo "Restoring /etc directory..." | tee -a $LOG_FILE
+               tar -xzf "$CONFIG_BACKUP" -C / etc/ 2>&1 | tee -a $LOG_FILE
+           fi
+           
+           # Restore user configurations
+           if tar -tzf "$CONFIG_BACKUP" | grep -q "^home/"; then
+               echo "Restoring user configurations..." | tee -a $LOG_FILE
+               tar -xzf "$CONFIG_BACKUP" -C / home/ 2>&1 | tee -a $LOG_FILE
+           fi
+           
+           # Restore root configuration
+           if tar -tzf "$CONFIG_BACKUP" | grep -q "^root/"; then
+               echo "Restoring root configuration..." | tee -a $LOG_FILE
+               tar -xzf "$CONFIG_BACKUP" -C / root/ 2>&1 | tee -a $LOG_FILE
+           fi
+           ;;
+       *)
+           echo "Invalid restore type: $RESTORE_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   echo "Configuration restoration completed" | tee -a $LOG_FILE
+   echo "Previous configuration backed up to: $CURRENT_BACKUP" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/config-restore.sh
+
+PART C: SYSTEM STATE RESTORATION
+---------------------------------
+
+1. Create system state backup:
+   # vim /usr/local/bin/create-system-state.sh
+   
+   #!/bin/bash
+   STATE_TYPE=${1:-"full"}
+   DESTINATION=${2:-"/opt/system-restore/states"}
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/system-restore/logs/system-state-$TIMESTAMP.log"
+   
+   echo "=== SYSTEM STATE CREATION - $(date) ===" | tee $LOG_FILE
+   echo "State Type: $STATE_TYPE" | tee -a $LOG_FILE
+   echo "Destination: $DESTINATION" | tee -a $LOG_FILE
+   
+   mkdir -p "$DESTINATION"
+   STATE_DIR="$DESTINATION/system-state-$TIMESTAMP"
+   mkdir -p "$STATE_DIR"
+   
+   case $STATE_TYPE in
+       "full")
+           echo "Creating full system state..." | tee -a $LOG_FILE
+           
+           # System information
+           echo "Collecting system information..." | tee -a $LOG_FILE
+           uname -a > "$STATE_DIR/system-info.txt"
+           cat /etc/redhat-release >> "$STATE_DIR/system-info.txt"
+           uptime >> "$STATE_DIR/system-info.txt"
+           
+           # Hardware information
+           echo "Collecting hardware information..." | tee -a $LOG_FILE
+           lscpu > "$STATE_DIR/cpu-info.txt"
+           lsmem > "$STATE_DIR/memory-info.txt" 2>/dev/null
+           lsblk -f > "$STATE_DIR/storage-info.txt"
+           lspci > "$STATE_DIR/pci-info.txt"
+           lsusb > "$STATE_DIR/usb-info.txt" 2>/dev/null
+           
+           # Network configuration
+           echo "Collecting network configuration..." | tee -a $LOG_FILE
+           ip addr show > "$STATE_DIR/network-interfaces.txt"
+           ip route show > "$STATE_DIR/network-routes.txt"
+           ss -tuln > "$STATE_DIR/network-sockets.txt"
+           
+           # Service states
+           echo "Collecting service states..." | tee -a $LOG_FILE
+           systemctl list-units --type=service > "$STATE_DIR/services-active.txt"
+           systemctl list-unit-files --type=service > "$STATE_DIR/services-enabled.txt"
+           
+           # Package information
+           echo "Collecting package information..." | tee -a $LOG_FILE
+           rpm -qa | sort > "$STATE_DIR/installed-packages.txt"
+           
+           # Filesystem information
+           echo "Collecting filesystem information..." | tee -a $LOG_FILE
+           df -h > "$STATE_DIR/filesystem-usage.txt"
+           mount > "$STATE_DIR/mount-points.txt"
+           
+           # Process information
+           echo "Collecting process information..." | tee -a $LOG_FILE
+           ps aux > "$STATE_DIR/running-processes.txt"
+           
+           # Kernel modules
+           echo "Collecting kernel module information..." | tee -a $LOG_FILE
+           lsmod > "$STATE_DIR/kernel-modules.txt"
+           
+           # Cron jobs
+           echo "Collecting cron jobs..." | tee -a $LOG_FILE
+           crontab -l > "$STATE_DIR/root-crontab.txt" 2>/dev/null
+           ls -la /etc/cron.d/ > "$STATE_DIR/system-cron.txt" 2>/dev/null
+           ;;
+       "services")
+           echo "Creating services state..." | tee -a $LOG_FILE
+           
+           systemctl list-units --type=service > "$STATE_DIR/services-active.txt"
+           systemctl list-unit-files --type=service > "$STATE_DIR/services-enabled.txt"
+           
+           # Service configurations
+           tar -czf "$STATE_DIR/service-configs.tar.gz" /etc/systemd/system /usr/lib/systemd/system 2>/dev/null
+           ;;
+       "network")
+           echo "Creating network state..." | tee -a $LOG_FILE
+           
+           ip addr show > "$STATE_DIR/network-interfaces.txt"
+           ip route show > "$STATE_DIR/network-routes.txt"
+           ss -tuln > "$STATE_DIR/network-sockets.txt"
+           
+           # Network configurations
+           tar -czf "$STATE_DIR/network-configs.tar.gz" /etc/sysconfig/network-scripts /etc/NetworkManager 2>/dev/null
+           ;;
+       *)
+           echo "Invalid state type: $STATE_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   # Create state archive
+   STATE_ARCHIVE="$DESTINATION/system-state-$TIMESTAMP.tar.gz"
+   tar -czf "$STATE_ARCHIVE" -C "$DESTINATION" "system-state-$TIMESTAMP" 2>&1 | tee -a $LOG_FILE
+   
+   # Remove temporary directory
+   rm -rf "$STATE_DIR"
+   
+   if [ $? -eq 0 ]; then
+       echo "System state created successfully: $STATE_ARCHIVE" | tee -a $LOG_FILE
+       echo "State size: $(du -h "$STATE_ARCHIVE" | cut -f1)" | tee -a $LOG_FILE
+   else
+       echo "System state creation failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/create-system-state.sh
+
+2. Create system state restoration:
+   # vim /usr/local/bin/restore-system-state.sh
+   
+   #!/bin/bash
+   STATE_ARCHIVE=$1
+   RESTORE_TYPE=${2:-"verify"}
+   
+   if [ -z "$STATE_ARCHIVE" ]; then
+       echo "Usage: $0 <state_archive> [restore_type]"
+       echo "Restore types: verify, services, network, compare"
+       exit 1
+   fi
+   
+   if [ ! -f "$STATE_ARCHIVE" ]; then
+       echo "State archive not found: $STATE_ARCHIVE"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/system-restore/logs/state-restore-$TIMESTAMP.log"
+   TEMP_DIR="/tmp/state-restore-$TIMESTAMP"
+   
+   echo "=== SYSTEM STATE RESTORATION - $(date) ===" | tee $LOG_FILE
+   echo "State Archive: $STATE_ARCHIVE" | tee -a $LOG_FILE
+   echo "Restore Type: $RESTORE_TYPE" | tee -a $LOG_FILE
+   
+   # Extract state archive
+   mkdir -p "$TEMP_DIR"
+   tar -xzf "$STATE_ARCHIVE" -C "$TEMP_DIR" 2>&1 | tee -a $LOG_FILE
+   
+   STATE_DIR=$(find "$TEMP_DIR" -name "system-state-*" -type d | head -1)
+   
+   if [ ! -d "$STATE_DIR" ]; then
+       echo "Invalid state archive format" | tee -a $LOG_FILE
+       rm -rf "$TEMP_DIR"
+       exit 1
+   fi
+   
+   case $RESTORE_TYPE in
+       "verify")
+           echo "=== VERIFYING SYSTEM STATE ===" | tee -a $LOG_FILE
+           
+           echo "State archive contents:" | tee -a $LOG_FILE
+           ls -la "$STATE_DIR" | tee -a $LOG_FILE
+           
+           if [ -f "$STATE_DIR/system-info.txt" ]; then
+               echo "System information from state:" | tee -a $LOG_FILE
+               cat "$STATE_DIR/system-info.txt" | tee -a $LOG_FILE
+           fi
+           ;;
+       "services")
+           echo "=== RESTORING SERVICE STATES ===" | tee -a $LOG_FILE
+           
+           if [ -f "$STATE_DIR/services-enabled.txt" ]; then
+               echo "Restoring enabled services..." | tee -a $LOG_FILE
+               
+               # Get services that should be enabled
+               grep "enabled" "$STATE_DIR/services-enabled.txt" | awk '{print $1}' | while read service; do
+                   if systemctl list-unit-files | grep -q "^$service"; then
+                       echo "Enabling service: $service" | tee -a $LOG_FILE
+                       systemctl enable "$service" 2>&1 | tee -a $LOG_FILE
+                   fi
+               done
+               
+               # Start services that should be active
+               if [ -f "$STATE_DIR/services-active.txt" ]; then
+                   grep "active" "$STATE_DIR/services-active.txt" | awk '{print $1}' | while read service; do
+                       if systemctl list-units | grep -q "^$service"; then
+                           echo "Starting service: $service" | tee -a $LOG_FILE
+                           systemctl start "$service" 2>&1 | tee -a $LOG_FILE
+                       fi
+                   done
+               fi
+           fi
+           ;;
+       "network")
+           echo "=== RESTORING NETWORK STATE ===" | tee -a $LOG_FILE
+           
+           if [ -f "$STATE_DIR/network-configs.tar.gz" ]; then
+               echo "Restoring network configurations..." | tee -a $LOG_FILE
+               tar -xzf "$STATE_DIR/network-configs.tar.gz" -C / 2>&1 | tee -a $LOG_FILE
+               
+               echo "Restarting network services..." | tee -a $LOG_FILE
+               systemctl restart NetworkManager 2>&1 | tee -a $LOG_FILE
+           fi
+           ;;
+       "compare")
+           echo "=== COMPARING CURRENT STATE WITH ARCHIVED STATE ===" | tee -a $LOG_FILE
+           
+           # Compare services
+           if [ -f "$STATE_DIR/services-active.txt" ]; then
+               echo "Service comparison:" | tee -a $LOG_FILE
+               CURRENT_SERVICES="/tmp/current-services-$$"
+               systemctl list-units --type=service > "$CURRENT_SERVICES"
+               
+               echo "Services in archive but not currently active:" | tee -a $LOG_FILE
+               comm -23 <(grep "active" "$STATE_DIR/services-active.txt" | awk '{print $1}' | sort) \
+                        <(grep "active" "$CURRENT_SERVICES" | awk '{print $1}' | sort) | tee -a $LOG_FILE
+               
+               rm -f "$CURRENT_SERVICES"
+           fi
+           
+           # Compare packages
+           if [ -f "$STATE_DIR/installed-packages.txt" ]; then
+               echo "Package comparison:" | tee -a $LOG_FILE
+               CURRENT_PACKAGES="/tmp/current-packages-$$"
+               rpm -qa | sort > "$CURRENT_PACKAGES"
+               
+               echo "Packages in archive but not currently installed:" | tee -a $LOG_FILE
+               comm -23 "$STATE_DIR/installed-packages.txt" "$CURRENT_PACKAGES" | head -10 | tee -a $LOG_FILE
+               
+               echo "Packages currently installed but not in archive:" | tee -a $LOG_FILE
+               comm -13 "$STATE_DIR/installed-packages.txt" "$CURRENT_PACKAGES" | head -10 | tee -a $LOG_FILE
+               
+               rm -f "$CURRENT_PACKAGES"
+           fi
+           ;;
+       *)
+           echo "Invalid restore type: $RESTORE_TYPE" | tee -a $LOG_FILE
+           rm -rf "$TEMP_DIR"
+           exit 1
+           ;;
+   esac
+   
+   # Cleanup
+   rm -rf "$TEMP_DIR"
+   
+   echo "System state restoration completed" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/restore-system-state.sh
+
+PART D: AUTOMATED RESTORATION WORKFLOWS
+----------------------------------------
+
+1. Create master restoration controller:
+   # vim /usr/local/bin/restoration-controller.sh
+   
+   #!/bin/bash
+   RESTORATION_TYPE=$1
+   SOURCE_LOCATION=$2
+   RESTORE_LEVEL=${3:-"basic"}
+   
+   if [ $# -lt 2 ]; then
+       echo "Usage: $0 <restoration_type> <source_location> [restore_level]"
+       echo "Restoration types: bare-metal, selective, config, state, full"
+       echo "Restore levels: basic, advanced, complete"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/system-restore/logs/restoration-controller-$TIMESTAMP.log"
+   
+   echo "=== RESTORATION CONTROLLER - $(date) ===" | tee $LOG_FILE
+   echo "Restoration Type: $RESTORATION_TYPE" | tee -a $LOG_FILE
+   echo "Source Location: $SOURCE_LOCATION" | tee -a $LOG_FILE
+   echo "Restore Level: $RESTORE_LEVEL" | tee -a $LOG_FILE
+   
+   RESTORATION_SUCCESS=0
+   RESTORATION_FAILURES=0
+   
+   case $RESTORATION_TYPE in
+       "bare-metal")
+           echo "=== BARE-METAL RESTORATION WORKFLOW ===" | tee -a $LOG_FILE
+           
+           if /usr/local/bin/bare-metal-restore.sh "$SOURCE_LOCATION" "/dev/sda" "verify" 2>&1 | tee -a $LOG_FILE; then
+               echo "Bare-metal restoration verification: PASSED" | tee -a $LOG_FILE
+               RESTORATION_SUCCESS=$((RESTORATION_SUCCESS + 1))
+           else
+               echo "Bare-metal restoration verification: FAILED" | tee -a $LOG_FILE
+               RESTORATION_FAILURES=$((RESTORATION_FAILURES + 1))
+           fi
+           ;;
+       "selective")
+           echo "=== SELECTIVE RESTORATION WORKFLOW ===" | tee -a $LOG_FILE
+           
+           # Restore critical system files
+           CRITICAL_FILES="/etc/fstab /etc/passwd /etc/group /etc/hosts"
+           
+           for file in $CRITICAL_FILES; do
+               echo "Restoring critical file: $file" | tee -a $LOG_FILE
+               if /usr/local/bin/selective-restore.sh "$SOURCE_LOCATION" "/" "specific" <<< "$file" 2>&1 | tee -a $LOG_FILE; then
+                   RESTORATION_SUCCESS=$((RESTORATION_SUCCESS + 1))
+               else
+                   RESTORATION_FAILURES=$((RESTORATION_FAILURES + 1))
+               fi
+           done
+           ;;
+       "config")
+           echo "=== CONFIGURATION RESTORATION WORKFLOW ===" | tee -a $LOG_FILE
+           
+           case $RESTORE_LEVEL in
+               "basic")
+                   CONFIG_TYPES="system network"
+                   ;;
+               "advanced")
+                   CONFIG_TYPES="system network services"
+                   ;;
+               "complete")
+                   CONFIG_TYPES="all"
+                   ;;
+           esac
+           
+           for config_type in $CONFIG_TYPES; do
+               echo "Restoring $config_type configuration..." | tee -a $LOG_FILE
+               if /usr/local/bin/config-restore.sh "$SOURCE_LOCATION" "$config_type" 2>&1 | tee -a $LOG_FILE; then
+                   RESTORATION_SUCCESS=$((RESTORATION_SUCCESS + 1))
+               else
+                   RESTORATION_FAILURES=$((RESTORATION_FAILURES + 1))
+               fi
+           done
+           ;;
+       "state")
+           echo "=== SYSTEM STATE RESTORATION WORKFLOW ===" | tee -a $LOG_FILE
+           
+           # Verify state archive
+           if /usr/local/bin/restore-system-state.sh "$SOURCE_LOCATION" "verify" 2>&1 | tee -a $LOG_FILE; then
+               echo "State verification: PASSED" | tee -a $LOG_FILE
+               RESTORATION_SUCCESS=$((RESTORATION_SUCCESS + 1))
+               
+               # Restore services if advanced level
+               if [ "$RESTORE_LEVEL" != "basic" ]; then
+                   if /usr/local/bin/restore-system-state.sh "$SOURCE_LOCATION" "services" 2>&1 | tee -a $LOG_FILE; then
+                       RESTORATION_SUCCESS=$((RESTORATION_SUCCESS + 1))
+                   else
+                       RESTORATION_FAILURES=$((RESTORATION_FAILURES + 1))
+                   fi
+               fi
+           else
+               echo "State verification: FAILED" | tee -a $LOG_FILE
+               RESTORATION_FAILURES=$((RESTORATION_FAILURES + 1))
+           fi
+           ;;
+       "full")
+           echo "=== FULL RESTORATION WORKFLOW ===" | tee -a $LOG_FILE
+           
+           # Phase 1: Configuration restoration
+           echo "Phase 1: Configuration restoration" | tee -a $LOG_FILE
+           if /usr/local/bin/config-restore.sh "$SOURCE_LOCATION" "all" 2>&1 | tee -a $LOG_FILE; then
+               RESTORATION_SUCCESS=$((RESTORATION_SUCCESS + 1))
+           else
+               RESTORATION_FAILURES=$((RESTORATION_FAILURES + 1))
+           fi
+           
+           # Phase 2: Service restoration
+           echo "Phase 2: Service restoration" | tee -a $LOG_FILE
+           STATE_ARCHIVE=$(find "$(dirname "$SOURCE_LOCATION")" -name "*state*.tar.gz" | head -1)
+           if [ -n "$STATE_ARCHIVE" ]; then
+               if /usr/local/bin/restore-system-state.sh "$STATE_ARCHIVE" "services" 2>&1 | tee -a $LOG_FILE; then
+                   RESTORATION_SUCCESS=$((RESTORATION_SUCCESS + 1))
+               else
+                   RESTORATION_FAILURES=$((RESTORATION_FAILURES + 1))
+               fi
+           fi
+           
+           # Phase 3: Verification
+           echo "Phase 3: System verification" | tee -a $LOG_FILE
+           /usr/local/bin/restoration-verification.sh 2>&1 | tee -a $LOG_FILE
+           ;;
+       *)
+           echo "Invalid restoration type: $RESTORATION_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   # Summary
+   echo >> $LOG_FILE
+   echo "=== RESTORATION SUMMARY ===" | tee -a $LOG_FILE
+   echo "Successful operations: $RESTORATION_SUCCESS" | tee -a $LOG_FILE
+   echo "Failed operations: $RESTORATION_FAILURES" | tee -a $LOG_FILE
+   echo "Total operations: $((RESTORATION_SUCCESS + RESTORATION_FAILURES))" | tee -a $LOG_FILE
+   
+   if [ $RESTORATION_FAILURES -eq 0 ]; then
+       echo "All restoration operations completed successfully" | tee -a $LOG_FILE
+       exit 0
+   else
+       echo "Some restoration operations failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/restoration-controller.sh
+
+2. Create restoration verification system:
+   # vim /usr/local/bin/restoration-verification.sh
+   
+   #!/bin/bash
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   VERIFICATION_LOG="/opt/system-restore/logs/restoration-verification-$TIMESTAMP.log"
+   
+   echo "=== RESTORATION VERIFICATION - $(date) ===" | tee $VERIFICATION_LOG
+   
+   VERIFICATION_PASSED=0
+   VERIFICATION_FAILED=0
+   
+   # Verify system boot capability
+   echo "VERIFYING SYSTEM BOOT CAPABILITY:" | tee -a $VERIFICATION_LOG
+   if [ -f /boot/grub2/grub.cfg ]; then
+       echo "GRUB configuration: EXISTS" | tee -a $VERIFICATION_LOG
+       VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+   else
+       echo "GRUB configuration: MISSING" | tee -a $VERIFICATION_LOG
+       VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+   fi
+   
+   # Verify critical system files
+   echo "VERIFYING CRITICAL SYSTEM FILES:" | tee -a $VERIFICATION_LOG
+   CRITICAL_FILES="/etc/fstab /etc/passwd /etc/group /etc/hosts /etc/resolv.conf"
+   
+   for file in $CRITICAL_FILES; do
+       if [ -f "$file" ]; then
+           echo "$file: EXISTS" | tee -a $VERIFICATION_LOG
+           VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+       else
+           echo "$file: MISSING" | tee -a $VERIFICATION_LOG
+           VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+       fi
+   done
+   
+   # Verify essential services
+   echo "VERIFYING ESSENTIAL SERVICES:" | tee -a $VERIFICATION_LOG
+   ESSENTIAL_SERVICES="sshd systemd-logind"
+   
+   for service in $ESSENTIAL_SERVICES; do
+       if systemctl is-active $service >/dev/null 2>&1; then
+           echo "$service: RUNNING" | tee -a $VERIFICATION_LOG
+           VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+       else
+           echo "$service: NOT RUNNING" | tee -a $VERIFICATION_LOG
+           VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+       fi
+   done
+   
+   # Verify filesystem integrity
+   echo "VERIFYING FILESYSTEM INTEGRITY:" | tee -a $VERIFICATION_LOG
+   if df -h / >/dev/null 2>&1; then
+       echo "Root filesystem: ACCESSIBLE" | tee -a $VERIFICATION_LOG
+       VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+   else
+       echo "Root filesystem: INACCESSIBLE" | tee -a $VERIFICATION_LOG
+       VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+   fi
+   
+   # Verify network connectivity
+   echo "VERIFYING NETWORK CONNECTIVITY:" | tee -a $VERIFICATION_LOG
+   if ping -c 3 8.8.8.8 >/dev/null 2>&1; then
+       echo "External connectivity: OK" | tee -a $VERIFICATION_LOG
+       VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+   else
+       echo "External connectivity: FAILED" | tee -a $VERIFICATION_LOG
+       VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+   fi
+   
+   # Verify package manager
+   echo "VERIFYING PACKAGE MANAGER:" | tee -a $VERIFICATION_LOG
+   if rpm -qa >/dev/null 2>&1; then
+       echo "RPM database: ACCESSIBLE" | tee -a $VERIFICATION_LOG
+       VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+   else
+       echo "RPM database: CORRUPTED" | tee -a $VERIFICATION_LOG
+       VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+   fi
+   
+   # Summary
+   echo >> $VERIFICATION_LOG
+   echo "=== VERIFICATION SUMMARY ===" | tee -a $VERIFICATION_LOG
+   echo "Passed verifications: $VERIFICATION_PASSED" | tee -a $VERIFICATION_LOG
+   echo "Failed verifications: $VERIFICATION_FAILED" | tee -a $VERIFICATION_LOG
+   echo "Total verifications: $((VERIFICATION_PASSED + VERIFICATION_FAILED))" | tee -a $VERIFICATION_LOG
+   
+   VERIFICATION_PERCENTAGE=$(echo "scale=2; $VERIFICATION_PASSED * 100 / ($VERIFICATION_PASSED + $VERIFICATION_FAILED)" | bc)
+   echo "Verification success rate: ${VERIFICATION_PERCENTAGE}%" | tee -a $VERIFICATION_LOG
+   
+   if [ $VERIFICATION_FAILED -eq 0 ]; then
+       echo "ALL VERIFICATIONS PASSED - System restoration successful" | tee -a $VERIFICATION_LOG
+       exit 0
+   elif (( $(echo "$VERIFICATION_PERCENTAGE >= 80" | bc -l) )); then
+       echo "MOST VERIFICATIONS PASSED - System restoration mostly successful" | tee -a $VERIFICATION_LOG
+       exit 0
+   else
+       echo "MANY VERIFICATIONS FAILED - System restoration incomplete" | tee -a $VERIFICATION_LOG
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/restoration-verification.sh
+PART E: RESTORATION AUTOMATION AND SCHEDULING
+---------------------------------------------
+
+1. Create restoration automation framework:
+   # vim /usr/local/bin/restoration-automation.sh
+   
+   #!/bin/bash
+   AUTOMATION_CONFIG="/etc/system-restore.conf"
+   
+   # Create default configuration
+   if [ ! -f $AUTOMATION_CONFIG ]; then
+       cat > $AUTOMATION_CONFIG << 'EOF'
+   # System Restoration Configuration
+   
+   # Backup locations
+   BACKUP_LOCATION="/backup"
+   RESTORE_LOCATION="/opt/system-restore"
+   
+   # Restoration preferences
+   DEFAULT_RESTORE_LEVEL="basic"
+   AUTO_VERIFICATION="true"
+   AUTO_NOTIFICATION="true"
+   
+   # Emergency contacts
+   ADMIN_EMAIL="admin@example.com"
+   EMERGENCY_EMAIL="emergency@example.com"
+   
+   # Restoration thresholds
+   MAX_RESTORE_TIME=3600  # 1 hour
+   MIN_SUCCESS_RATE=80    # 80%
+   EOF
+   fi
+   
+   source $AUTOMATION_CONFIG
+   
+   AUTOMATION_TYPE=${1:-"scheduled"}
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/system-restore/logs/restoration-automation-$TIMESTAMP.log"
+   
+   echo "=== RESTORATION AUTOMATION - $(date) ===" | tee $LOG_FILE
+   echo "Automation Type: $AUTOMATION_TYPE" | tee -a $LOG_FILE
+   
+   case $AUTOMATION_TYPE in
+       "scheduled")
+           echo "Running scheduled restoration tasks..." | tee -a $LOG_FILE
+           
+           # Create system state backup
+           /usr/local/bin/create-system-state.sh "full" 2>&1 | tee -a $LOG_FILE
+           
+           # Create bare-metal image (weekly)
+           if [ $(date +%u) -eq 7 ]; then  # Sunday
+               /usr/local/bin/create-bare-metal-image.sh "system" 2>&1 | tee -a $LOG_FILE
+           fi
+           
+           # Verify recent backups
+           RECENT_BACKUP=$(find $BACKUP_LOCATION -name "*.tar.gz" -mtime -1 | head -1)
+           if [ -n "$RECENT_BACKUP" ]; then
+               /usr/local/bin/selective-restore.sh "$RECENT_BACKUP" "/tmp/restore-test" "verify" 2>&1 | tee -a $LOG_FILE
+           fi
+           ;;
+       "emergency")
+           echo "Running emergency restoration..." | tee -a $LOG_FILE
+           
+           # Find latest backup
+           LATEST_BACKUP=$(find $BACKUP_LOCATION -name "*.tar.gz" -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+           
+           if [ -n "$LATEST_BACKUP" ]; then
+               echo "Using latest backup: $LATEST_BACKUP" | tee -a $LOG_FILE
+               /usr/local/bin/restoration-controller.sh "config" "$LATEST_BACKUP" "advanced" 2>&1 | tee -a $LOG_FILE
+           else
+               echo "No backup found for emergency restoration" | tee -a $LOG_FILE
+               exit 1
+           fi
+           ;;
+       "test")
+           echo "Running restoration test..." | tee -a $LOG_FILE
+           
+           # Test restoration procedures without making changes
+           TEST_BACKUP=$(find $BACKUP_LOCATION -name "*.tar.gz" -mtime -7 | head -1)
+           if [ -n "$TEST_BACKUP" ]; then
+               /usr/local/bin/selective-restore.sh "$TEST_BACKUP" "/tmp/restore-test" "list" 2>&1 | tee -a $LOG_FILE
+               /usr/local/bin/restoration-verification.sh 2>&1 | tee -a $LOG_FILE
+           fi
+           ;;
+       *)
+           echo "Invalid automation type: $AUTOMATION_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   echo "Restoration automation completed" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/restoration-automation.sh
+
+2. Create restoration monitoring dashboard:
+   # vim /usr/local/bin/restoration-dashboard.sh
+   
+   #!/bin/bash
+   DASHBOARD_FILE="/var/www/html/restoration-dashboard.html"
+   
+   # Create web directory if it doesn't exist
+   mkdir -p /var/www/html
+   
+   cat > $DASHBOARD_FILE << 'EOF'
+   <!DOCTYPE html>
+   <html>
+   <head>
+       <title>System Restoration Dashboard</title>
+       <meta http-equiv="refresh" content="300">
+       <style>
+           body { font-family: Arial, sans-serif; margin: 20px; }
+           .status-ok { color: green; font-weight: bold; }
+           .status-warning { color: orange; font-weight: bold; }
+           .status-critical { color: red; font-weight: bold; }
+           .section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+           table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+           th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+           th { background-color: #f2f2f2; }
+           .metric { display: inline-block; margin: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+       </style>
+   </head>
+   <body>
+       <h1>System Restoration Dashboard</h1>
+       <p><strong>Last Updated:</strong> $(date)</p>
+       <p><strong>System:</strong> $(hostname)</p>
+   EOF
+   
+   # System Status Section
+   echo '<div class="section"><h2>System Status</h2>' >> $DASHBOARD_FILE
+   
+   # Current system health
+   UPTIME=$(uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')
+   LOAD_AVG=$(uptime | awk -F'load average:' '{print $2}')
+   
+   echo "<p><strong>System Uptime:</strong> $UPTIME</p>" >> $DASHBOARD_FILE
+   echo "<p><strong>Load Average:</strong> $LOAD_AVG</p>" >> $DASHBOARD_FILE
+   
+   echo '</div>' >> $DASHBOARD_FILE
+   
+   # Available Backups Section
+   echo '<div class="section"><h2>Available Backups</h2>' >> $DASHBOARD_FILE
+   echo '<table><tr><th>Backup Type</th><th>File</th><th>Size</th><th>Date</th><th>Age</th></tr>' >> $DASHBOARD_FILE
+   
+   # Bare-metal images
+   find /opt/system-restore/images -name "*.tar.gz" -type f -printf '%T@ %p %s\n' | sort -nr | head -5 | while read timestamp file size; do
+       BACKUP_NAME=$(basename "$file")
+       BACKUP_TYPE="Bare-Metal"
+       BACKUP_SIZE=$(numfmt --to=iec $size)
+       BACKUP_DATE=$(date -d "@$timestamp" '+%Y-%m-%d %H:%M')
+       BACKUP_AGE=$(( ($(date +%s) - ${timestamp%.*}) / 86400 ))
+       
+       if [ $BACKUP_AGE -le 1 ]; then
+           AGE_CLASS="status-ok"
+       elif [ $BACKUP_AGE -le 7 ]; then
+           AGE_CLASS="status-warning"
+       else
+           AGE_CLASS="status-critical"
+       fi
+       
+       echo "<tr><td>$BACKUP_TYPE</td><td>$BACKUP_NAME</td><td>$BACKUP_SIZE</td><td>$BACKUP_DATE</td><td><span class=\"$AGE_CLASS\">${BACKUP_AGE} days</span></td></tr>" >> $DASHBOARD_FILE
+   done
+   
+   # System states
+   find /opt/system-restore/states -name "*.tar.gz" -type f -printf '%T@ %p %s\n' | sort -nr | head -3 | while read timestamp file size; do
+       BACKUP_NAME=$(basename "$file")
+       BACKUP_TYPE="System State"
+       BACKUP_SIZE=$(numfmt --to=iec $size)
+       BACKUP_DATE=$(date -d "@$timestamp" '+%Y-%m-%d %H:%M')
+       BACKUP_AGE=$(( ($(date +%s) - ${timestamp%.*}) / 86400 ))
+       
+       if [ $BACKUP_AGE -le 1 ]; then
+           AGE_CLASS="status-ok"
+       elif [ $BACKUP_AGE -le 7 ]; then
+           AGE_CLASS="status-warning"
+       else
+           AGE_CLASS="status-critical"
+       fi
+       
+       echo "<tr><td>$BACKUP_TYPE</td><td>$BACKUP_NAME</td><td>$BACKUP_SIZE</td><td>$BACKUP_DATE</td><td><span class=\"$AGE_CLASS\">${BACKUP_AGE} days</span></td></tr>" >> $DASHBOARD_FILE
+   done
+   
+   echo '</table></div>' >> $DASHBOARD_FILE
+   
+   # Recent Restoration Activities
+   echo '<div class="section"><h2>Recent Restoration Activities</h2>' >> $DASHBOARD_FILE
+   
+   if [ -d /opt/system-restore/logs ]; then
+       echo '<h3>Recent Log Files</h3>' >> $DASHBOARD_FILE
+       echo '<ul>' >> $DASHBOARD_FILE
+       find /opt/system-restore/logs -name "*.log" -mtime -7 -printf '%T@ %f\n' | sort -nr | head -10 | while read timestamp logfile; do
+           LOG_DATE=$(date -d "@$timestamp" '+%Y-%m-%d %H:%M')
+           echo "<li>$logfile - $LOG_DATE</li>" >> $DASHBOARD_FILE
+       done
+       echo '</ul>' >> $DASHBOARD_FILE
+   fi
+   
+   echo '</div>' >> $DASHBOARD_FILE
+   
+   # Restoration Capabilities
+   echo '<div class="section"><h2>Restoration Capabilities</h2>' >> $DASHBOARD_FILE
+   
+   echo '<table><tr><th>Capability</th><th>Status</th><th>Last Tested</th></tr>' >> $DASHBOARD_FILE
+   
+   # Check if restoration scripts exist
+   RESTORATION_SCRIPTS=(
+       "bare-metal-restore.sh:Bare-Metal Restoration"
+       "selective-restore.sh:Selective File Restoration"
+       "config-restore.sh:Configuration Restoration"
+       "restore-system-state.sh:System State Restoration"
+   )
+   
+   for script_info in "${RESTORATION_SCRIPTS[@]}"; do
+       SCRIPT_NAME=$(echo $script_info | cut -d: -f1)
+       SCRIPT_DESC=$(echo $script_info | cut -d: -f2)
+       
+       if [ -x "/usr/local/bin/$SCRIPT_NAME" ]; then
+           STATUS="<span class=\"status-ok\">Available</span>"
+           LAST_TESTED="Unknown"
+       else
+           STATUS="<span class=\"status-critical\">Missing</span>"
+           LAST_TESTED="N/A"
+       fi
+       
+       echo "<tr><td>$SCRIPT_DESC</td><td>$STATUS</td><td>$LAST_TESTED</td></tr>" >> $DASHBOARD_FILE
+   done
+   
+   echo '</table></div>' >> $DASHBOARD_FILE
+   
+   echo '</body></html>' >> $DASHBOARD_FILE
+   
+   echo "Restoration dashboard updated: $DASHBOARD_FILE"
+   
+   # chmod +x /usr/local/bin/restoration-dashboard.sh
+
+3. Schedule restoration automation:
+   # vim /etc/cron.d/system-restoration
+   
+   # System Restoration Automation Schedule
+   
+   # Create system state daily at 3 AM
+   0 3 * * * root /usr/local/bin/create-system-state.sh full
+   
+   # Create bare-metal image weekly on Sunday at 4 AM
+   0 4 * * 0 root /usr/local/bin/create-bare-metal-image.sh system
+   
+   # Run restoration automation daily at 5 AM
+   0 5 * * * root /usr/local/bin/restoration-automation.sh scheduled
+   
+   # Update restoration dashboard every 15 minutes
+   */15 * * * * root /usr/local/bin/restoration-dashboard.sh
+   
+   # Test restoration procedures monthly
+   0 6 1 * * root /usr/local/bin/restoration-automation.sh test
+   
+   # Clean old restoration logs weekly
+   0 7 * * 0 root find /opt/system-restore/logs -name "*.log" -mtime +30 -delete
+
+PART F: TESTING AND VALIDATION
+-------------------------------
+
+1. Test bare-metal image creation:
+   # /usr/local/bin/create-bare-metal-image.sh full
+   # /usr/local/bin/create-bare-metal-image.sh system
+   # /usr/local/bin/create-bare-metal-image.sh boot
+   # ls -la /opt/system-restore/images/
+
+2. Test bare-metal restoration verification:
+   # LATEST_IMAGE=$(find /opt/system-restore/images -name "*.tar.gz" | head -1)
+   # /usr/local/bin/bare-metal-restore.sh "$LATEST_IMAGE" "/dev/sda" "verify"
+
+3. Test selective file restoration:
+   # mkdir -p /test-backup
+   # echo "Test content" > /test-backup/test.txt
+   # tar -czf /tmp/test-selective.tar.gz /test-backup
+   # rm -rf /test-backup
+   # /usr/local/bin/selective-restore.sh /tmp/test-selective.tar.gz / specific
+
+4. Test configuration restoration:
+   # tar -czf /tmp/test-config.tar.gz /etc/hosts /etc/hostname
+   # /usr/local/bin/config-restore.sh /tmp/test-config.tar.gz system
+
+5. Test system state creation and restoration:
+   # /usr/local/bin/create-system-state.sh full
+   # LATEST_STATE=$(find /opt/system-restore/states -name "*.tar.gz" | head -1)
+   # /usr/local/bin/restore-system-state.sh "$LATEST_STATE" verify
+   # /usr/local/bin/restore-system-state.sh "$LATEST_STATE" compare
+
+6. Test restoration controller:
+   # /usr/local/bin/restoration-controller.sh selective /tmp/test-selective.tar.gz basic
+   # /usr/local/bin/restoration-controller.sh config /tmp/test-config.tar.gz advanced
+
+7. Test restoration verification:
+   # /usr/local/bin/restoration-verification.sh
+
+8. Test restoration automation:
+   # /usr/local/bin/restoration-automation.sh test
+   # /usr/local/bin/restoration-automation.sh scheduled
+
+9. Test restoration dashboard:
+   # /usr/local/bin/restoration-dashboard.sh
+   # cat /var/www/html/restoration-dashboard.html
+
+10. Validate restoration procedures:
+    # Create test scenario
+    # cp /etc/hosts /etc/hosts.backup
+    # echo "127.0.0.1 test-restore" >> /etc/hosts
+    # tar -czf /tmp/hosts-backup.tar.gz /etc/hosts
+    # cp /etc/hosts.backup /etc/hosts
+    # /usr/local/bin/selective-restore.sh /tmp/hosts-backup.tar.gz / specific
+    # grep "test-restore" /etc/hosts
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# tail -f /opt/system-restore/logs/*.log
+# ls -la /opt/system-restore/images/
+# ls -la /opt/system-restore/states/
+# tar -tzf /opt/system-restore/images/*.tar.gz | head -10
+# df -h /opt/system-restore
+# systemctl status httpd  # for dashboard access
+
+EXPECTED RESULTS:
+-----------------
+- Bare-metal recovery images created and verified
+- Selective file restoration working for specific files and patterns
+- Configuration restoration functional for different config types
+- System state backup and restoration operational
+- Automated restoration workflows executing correctly
+- Restoration verification providing comprehensive system checks
+- Restoration automation and scheduling active
+- Dashboard providing real-time restoration status
+
+VALIDATION CHECKLIST:
+---------------------
+□ Bare-metal image creation working
+□ Bare-metal restoration procedures tested
+□ Selective file restoration operational
+□ Configuration restoration functional
+□ System state backup and restore working
+□ Restoration controller orchestrating workflows
+□ Restoration verification comprehensive
+□ Automation framework scheduled and running
+□ Dashboard providing status visibility
+□ All restoration scripts executable and tested
+
+CLEANUP:
+--------
+# rm /etc/cron.d/system-restoration
+# rm -rf /opt/system-restore
+# rm /etc/system-restore.conf
+# rm /usr/local/bin/create-bare-metal-image.sh
+# rm /usr/local/bin/bare-metal-restore.sh
+# rm /usr/local/bin/selective-restore.sh
+# rm /usr/local/bin/config-restore.sh
+# rm /usr/local/bin/create-system-state.sh
+# rm /usr/local/bin/restore-system-state.sh
+# rm /usr/local/bin/restoration-controller.sh
+# rm /usr/local/bin/restoration-verification.sh
+# rm /usr/local/bin/restoration-automation.sh
+# rm /usr/local/bin/restoration-dashboard.sh
+# rm /var/www/html/restoration-dashboard.html
+# rm /tmp/test-*.tar.gz

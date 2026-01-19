@@ -1,0 +1,529 @@
+RHCE RH254 HANDS-ON LAB: iSCSI TARGET AND INITIATOR CONFIGURATION
+==============================================================
+
+LAB OBJECTIVE:
+Configure iSCSI target server and initiator clients for network-attached block storage, including LUN management, authentication, and multipath configuration
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Additional storage devices or LVM volumes
+- Understanding of block storage concepts
+- Network connectivity between target and initiator
+
+LAB SCENARIO:
+Deploy iSCSI storage infrastructure with target server providing block storage to multiple initiator clients, including advanced features like CHAP authentication and multipath I/O.
+
+EQUIPMENT NEEDED:
+- iSCSI Target server (192.168.1.10)
+- iSCSI Initiator clients (192.168.1.20, 192.168.1.21)
+- Additional storage devices (/dev/sdb, /dev/sdc)
+- Network infrastructure
+
+LAB TASKS:
+
+PART A: CONFIGURE iSCSI TARGET SERVER
+--------------------------------------
+
+1. Install target packages:
+   # dnf install targetcli -y
+   # systemctl enable target
+   # systemctl start target
+
+2. Create storage backend:
+   # pvcreate /dev/sdb /dev/sdc
+   # vgcreate iscsi_vg /dev/sdb /dev/sdc
+   # lvcreate -L 10G -n lun1 iscsi_vg
+   # lvcreate -L 15G -n lun2 iscsi_vg
+   # lvcreate -L 20G -n lun3 iscsi_vg
+
+3. Configure iSCSI target using targetcli:
+   # targetcli
+   /> backstores/block create lun1 /dev/iscsi_vg/lun1
+   /> backstores/block create lun2 /dev/iscsi_vg/lun2
+   /> backstores/block create lun3 /dev/iscsi_vg/lun3
+   
+   /> iscsi/ create iqn.2024-12.com.example:target1
+   /> cd iscsi/iqn.2024-12.com.example:target1/tpg1/
+   
+   /> luns/ create /backstores/block/lun1
+   /> luns/ create /backstores/block/lun2
+   /> luns/ create /backstores/block/lun3
+   
+   /> acls/ create iqn.2024-12.com.example:client1
+   /> acls/ create iqn.2024-12.com.example:client2
+   
+   /> portals/ create 192.168.1.10 3260
+   /> cd /
+   /> saveconfig
+   /> exit
+
+4. Configure firewall:
+   # firewall-cmd --add-service=iscsi-target --permanent
+   # firewall-cmd --reload
+
+5. Verify target configuration:
+   # systemctl status target
+   # ss -tlnp | grep 3260
+
+PART B: CONFIGURE CHAP AUTHENTICATION
+--------------------------------------
+
+1. Configure CHAP authentication on target:
+   # targetcli
+   /> cd iscsi/iqn.2024-12.com.example:target1/tpg1/
+   /> set attribute authentication=1
+   /> set attribute generate_node_acls=0
+   
+   /> cd acls/iqn.2024-12.com.example:client1/
+   /> set auth userid=client1user
+   /> set auth password=client1pass123
+   /> set auth mutual_userid=targetuser
+   /> set auth mutual_password=targetpass123
+   
+   /> cd ../iqn.2024-12.com.example:client2/
+   /> set auth userid=client2user
+   /> set auth password=client2pass123
+   /> set auth mutual_userid=targetuser
+   /> set auth mutual_password=targetpass123
+   
+   /> cd /
+   /> saveconfig
+   /> exit
+
+2. Create authentication configuration file:
+   # vim /etc/target/iscsi_auth.conf
+   
+   # CHAP authentication settings
+   iqn.2024-12.com.example:client1 client1user client1pass123
+   iqn.2024-12.com.example:client2 client2user client2pass123
+
+PART C: CONFIGURE ADVANCED TARGET FEATURES
+-------------------------------------------
+
+1. Configure target performance settings:
+   # targetcli
+   /> cd iscsi/iqn.2024-12.com.example:target1/tpg1/
+   /> set parameter DefaultTime2Wait=2
+   /> set parameter DefaultTime2Retain=20
+   /> set parameter MaxOutstandingR2T=8
+   /> set parameter MaxBurstLength=262144
+   /> set parameter FirstBurstLength=65536
+   /> saveconfig
+   /> exit
+
+2. Configure LUN-specific settings:
+   # targetcli
+   /> cd backstores/block/lun1/
+   /> set attribute emulate_write_cache=1
+   /> set attribute emulate_fua_write=1
+   /> set attribute block_size=4096
+   
+   /> cd ../lun2/
+   /> set attribute emulate_write_cache=1
+   /> set attribute emulate_fua_write=1
+   /> set attribute block_size=4096
+   
+   /> saveconfig
+   /> exit
+
+3. Create multiple target portals:
+   # targetcli
+   /> cd iscsi/iqn.2024-12.com.example:target1/tpg1/portals/
+   /> create 192.168.1.10 3261
+   /> create 192.168.2.10 3260
+   /> saveconfig
+   /> exit
+
+PART D: CONFIGURE iSCSI INITIATOR CLIENT
+-----------------------------------------
+
+1. Install initiator packages on client:
+   # dnf install iscsi-initiator-utils device-mapper-multipath -y
+
+2. Configure initiator name:
+   # vim /etc/iscsi/initiatorname.iscsi
+   InitiatorName=iqn.2024-12.com.example:client1
+
+3. Configure CHAP authentication:
+   # vim /etc/iscsi/iscsid.conf
+   
+   # Uncomment and configure CHAP settings
+   node.session.auth.authmethod = CHAP
+   node.session.auth.username = client1user
+   node.session.auth.password = client1pass123
+   node.session.auth.username_in = targetuser
+   node.session.auth.password_in = targetpass123
+   
+   # Session settings
+   node.startup = automatic
+   node.session.timeo.replacement_timeout = 120
+   node.conn[0].timeo.login_timeout = 15
+   node.conn[0].timeo.logout_timeout = 15
+   node.conn[0].timeo.noop_out_interval = 5
+   node.conn[0].timeo.noop_out_timeout = 5
+
+4. Enable and start iSCSI services:
+   # systemctl enable iscsid iscsi
+   # systemctl start iscsid
+
+PART E: DISCOVER AND CONNECT TO iSCSI TARGETS
+----------------------------------------------
+
+1. Discover iSCSI targets:
+   # iscsiadm -m discovery -t sendtargets -p 192.168.1.10:3260
+   # iscsiadm -m node -o show
+
+2. Login to specific target:
+   # iscsiadm -m node -T iqn.2024-12.com.example:target1 -p 192.168.1.10:3260 --login
+
+3. Verify connection:
+   # iscsiadm -m session -o show
+   # lsblk
+   # fdisk -l
+
+4. Configure automatic login:
+   # iscsiadm -m node -T iqn.2024-12.com.example:target1 -p 192.168.1.10:3260 -o update -n node.startup -v automatic
+
+PART F: CONFIGURE MULTIPATH I/O
+--------------------------------
+
+1. Configure multipath on initiator:
+   # vim /etc/multipath.conf
+   
+   defaults {
+       user_friendly_names yes
+       find_multipaths yes
+       path_selector "round-robin 0"
+       path_grouping_policy multibus
+       path_checker tur
+       failback immediate
+       no_path_retry 12
+   }
+   
+   blacklist {
+       devnode "^(ram|raw|loop|fd|md|dm-|sr|scd|st)[0-9]*"
+       devnode "^hd[a-z]"
+       devnode "^sda"
+   }
+   
+   multipaths {
+       multipath {
+           wwid "36001405abcdef1234567890"
+           alias iscsi_lun1
+           path_grouping_policy multibus
+           path_selector "round-robin 0"
+       }
+   }
+
+2. Enable multipath services:
+   # systemctl enable multipathd
+   # systemctl start multipathd
+   # multipath -ll
+
+3. Add second path for multipath:
+   # iscsiadm -m discovery -t sendtargets -p 192.168.1.10:3261
+   # iscsiadm -m node -T iqn.2024-12.com.example:target1 -p 192.168.1.10:3261 --login
+
+4. Verify multipath configuration:
+   # multipath -ll
+   # multipath -v2
+
+PART G: CONFIGURE PERSISTENT STORAGE
+-------------------------------------
+
+1. Create filesystems on iSCSI LUNs:
+   # mkfs.ext4 /dev/mapper/iscsi_lun1
+   # mkfs.xfs /dev/sdb
+   # mkfs.ext4 /dev/sdc
+
+2. Create mount points:
+   # mkdir -p /mnt/iscsi/{lun1,lun2,lun3}
+
+3. Configure persistent mounting:
+   # vim /etc/fstab
+   
+   /dev/mapper/iscsi_lun1 /mnt/iscsi/lun1 ext4 defaults,_netdev 0 0
+   /dev/disk/by-path/ip-192.168.1.10:3260-iscsi-iqn.2024-12.com.example:target1-lun-1 /mnt/iscsi/lun2 xfs defaults,_netdev 0 0
+
+4. Mount filesystems:
+   # mount -a
+   # df -h
+
+PART H: CONFIGURE iSCSI MONITORING
+-----------------------------------
+
+1. Create iSCSI monitoring script:
+   # vim /usr/local/bin/iscsi-monitor.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/iscsi-monitor.log"
+   
+   echo "=== iSCSI Monitor - $(date) ===" >> $LOGFILE
+   
+   # Check target service (on target server)
+   if systemctl is-active target >/dev/null 2>&1; then
+       echo "Target service: ACTIVE" >> $LOGFILE
+       targetcli ls >> $LOGFILE 2>&1
+   fi
+   
+   # Check initiator sessions (on initiator)
+   if systemctl is-active iscsi >/dev/null 2>&1; then
+       echo "iSCSI sessions:" >> $LOGFILE
+       iscsiadm -m session >> $LOGFILE 2>&1
+   fi
+   
+   # Check multipath status
+   if systemctl is-active multipathd >/dev/null 2>&1; then
+       echo "Multipath status:" >> $LOGFILE
+       multipath -ll >> $LOGFILE 2>&1
+   fi
+   
+   echo "---" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/iscsi-monitor.sh
+
+2. Create performance monitoring:
+   # vim /usr/local/bin/iscsi-performance.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/iscsi-performance.log"
+   
+   echo "$(date): iSCSI Performance Metrics" >> $LOGFILE
+   
+   # I/O statistics for iSCSI devices
+   iostat -x 1 1 | grep -E "(Device|sd[b-z])" >> $LOGFILE
+   
+   # Network statistics for iSCSI traffic
+   ss -i | grep :3260 >> $LOGFILE
+   
+   # Multipath statistics
+   if command -v multipath >/dev/null; then
+       multipath -ll | grep -E "(mpath|policy|status)" >> $LOGFILE
+   fi
+   
+   echo "---" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/iscsi-performance.sh
+
+PART I: CONFIGURE iSCSI SECURITY
+---------------------------------
+
+1. Configure target access control:
+   # targetcli
+   /> cd iscsi/iqn.2024-12.com.example:target1/tpg1/
+   /> acls/iqn.2024-12.com.example:client1/ set attribute demo_mode_write_protect=0
+   /> acls/iqn.2024-12.com.example:client1/mapped_lun0 set attribute write_protect=0
+   /> saveconfig
+   /> exit
+
+2. Configure network security:
+   # firewall-cmd --add-rich-rule="rule family='ipv4' source address='192.168.1.0/24' service name='iscsi-target' accept" --permanent
+   # firewall-cmd --remove-service=iscsi-target --permanent
+   # firewall-cmd --reload
+
+3. Configure SELinux for iSCSI:
+   # setsebool -P iscsi_use_ttys on
+   # semanage port -a -t iscsi_target_port_t -p tcp 3260
+   # semanage port -a -t iscsi_target_port_t -p tcp 3261
+
+4. Create security audit script:
+   # vim /usr/local/bin/iscsi-security-audit.sh
+   
+   #!/bin/bash
+   LOGFILE="/var/log/iscsi-security.log"
+   
+   echo "=== iSCSI Security Audit - $(date) ===" >> $LOGFILE
+   
+   # Check authentication settings
+   echo "Authentication status:" >> $LOGFILE
+   targetcli ls iscsi/ | grep -i auth >> $LOGFILE
+   
+   # Check ACL configurations
+   echo "ACL configurations:" >> $LOGFILE
+   targetcli ls iscsi/*/tpg*/acls/ >> $LOGFILE
+   
+   # Check firewall rules
+   echo "Firewall rules:" >> $LOGFILE
+   firewall-cmd --list-services | grep iscsi >> $LOGFILE
+   firewall-cmd --list-rich-rules | grep iscsi >> $LOGFILE
+   
+   echo "---" >> $LOGFILE
+   
+   # chmod +x /usr/local/bin/iscsi-security-audit.sh
+
+PART J: CONFIGURE BACKUP AND RECOVERY
+--------------------------------------
+
+1. Create target configuration backup:
+   # vim /usr/local/bin/backup-iscsi-config.sh
+   
+   #!/bin/bash
+   BACKUP_DIR="/opt/iscsi-backups"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   mkdir -p $BACKUP_DIR
+   
+   # Backup target configuration
+   cp -r /etc/target $BACKUP_DIR/target-config-$DATE
+   
+   # Backup targetcli configuration
+   targetcli saveconfig $BACKUP_DIR/targetcli-config-$DATE.json
+   
+   # Backup initiator configuration
+   cp /etc/iscsi/initiatorname.iscsi $BACKUP_DIR/initiatorname-$DATE.iscsi
+   cp /etc/iscsi/iscsid.conf $BACKUP_DIR/iscsid-$DATE.conf
+   
+   # Backup multipath configuration
+   cp /etc/multipath.conf $BACKUP_DIR/multipath-$DATE.conf
+   
+   echo "iSCSI configuration backed up to $BACKUP_DIR"
+   
+   # chmod +x /usr/local/bin/backup-iscsi-config.sh
+
+2. Create LUN snapshot script:
+   # vim /usr/local/bin/iscsi-snapshot.sh
+   
+   #!/bin/bash
+   LUN_NAME=$1
+   SNAPSHOT_NAME="${LUN_NAME}_snap_$(date +%Y%m%d_%H%M%S)"
+   
+   if [ -z "$LUN_NAME" ]; then
+       echo "Usage: $0 <lun_name>"
+       exit 1
+   fi
+   
+   # Create LVM snapshot
+   lvcreate -L 2G -s -n $SNAPSHOT_NAME /dev/iscsi_vg/$LUN_NAME
+   
+   if [ $? -eq 0 ]; then
+       echo "Snapshot created: $SNAPSHOT_NAME"
+       
+       # Add snapshot to target
+       targetcli backstores/block create $SNAPSHOT_NAME /dev/iscsi_vg/$SNAPSHOT_NAME
+       echo "Snapshot added to target as $SNAPSHOT_NAME"
+   else
+       echo "Failed to create snapshot"
+   fi
+   
+   # chmod +x /usr/local/bin/iscsi-snapshot.sh
+
+PART K: CONFIGURE HIGH AVAILABILITY
+------------------------------------
+
+1. Configure target failover script:
+   # vim /usr/local/bin/iscsi-failover.sh
+   
+   #!/bin/bash
+   PRIMARY_TARGET="192.168.1.10"
+   SECONDARY_TARGET="192.168.1.11"
+   TARGET_IQN="iqn.2024-12.com.example:target1"
+   
+   # Check primary target
+   if ping -c 3 $PRIMARY_TARGET >/dev/null 2>&1; then
+       echo "Primary target is available"
+       # Ensure connection to primary
+       iscsiadm -m node -T $TARGET_IQN -p $PRIMARY_TARGET:3260 --login
+   else
+       echo "Primary target unavailable, switching to secondary"
+       # Logout from primary
+       iscsiadm -m node -T $TARGET_IQN -p $PRIMARY_TARGET:3260 --logout
+       # Login to secondary
+       iscsiadm -m node -T $TARGET_IQN -p $SECONDARY_TARGET:3260 --login
+   fi
+   
+   # chmod +x /usr/local/bin/iscsi-failover.sh
+
+2. Configure automatic failover with systemd:
+   # vim /etc/systemd/system/iscsi-failover.service
+   
+   [Unit]
+   Description=iSCSI Failover Service
+   After=iscsi.service
+   
+   [Service]
+   Type=oneshot
+   ExecStart=/usr/local/bin/iscsi-failover.sh
+   
+   [Install]
+   WantedBy=multi-user.target
+
+3. Create failover timer:
+   # vim /etc/systemd/system/iscsi-failover.timer
+   
+   [Unit]
+   Description=iSCSI Failover Check Timer
+   Requires=iscsi-failover.service
+   
+   [Timer]
+   OnCalendar=*:0/2
+   Persistent=true
+   
+   [Install]
+   WantedBy=timers.target
+
+PART L: TESTING AND VALIDATION
+-------------------------------
+
+1. Test target discovery:
+   # iscsiadm -m discovery -t sendtargets -p 192.168.1.10:3260
+
+2. Test authentication:
+   # iscsiadm -m node -T iqn.2024-12.com.example:target1 -p 192.168.1.10:3260 --login
+
+3. Test I/O operations:
+   # dd if=/dev/zero of=/mnt/iscsi/lun1/testfile bs=1M count=100
+   # dd if=/mnt/iscsi/lun1/testfile of=/dev/null bs=1M
+
+4. Test multipath failover:
+   # multipath -ll
+   # echo "offline" > /sys/block/sdb/device/state
+   # multipath -ll
+
+5. Test monitoring scripts:
+   # /usr/local/bin/iscsi-monitor.sh
+   # /usr/local/bin/iscsi-performance.sh
+
+6. Test backup procedures:
+   # /usr/local/bin/backup-iscsi-config.sh
+   # /usr/local/bin/iscsi-snapshot.sh lun1
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status target iscsi iscsid
+# journalctl -u target -f
+# targetcli ls
+# iscsiadm -m session -P 3
+# multipath -v2
+# dmesg | grep iscsi
+# ss -tlnp | grep 3260
+
+EXPECTED RESULTS:
+-----------------
+- iSCSI target server operational with LUNs
+- Initiator clients connected with authentication
+- Multipath I/O configured and working
+- Persistent storage mounted and accessible
+- Monitoring and security measures active
+- High availability features functional
+
+VALIDATION CHECKLIST:
+---------------------
+□ Target service running with LUNs configured
+□ CHAP authentication working
+□ Initiator discovery and login successful
+□ Multipath I/O operational
+□ Persistent mounting configured
+□ Performance monitoring active
+□ Security measures implemented
+□ Backup procedures tested
+
+CLEANUP:
+--------
+# iscsiadm -m node --logoutall=all
+# systemctl stop target iscsi iscsid multipathd
+# systemctl disable target iscsi iscsid multipathd
+# targetcli clearconfig confirm=True
+# umount /mnt/iscsi/*
+# lvremove -f iscsi_vg/lun1 iscsi_vg/lun2 iscsi_vg/lun3
+# vgremove iscsi_vg
+# rm /usr/local/bin/iscsi-*.sh

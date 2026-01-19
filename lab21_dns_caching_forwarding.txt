@@ -1,0 +1,550 @@
+RHCE RH254 HANDS-ON LAB: DNS CACHING AND FORWARDING
+===================================================
+
+LAB OBJECTIVE:
+Configure DNS caching and forwarding to improve DNS performance and provide efficient name resolution
+
+PREREQUISITES:
+- BIND DNS server installed and configured
+- Root access to RHEL system
+- Understanding of DNS caching concepts
+
+LAB SCENARIO:
+Configure DNS server as a caching nameserver with conditional forwarding for different domains and networks.
+
+EQUIPMENT NEEDED:
+- RHEL system with BIND installed
+- Multiple DNS servers for forwarding
+- Client systems for testing
+
+LAB TASKS:
+
+PART A: CONFIGURE DNS CACHING
+------------------------------
+
+1. Configure basic caching settings:
+   # vim /etc/named.conf
+   
+   options {
+       listen-on port 53 { any; };
+       directory "/var/named";
+       
+       // Caching configuration
+       recursion yes;
+       allow-recursion { 192.168.1.0/24; 10.0.0.0/8; localhost; };
+       allow-query-cache { 192.168.1.0/24; 10.0.0.0/8; localhost; };
+       
+       // Cache settings
+       max-cache-size 512M;
+       max-cache-ttl 86400;        // 1 day
+       max-ncache-ttl 3600;        // 1 hour negative cache
+       
+       // Cache cleaning
+       cleaning-interval 60;       // Clean cache every 60 minutes
+       
+       dnssec-enable yes;
+       dnssec-validation yes;
+   };
+
+2. Configure cache-specific logging:
+   # vim /etc/named.conf
+   
+   logging {
+       channel cache_log {
+           file "/var/log/named/cache.log" versions 3 size 5m;
+           severity info;
+           print-time yes;
+           print-category yes;
+       };
+       
+       category resolver { cache_log; };
+       category cname { cache_log; };
+   };
+
+3. Create cache log directory:
+   # mkdir -p /var/log/named
+   # chown named:named /var/log/named
+
+PART B: CONFIGURE DNS FORWARDERS
+---------------------------------
+
+1. Configure global forwarders:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       // Global forwarders
+       forwarders {
+           8.8.8.8;        // Google DNS
+           8.8.4.4;        // Google DNS
+           1.1.1.1;        // Cloudflare DNS
+           1.0.0.1;        // Cloudflare DNS
+       };
+       
+       forward first;      // Try forwarders first, then recursive
+   };
+
+2. Configure conditional forwarders:
+   # vim /etc/named.conf
+   
+   // Forward specific domains to specific servers
+   zone "internal.company.com" {
+       type forward;
+       forward only;
+       forwarders { 192.168.10.10; 192.168.10.11; };
+   };
+   
+   zone "partner.org" {
+       type forward;
+       forward only;
+       forwarders { 203.0.113.10; 203.0.113.11; };
+   };
+   
+   zone "dev.local" {
+       type forward;
+       forward first;
+       forwarders { 192.168.100.10; };
+   };
+
+3. Configure reverse zone forwarding:
+   # vim /etc/named.conf
+   
+   zone "10.168.192.in-addr.arpa" {
+       type forward;
+       forward only;
+       forwarders { 192.168.10.10; };
+   };
+
+PART C: CONFIGURE ADVANCED CACHING
+-----------------------------------
+
+1. Configure cache optimization:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       // Query optimization
+       minimal-responses yes;
+       minimal-any yes;
+       
+       // Prefetch settings
+       prefetch 2 9;               // Prefetch when TTL drops to 2, if > 9 queries
+       
+       // Cache performance
+       recursive-clients 1000;
+       tcp-clients 100;
+       
+       // Response rate limiting
+       rate-limit {
+           responses-per-second 10;
+           window 5;
+           slip 2;
+       };
+   };
+
+2. Configure cache zones:
+   # vim /etc/named.conf
+   
+   // Cache-only zones for frequently accessed domains
+   zone "google.com" {
+       type hint;
+       file "google.com.cache";
+   };
+
+3. Create cache hint file:
+   # vim /var/named/google.com.cache
+   
+   $TTL 86400
+   google.com.     IN  NS  ns1.google.com.
+   google.com.     IN  NS  ns2.google.com.
+   google.com.     IN  NS  ns3.google.com.
+   google.com.     IN  NS  ns4.google.com.
+   
+   ns1.google.com. IN  A   216.239.32.10
+   ns2.google.com. IN  A   216.239.34.10
+   ns3.google.com. IN  A   216.239.36.10
+   ns4.google.com. IN  A   216.239.38.10
+
+PART D: CONFIGURE STUB ZONES
+-----------------------------
+
+1. Configure stub zones for local domains:
+   # vim /etc/named.conf
+   
+   zone "branch1.company.com" {
+       type stub;
+       masters { 192.168.20.10; };
+       file "stub/branch1.company.com";
+   };
+   
+   zone "branch2.company.com" {
+       type stub;
+       masters { 192.168.30.10; };
+       file "stub/branch2.company.com";
+   };
+
+2. Create stub directory:
+   # mkdir -p /var/named/stub
+   # chown named:named /var/named/stub
+
+3. Configure stub zone with multiple masters:
+   # vim /etc/named.conf
+   
+   zone "datacenter.company.com" {
+       type stub;
+       masters { 10.1.1.10; 10.1.1.11; };
+       file "stub/datacenter.company.com";
+   };
+
+PART E: CONFIGURE CACHE MANAGEMENT
+-----------------------------------
+
+1. Create cache management script:
+   # vim /usr/local/bin/dns-cache-manager.sh
+   
+   #!/bin/bash
+   # DNS cache management script
+   
+   case "$1" in
+       "flush")
+           echo "Flushing DNS cache..."
+           rndc flush
+           echo "Cache flushed"
+           ;;
+       "stats")
+           echo "DNS cache statistics:"
+           rndc stats
+           cat /var/named/data/named_stats.txt | tail -20
+           ;;
+       "dump")
+           echo "Dumping cache to file..."
+           rndc dumpdb -cache
+           echo "Cache dumped to /var/named/data/cache_dump.db"
+           ;;
+       "size")
+           echo "Current cache size:"
+           rndc status | grep "cache size"
+           ;;
+       *)
+           echo "Usage: $0 {flush|stats|dump|size}"
+           exit 1
+           ;;
+   esac
+   
+   # chmod +x /usr/local/bin/dns-cache-manager.sh
+
+2. Configure automatic cache cleaning:
+   # vim /usr/local/bin/dns-cache-clean.sh
+   
+   #!/bin/bash
+   # Automatic DNS cache cleaning
+   
+   LOG_FILE="/var/log/dns-cache-clean.log"
+   
+   # Get current cache size
+   CACHE_SIZE=$(rndc status | grep "cache size" | awk '{print $4}')
+   
+   # If cache size exceeds 400MB, flush it
+   if [ "$CACHE_SIZE" -gt 400000000 ]; then
+       echo "$(date): Cache size $CACHE_SIZE bytes, flushing..." >> $LOG_FILE
+       rndc flush
+       echo "$(date): Cache flushed" >> $LOG_FILE
+   else
+       echo "$(date): Cache size $CACHE_SIZE bytes, OK" >> $LOG_FILE
+   fi
+   
+   # chmod +x /usr/local/bin/dns-cache-clean.sh
+
+3. Schedule cache cleaning:
+   # crontab -e
+   # Add: 0 */6 * * * /usr/local/bin/dns-cache-clean.sh
+
+PART F: CONFIGURE FORWARDING POLICIES
+--------------------------------------
+
+1. Configure forwarding based on client:
+   # vim /etc/named.conf
+   
+   view "internal" {
+       match-clients { 192.168.1.0/24; };
+       recursion yes;
+       
+       forwarders {
+           192.168.10.10;  // Internal DNS
+           192.168.10.11;
+       };
+       
+       zone "." {
+           type hint;
+           file "named.ca";
+       };
+   };
+   
+   view "external" {
+       match-clients { any; };
+       recursion yes;
+       
+       forwarders {
+           8.8.8.8;
+           8.8.4.4;
+       };
+       
+       zone "." {
+           type hint;
+           file "named.ca";
+       };
+   };
+
+2. Configure domain-specific forwarding:
+   # vim /etc/named.conf
+   
+   // Forward based on domain patterns
+   zone "*.internal.com" {
+       type forward;
+       forward only;
+       forwarders { 192.168.10.10; };
+   };
+   
+   zone "*.cloud.company.com" {
+       type forward;
+       forward only;
+       forwarders { 10.0.0.10; 10.0.0.11; };
+   };
+
+PART G: MONITOR CACHING PERFORMANCE
+------------------------------------
+
+1. Create cache monitoring script:
+   # vim /usr/local/bin/cache-monitor.sh
+   
+   #!/bin/bash
+   # DNS cache monitoring script
+   
+   echo "=== DNS Cache Performance Report ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Cache statistics
+   rndc stats > /dev/null 2>&1
+   STATS_FILE="/var/named/data/named_stats.txt"
+   
+   if [ -f "$STATS_FILE" ]; then
+       echo "Cache Statistics:"
+       grep -E "(cache|queries)" "$STATS_FILE" | tail -10
+       echo
+       
+       # Hit ratio calculation
+       CACHE_HITS=$(grep "cache hits" "$STATS_FILE" | tail -1 | awk '{print $1}')
+       CACHE_MISSES=$(grep "cache misses" "$STATS_FILE" | tail -1 | awk '{print $1}')
+       
+       if [ -n "$CACHE_HITS" ] && [ -n "$CACHE_MISSES" ]; then
+           TOTAL=$((CACHE_HITS + CACHE_MISSES))
+           if [ $TOTAL -gt 0 ]; then
+               HIT_RATIO=$((CACHE_HITS * 100 / TOTAL))
+               echo "Cache Hit Ratio: $HIT_RATIO%"
+           fi
+       fi
+   fi
+   
+   # Current cache size
+   echo
+   echo "Current Status:"
+   rndc status | grep -E "(cache|recursive)"
+   
+   # chmod +x /usr/local/bin/cache-monitor.sh
+
+2. Create forwarding test script:
+   # vim /usr/local/bin/test-forwarding.sh
+   
+   #!/bin/bash
+   # Test DNS forwarding functionality
+   
+   DOMAINS=("google.com" "internal.company.com" "partner.org")
+   DNS_SERVER="localhost"
+   
+   echo "Testing DNS forwarding..."
+   
+   for domain in "${DOMAINS[@]}"; do
+       echo "Testing $domain:"
+       
+       # Test resolution time
+       TIME_RESULT=$(time dig @$DNS_SERVER $domain +short 2>&1)
+       echo "  Result: $(echo "$TIME_RESULT" | head -1)"
+       echo "  Time: $(echo "$TIME_RESULT" | grep real)"
+       
+       # Test cache hit (second query should be faster)
+       echo "  Testing cache hit:"
+       TIME_RESULT2=$(time dig @$DNS_SERVER $domain +short 2>&1)
+       echo "  Time (cached): $(echo "$TIME_RESULT2" | grep real)"
+       echo
+   done
+   
+   # chmod +x /usr/local/bin/test-forwarding.sh
+
+PART H: CONFIGURE CACHE SECURITY
+---------------------------------
+
+1. Configure cache poisoning protection:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       // Security settings
+       dnssec-enable yes;
+       dnssec-validation yes;
+       
+       // Query source randomization
+       use-v4-udp-ports { range 1024 65535; };
+       use-v6-udp-ports { range 1024 65535; };
+       
+       // Cache security
+       max-cache-size 512M;
+       max-cache-ttl 86400;
+       max-ncache-ttl 3600;
+       
+       // Prevent cache snooping
+       allow-query-cache { 192.168.1.0/24; localhost; };
+       allow-recursion { 192.168.1.0/24; localhost; };
+   };
+
+2. Configure response policy zones for cache protection:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       response-policy {
+           zone "rpz.local" policy given;
+       };
+   };
+   
+   zone "rpz.local" {
+       type master;
+       file "rpz.local.zone";
+       allow-query { none; };
+   };
+
+3. Create RPZ zone file:
+   # vim /var/named/rpz.local.zone
+   
+   $TTL 60
+   @   IN  SOA localhost. admin.localhost. (
+           1
+           3600
+           1800
+           604800
+           60
+   )
+   
+   @           IN  NS  localhost.
+   
+   ; Block malicious domains
+   malware.example.com     IN  CNAME   .
+   phishing.example.org    IN  CNAME   .
+   spam.example.net        IN  CNAME   .
+
+PART I: TESTING AND VALIDATION
+-------------------------------
+
+1. Test basic caching:
+   # dig @localhost google.com
+   # dig @localhost google.com  # Should be faster (cached)
+
+2. Test forwarding:
+   # dig @localhost internal.company.com
+   # dig @localhost partner.org
+
+3. Test cache management:
+   # /usr/local/bin/dns-cache-manager.sh stats
+   # /usr/local/bin/dns-cache-manager.sh flush
+   # /usr/local/bin/dns-cache-manager.sh size
+
+4. Test performance:
+   # /usr/local/bin/test-forwarding.sh
+   # /usr/local/bin/cache-monitor.sh
+
+5. Monitor cache activity:
+   # tail -f /var/log/named/cache.log
+   # rndc querylog on
+   # tail -f /var/log/messages | grep named
+
+PART J: TROUBLESHOOTING CACHING
+--------------------------------
+
+1. Create cache troubleshooting script:
+   # vim /usr/local/bin/cache-troubleshoot.sh
+   
+   #!/bin/bash
+   # DNS cache troubleshooting script
+   
+   echo "DNS Cache Troubleshooting"
+   echo "========================"
+   
+   # Check BIND status
+   echo "1. BIND Service Status:"
+   systemctl status named --no-pager
+   echo
+   
+   # Check configuration
+   echo "2. Configuration Check:"
+   named-checkconf && echo "Configuration OK" || echo "Configuration ERROR"
+   echo
+   
+   # Check forwarders
+   echo "3. Testing Forwarders:"
+   for fw in 8.8.8.8 8.8.4.4 1.1.1.1; do
+       if dig @$fw google.com +short > /dev/null 2>&1; then
+           echo "  $fw: OK"
+       else
+           echo "  $fw: FAILED"
+       fi
+   done
+   echo
+   
+   # Check cache size
+   echo "4. Cache Status:"
+   rndc status | grep -E "(cache|recursive)"
+   echo
+   
+   # Check recent errors
+   echo "5. Recent Errors:"
+   tail -10 /var/log/messages | grep named
+   
+   # chmod +x /usr/local/bin/cache-troubleshoot.sh
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# rndc flush
+# rndc stats
+# rndc dumpdb -cache
+# dig @localhost +trace google.com
+# tail -f /var/log/named/cache.log
+
+EXPECTED RESULTS:
+-----------------
+- DNS caching improving query response times
+- Forwarders routing queries to appropriate servers
+- Conditional forwarding working for specific domains
+- Cache management tools functional
+- Security measures protecting cache integrity
+
+VALIDATION CHECKLIST:
+---------------------
+□ DNS caching configured and working
+□ Global forwarders configured
+□ Conditional forwarding operational
+□ Stub zones configured
+□ Cache management scripts working
+□ Performance monitoring active
+□ Security measures implemented
+
+CLEANUP:
+--------
+# rndc flush
+# rm /usr/local/bin/dns-cache-*.sh
+# rm /usr/local/bin/cache-*.sh
+# rm /usr/local/bin/test-forwarding.sh
+# crontab -e  # Remove cache cleaning entries

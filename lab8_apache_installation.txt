@@ -1,0 +1,244 @@
+RHCE RH254 HANDS-ON LAB: APACHE HTTP SERVER INSTALLATION AND CONFIGURATION
+========================================================================
+
+LAB OBJECTIVE:
+Install and configure Apache HTTP Server with basic settings and document root configuration
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- Network connectivity
+- Basic understanding of web server concepts
+
+LAB SCENARIO:
+Install Apache HTTP Server, configure basic settings, create web content, and ensure proper service operation.
+
+EQUIPMENT NEEDED:
+- RHEL system (server1: 192.168.1.10)
+- Web browser for testing
+
+LAB TASKS:
+
+PART A: APACHE INSTALLATION
+----------------------------
+
+1. Install Apache HTTP Server:
+   # yum install httpd -y
+   # systemctl enable httpd
+
+2. Check Apache version and modules:
+   # httpd -v
+   # httpd -M
+   # rpm -qa | grep httpd
+
+3. Verify installation directories:
+   # ls -la /etc/httpd/
+   # ls -la /var/www/
+   # ls -la /var/log/httpd/
+
+PART B: BASIC APACHE CONFIGURATION
+-----------------------------------
+
+1. Backup original configuration:
+   # cp /etc/httpd/conf/httpd.conf /etc/httpd/conf/httpd.conf.backup
+
+2. Configure main Apache settings (/etc/httpd/conf/httpd.conf):
+   # install Vim 
+   # yum install vim -y
+
+   # vim /etc/httpd/conf/httpd.conf
+   
+   # Basic server settings
+   ServerRoot "/etc/httpd"
+   Listen 80
+   ServerName server1.example.com:80
+   ServerAdmin webmaster@example.com
+   
+   # Document root
+   DocumentRoot "/var/www/html"
+   
+   # Directory permissions
+   <Directory "/var/www/html">
+       Options Indexes FollowSymLinks
+       AllowOverride None
+       Require all granted
+   </Directory>
+   
+   # Default file types
+   DirectoryIndex index.html index.html
+   
+   # Logging
+   ErrorLog logs/error_log
+   CustomLog logs/access_log combined
+   LogLevel warn
+
+3. Test configuration syntax:
+   # httpd -t
+   # apachectl configtest
+
+PART C: CREATE WEB CONTENT
+---------------------------
+
+1. Create default web page:
+   # vim /var/www/html/index.html
+   
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to Apache Server</title>
+</head>
+<body>
+<h1>Apache HTTP Server is Working!</h1>
+<p>Server: server1.example.com</p>
+<p>Date: $(date)</p>
+</body>
+</html>
+
+2. Create additional web content:
+   # mkdir -p /var/www/html/test
+   # echo "<h1>Test Page</h1>" > /var/www/html/test/index.html
+   # echo "Plain text file" > /var/www/html/test.txt
+
+3. Set proper permissions:
+   # chown -R apache:apache /var/www/html
+   # chmod -R 644 /var/www/html/*
+   # find /var/www/html -type d -exec chmod 755 {} \;
+
+PART D: CONFIGURE FIREWALL AND SELINUX
+---------------------------------------
+   # install firewall 
+   # yum install firewalld
+   # systemctl start firewalld
+   # systemctl enable firewalld
+
+1. Configure firewall:
+   # firewall-cmd --permanent --add-service=http
+   # firewall-cmd --reload
+   # firewall-cmd --list-services
+
+2. Configure SELinux contexts:
+   # setsebool -P httpd_can_network_connect on
+   # semanage fcontext -a -t httpd_exec_t "/var/www/html(/.*)?"
+   # restorecon -R /var/www/html
+
+3. Check SELinux status:
+   # getsebool -a | grep httpd
+   # ls -Z /var/www/html/
+
+PART E: START AND TEST APACHE
+------------------------------
+
+1. Start Apache service:
+   # systemctl start httpd
+   # systemctl status httpd
+
+2. Verify Apache is listening:
+   # netstat -tulpn | grep :80
+   # ss -tulpn | grep :80
+
+3. Test web server locally:
+   # curl http://localhost
+   # curl http://192.168.1.10
+   # wget http://localhost/test/
+
+4. Test from web browser:              (No )
+   # Open browser and navigate to:
+   http://192.168.1.10
+   http://192.168.1.10/test/
+   http://192.168.1.10/test.txt
+
+PART F: CONFIGURE ADDITIONAL SETTINGS
+--------------------------------------
+
+1. Configure server tokens and signature:
+   # vim /etc/httpd/conf/httpd.conf
+   ServerTokens Prod
+   ServerSignature Off
+
+2. Configure timeout settings:
+   # vim /etc/httpd/conf/httpd.conf
+   Timeout 60
+   KeepAlive On
+   MaxKeepAliveRequests 100
+   KeepAliveTimeout 15
+
+3. Configure worker settings:
+   # vim /etc/httpd/conf.modules.d/00-mpm.conf
+   LoadModule mpm_prefork_module modules/mod_mpm_prefork.so
+   LoadModule status_module modules/mod_status.so
+
+<IfModule mpm_prefork_module>
+StartServers 8
+MinSpareServers 5
+MaxSpareServers 20
+ServerLimit 256
+MaxRequestWorkers 256
+MaxConnectionsPerChild 4000
+</IfModule>
+
+PART G: MONITORING AND LOGGING
+-------------------------------
+
+1. Monitor Apache processes:
+   # ps aux | grep httpd
+   # systemctl status httpd
+
+2. Check Apache logs:
+   # tail -f /var/log/httpd/access_log
+   # tail -f /var/log/httpd/error_log
+
+3. Enable server status module:
+   # vim /etc/httpd/conf/httpd.conf
+   LoadModule status_module modules/mod_status.so
+   
+   <Location "/server-status">
+       SetHandler server-status
+       Require local
+   </Location>
+
+   #httpd -t
+   #systemctl restart httpd
+
+
+
+4. Monitor web server statistics:
+   # apachectl status
+   # curl http://localhost/server-status
+
+
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status httpd
+# httpd -t
+# tail -f /var/log/httpd/error_log
+# netstat -tulpn | grep :80
+# curl -I http://localhost
+# semanage fcontext -l | grep httpd
+
+EXPECTED RESULTS:
+-----------------
+- Apache HTTP Server installed and running
+- Web pages accessible via browser
+- Proper file permissions and SELinux contexts
+- Firewall allows HTTP traffic
+- Logging captures web requests
+
+VALIDATION CHECKLIST:
+---------------------
+□ Apache service running       Done
+□ Web pages accessible         Done 
+□ Firewall configured for HTTP Done 
+□ SELinux contexts correct     Done 
+□ Logging working properly     Done
+□ Configuration syntax valid   Done
+
+CLEANUP:
+--------
+# systemctl stop httpd
+# systemctl disable httpd
+# firewall-cmd --permanent --remove-service=http
+# firewall-cmd --reload
+# rm -rf /var/www/html/*
+
+
+                              Done 

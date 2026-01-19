@@ -1,0 +1,964 @@
+RHCE RH254 HANDS-ON LAB: AUTOMATED MONITORING SCRIPTS
+===================================================
+
+LAB OBJECTIVE:
+Create comprehensive automated monitoring scripts for system health, service availability, security events, and performance metrics with intelligent alerting and self-healing capabilities
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of shell scripting
+- Basic knowledge of system monitoring concepts
+- Familiarity with cron scheduling
+
+LAB SCENARIO:
+Deploy enterprise automated monitoring system with intelligent scripts that monitor system health, detect anomalies, send alerts, and perform automated remediation actions.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20)
+- Email server for notifications (optional)
+- Storage for monitoring logs and data
+
+LAB TASKS:
+
+PART A: CREATE SYSTEM HEALTH MONITORING SCRIPT
+-----------------------------------------------
+
+1. Create comprehensive system health monitor:
+   # vim /usr/local/bin/system-health-monitor.sh
+   
+   #!/bin/bash
+   CONFIG_FILE="/etc/monitoring/system-health.conf"
+   LOG_FILE="/var/log/system-health-monitor.log"
+   ALERT_FILE="/var/log/system-health-alerts.log"
+   
+   # Create config directory
+   mkdir -p /etc/monitoring
+   
+   # Create default configuration
+   if [ ! -f $CONFIG_FILE ]; then
+       cat > $CONFIG_FILE << 'EOF'
+   # System Health Monitoring Configuration
+   CPU_THRESHOLD=80
+   MEMORY_THRESHOLD=85
+   DISK_THRESHOLD=90
+   LOAD_THRESHOLD=3.0
+   SWAP_THRESHOLD=50
+   TEMP_THRESHOLD=70
+   ALERT_EMAIL="admin@example.com"
+   ENABLE_EMAIL=false
+   ENABLE_REMEDIATION=true
+   EOF
+   fi
+   
+   # Source configuration
+   source $CONFIG_FILE
+   
+   echo "=== System Health Check - $(date) ===" >> $LOG_FILE
+   
+   # Check CPU usage
+   CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 | cut -d'.' -f1)
+   echo "CPU Usage: ${CPU_USAGE}%" >> $LOG_FILE
+   if [ $CPU_USAGE -gt $CPU_THRESHOLD ]; then
+       ALERT="HIGH CPU USAGE: ${CPU_USAGE}%"
+       echo "$(date): $ALERT" >> $ALERT_FILE
+       
+       if [ "$ENABLE_REMEDIATION" = "true" ]; then
+           # Kill high CPU processes if needed
+           ps aux --sort=-%cpu | head -5 | tail -4 >> $LOG_FILE
+       fi
+   fi
+   
+   # Check memory usage
+   MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
+   echo "Memory Usage: ${MEMORY_USAGE}%" >> $LOG_FILE
+   if [ $MEMORY_USAGE -gt $MEMORY_THRESHOLD ]; then
+       ALERT="HIGH MEMORY USAGE: ${MEMORY_USAGE}%"
+       echo "$(date): $ALERT" >> $ALERT_FILE
+       
+       if [ "$ENABLE_REMEDIATION" = "true" ]; then
+           # Clear caches if memory is high
+           sync && echo 1 > /proc/sys/vm/drop_caches
+           echo "$(date): Cleared system caches" >> $LOG_FILE
+       fi
+   fi
+   
+   # Check disk usage
+   df -h | grep -E '^/dev/' | while read line; do
+       USAGE=$(echo $line | awk '{print $5}' | cut -d'%' -f1)
+       FILESYSTEM=$(echo $line | awk '{print $6}')
+       echo "Disk Usage $FILESYSTEM: ${USAGE}%" >> $LOG_FILE
+       
+       if [ $USAGE -gt $DISK_THRESHOLD ]; then
+           ALERT="HIGH DISK USAGE: $FILESYSTEM ${USAGE}%"
+           echo "$(date): $ALERT" >> $ALERT_FILE
+           
+           if [ "$ENABLE_REMEDIATION" = "true" ]; then
+               # Clean temporary files
+               find /tmp -type f -atime +7 -delete 2>/dev/null
+               find /var/tmp -type f -atime +7 -delete 2>/dev/null
+               echo "$(date): Cleaned temporary files on $FILESYSTEM" >> $LOG_FILE
+           fi
+       fi
+   done
+   
+   # Check load average
+   LOAD_1MIN=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}' | tr -d ' ')
+   echo "Load Average (1min): $LOAD_1MIN" >> $LOG_FILE
+   if (( $(echo "$LOAD_1MIN > $LOAD_THRESHOLD" | bc -l) )); then
+       ALERT="HIGH LOAD AVERAGE: $LOAD_1MIN"
+       echo "$(date): $ALERT" >> $ALERT_FILE
+   fi
+   
+   # Check swap usage
+   SWAP_TOTAL=$(free | grep Swap | awk '{print $2}')
+   if [ $SWAP_TOTAL -gt 0 ]; then
+       SWAP_USAGE=$(free | grep Swap | awk '{printf("%.0f", $3/$2 * 100.0)}')
+       echo "Swap Usage: ${SWAP_USAGE}%" >> $LOG_FILE
+       if [ $SWAP_USAGE -gt $SWAP_THRESHOLD ]; then
+           ALERT="HIGH SWAP USAGE: ${SWAP_USAGE}%"
+           echo "$(date): $ALERT" >> $ALERT_FILE
+       fi
+   fi
+   
+   # Check system temperature (if available)
+   if command -v sensors >/dev/null 2>&1; then
+       TEMP=$(sensors | grep -i "core 0" | awk '{print $3}' | cut -d'+' -f2 | cut -d'.' -f1 2>/dev/null)
+       if [ -n "$TEMP" ]; then
+           echo "CPU Temperature: ${TEMP}°C" >> $LOG_FILE
+           if [ $TEMP -gt $TEMP_THRESHOLD ]; then
+               ALERT="HIGH CPU TEMPERATURE: ${TEMP}°C"
+               echo "$(date): $ALERT" >> $ALERT_FILE
+           fi
+       fi
+   fi
+   
+   echo "---" >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/system-health-monitor.sh
+
+2. Create service availability monitor:
+   # vim /usr/local/bin/service-monitor.sh
+   
+   #!/bin/bash
+   CONFIG_FILE="/etc/monitoring/services.conf"
+   LOG_FILE="/var/log/service-monitor.log"
+   ALERT_FILE="/var/log/service-alerts.log"
+   
+   # Create default service configuration
+   if [ ! -f $CONFIG_FILE ]; then
+       cat > $CONFIG_FILE << 'EOF'
+   # Service Monitoring Configuration
+   # Format: service_name:check_command:restart_command:max_failures:notification
+   sshd:systemctl is-active sshd:systemctl restart sshd:3:critical
+   httpd:systemctl is-active httpd:systemctl restart httpd:2:high
+   mysqld:systemctl is-active mysqld:systemctl restart mysqld:3:high
+   postfix:systemctl is-active postfix:systemctl restart postfix:2:medium
+   chronyd:systemctl is-active chronyd:systemctl restart chronyd:1:low
+   EOF
+   fi
+   
+   echo "=== Service Monitor Check - $(date) ===" >> $LOG_FILE
+   
+   while IFS=':' read -r service check_cmd restart_cmd max_failures priority; do
+       # Skip comments and empty lines
+       [[ $service =~ ^#.*$ ]] && continue
+       [[ -z $service ]] && continue
+       
+       FAILURE_FILE="/tmp/service-failures-$service"
+       
+       # Check if service is running
+       if eval $check_cmd >/dev/null 2>&1; then
+           echo "$service: RUNNING" >> $LOG_FILE
+           # Reset failure count on success
+           rm -f $FAILURE_FILE
+       else
+           echo "$service: FAILED" >> $LOG_FILE
+           
+           # Count failures
+           if [ -f $FAILURE_FILE ]; then
+               FAILURES=$(cat $FAILURE_FILE)
+           else
+               FAILURES=0
+           fi
+           
+           FAILURES=$((FAILURES + 1))
+           echo $FAILURES > $FAILURE_FILE
+           
+           ALERT="SERVICE FAILURE: $service (attempt $FAILURES/$max_failures) - Priority: $priority"
+           echo "$(date): $ALERT" >> $ALERT_FILE
+           
+           if [ $FAILURES -le $max_failures ]; then
+               echo "$(date): Attempting to restart $service" >> $LOG_FILE
+               if eval $restart_cmd >> $LOG_FILE 2>&1; then
+                   sleep 5
+                   if eval $check_cmd >/dev/null 2>&1; then
+                       echo "$(date): Successfully restarted $service" >> $LOG_FILE
+                       rm -f $FAILURE_FILE
+                   else
+                       echo "$(date): Failed to restart $service" >> $LOG_FILE
+                   fi
+               fi
+           else
+               echo "$(date): Maximum restart attempts reached for $service" >> $LOG_FILE
+           fi
+       fi
+   done < $CONFIG_FILE
+   
+   echo "---" >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/service-monitor.sh
+
+PART B: CREATE SECURITY MONITORING SCRIPT
+------------------------------------------
+
+1. Create security event monitor:
+   # vim /usr/local/bin/security-monitor.sh
+   
+   #!/bin/bash
+   LOG_FILE="/var/log/security-monitor.log"
+   ALERT_FILE="/var/log/security-alerts.log"
+   AUTH_LOG="/var/log/secure"
+   
+   # Configuration
+   FAILED_LOGIN_THRESHOLD=5
+   TIME_WINDOW=300  # 5 minutes
+   BLOCKED_IPS_FILE="/tmp/blocked-ips"
+   
+   echo "=== Security Monitor Check - $(date) ===" >> $LOG_FILE
+   
+   # Check for failed SSH attempts
+   CURRENT_TIME=$(date +%s)
+   FAILED_ATTEMPTS=$(grep "Failed password" $AUTH_LOG | \
+       awk -v window=$TIME_WINDOW -v now=$CURRENT_TIME '
+       {
+           cmd="date -d \"" $1 " " $2 " " $3 "\" +%s 2>/dev/null"
+           if((cmd | getline timestamp) > 0 && (now - timestamp) <= window) {
+               print $11
+           }
+           close(cmd)
+       }' | sort | uniq -c | sort -nr)
+   
+   if [ -n "$FAILED_ATTEMPTS" ]; then
+       echo "$FAILED_ATTEMPTS" | while read count ip; do
+           if [ $count -gt $FAILED_LOGIN_THRESHOLD ]; then
+               ALERT="SECURITY THREAT: $count failed login attempts from $ip in last 5 minutes"
+               echo "$(date): $ALERT" >> $ALERT_FILE
+               
+               # Block IP if not already blocked
+               if ! grep -q "$ip" $BLOCKED_IPS_FILE 2>/dev/null; then
+                   echo "$ip" >> $BLOCKED_IPS_FILE
+                   firewall-cmd --add-rich-rule="rule family='ipv4' source address='$ip' reject" 2>/dev/null
+                   echo "$(date): Blocked IP $ip" >> $LOG_FILE
+               fi
+           fi
+       done
+   fi
+   
+   # Check for successful root logins
+   ROOT_LOGINS=$(grep "Accepted.*root" $AUTH_LOG | tail -10)
+   if [ -n "$ROOT_LOGINS" ]; then
+       echo "Recent root logins detected:" >> $LOG_FILE
+       echo "$ROOT_LOGINS" >> $LOG_FILE
+   fi
+   
+   # Check for new user accounts
+   NEW_USERS=$(grep "new user" /var/log/messages | tail -5)
+   if [ -n "$NEW_USERS" ]; then
+       echo "New user accounts created:" >> $LOG_FILE
+       echo "$NEW_USERS" >> $LOG_FILE
+   fi
+   
+   # Check for sudo usage
+   SUDO_USAGE=$(grep "sudo:" $AUTH_LOG | tail -10)
+   if [ -n "$SUDO_USAGE" ]; then
+       echo "Recent sudo usage:" >> $LOG_FILE
+       echo "$SUDO_USAGE" >> $LOG_FILE
+   fi
+   
+   # Check for file permission changes
+   PERM_CHANGES=$(find /etc /usr/bin /usr/sbin -type f -mmin -60 -ls 2>/dev/null | head -10)
+   if [ -n "$PERM_CHANGES" ]; then
+       echo "Recent file changes in system directories:" >> $LOG_FILE
+       echo "$PERM_CHANGES" >> $LOG_FILE
+   fi
+   
+   echo "---" >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/security-monitor.sh
+
+2. Create network security monitor:
+   # vim /usr/local/bin/network-security-monitor.sh
+   
+   #!/bin/bash
+   LOG_FILE="/var/log/network-security-monitor.log"
+   ALERT_FILE="/var/log/network-security-alerts.log"
+   
+   echo "=== Network Security Monitor - $(date) ===" >> $LOG_FILE
+   
+   # Check for unusual network connections
+   CONNECTIONS=$(netstat -tuln | grep LISTEN | wc -l)
+   echo "Active listening ports: $CONNECTIONS" >> $LOG_FILE
+   
+   # Check for new listening ports
+   CURRENT_PORTS="/tmp/current-ports-$(date +%Y%m%d)"
+   PREVIOUS_PORTS="/tmp/previous-ports"
+   
+   netstat -tuln | grep LISTEN | awk '{print $4}' | sort > $CURRENT_PORTS
+   
+   if [ -f $PREVIOUS_PORTS ]; then
+       NEW_PORTS=$(comm -13 $PREVIOUS_PORTS $CURRENT_PORTS)
+       if [ -n "$NEW_PORTS" ]; then
+           ALERT="NEW LISTENING PORTS DETECTED: $NEW_PORTS"
+           echo "$(date): $ALERT" >> $ALERT_FILE
+       fi
+   fi
+   
+   cp $CURRENT_PORTS $PREVIOUS_PORTS
+   
+   # Check for high number of connections from single IP
+   HIGH_CONN_IPS=$(netstat -an | grep ESTABLISHED | awk '{print $5}' | cut -d: -f1 | sort | uniq -c | sort -nr | head -5)
+   if [ -n "$HIGH_CONN_IPS" ]; then
+       echo "Top connection sources:" >> $LOG_FILE
+       echo "$HIGH_CONN_IPS" >> $LOG_FILE
+       
+       # Alert if any IP has more than 50 connections
+       echo "$HIGH_CONN_IPS" | while read count ip; do
+           if [ $count -gt 50 ]; then
+               ALERT="HIGH CONNECTION COUNT: $ip has $count connections"
+               echo "$(date): $ALERT" >> $ALERT_FILE
+           fi
+       done
+   fi
+   
+   # Check firewall status
+   if ! systemctl is-active firewalld >/dev/null 2>&1; then
+       ALERT="FIREWALL NOT RUNNING"
+       echo "$(date): $ALERT" >> $ALERT_FILE
+   fi
+   
+   echo "---" >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/network-security-monitor.sh
+
+PART C: CREATE PERFORMANCE MONITORING SCRIPT
+---------------------------------------------
+
+1. Create performance anomaly detector:
+   # vim /usr/local/bin/performance-anomaly-detector.sh
+   
+   #!/bin/bash
+   LOG_FILE="/var/log/performance-anomaly.log"
+   ALERT_FILE="/var/log/performance-alerts.log"
+   BASELINE_DIR="/var/log/performance-baseline"
+   
+   mkdir -p $BASELINE_DIR
+   
+   echo "=== Performance Anomaly Detection - $(date) ===" >> $LOG_FILE
+   
+   # Get current performance metrics
+   CURRENT_CPU=$(sar -u 1 1 | grep Average | awk '{print 100-$8}')
+   CURRENT_MEM=$(free | grep Mem | awk '{printf("%.1f", $3/$2 * 100.0)}')
+   CURRENT_LOAD=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}' | tr -d ' ')
+   
+   # Store current metrics
+   echo "$(date +%s),$CURRENT_CPU,$CURRENT_MEM,$CURRENT_LOAD" >> $BASELINE_DIR/metrics-$(date +%Y%m%d).log
+   
+   # Calculate baseline (average of last 7 days)
+   BASELINE_FILE="$BASELINE_DIR/baseline-averages.log"
+   
+   if [ -f $BASELINE_FILE ]; then
+       BASELINE_CPU=$(awk -F',' '{cpu+=$2; count++} END {print cpu/count}' $BASELINE_FILE)
+       BASELINE_MEM=$(awk -F',' '{mem+=$3; count++} END {print mem/count}' $BASELINE_FILE)
+       BASELINE_LOAD=$(awk -F',' '{load+=$4; count++} END {print load/count}' $BASELINE_FILE)
+       
+       # Check for anomalies (deviation > 50% from baseline)
+       CPU_DEVIATION=$(echo "scale=2; ($CURRENT_CPU - $BASELINE_CPU) / $BASELINE_CPU * 100" | bc)
+       MEM_DEVIATION=$(echo "scale=2; ($CURRENT_MEM - $BASELINE_MEM) / $BASELINE_MEM * 100" | bc)
+       LOAD_DEVIATION=$(echo "scale=2; ($CURRENT_LOAD - $BASELINE_LOAD) / $BASELINE_LOAD * 100" | bc)
+       
+       echo "CPU: Current=$CURRENT_CPU%, Baseline=$BASELINE_CPU%, Deviation=${CPU_DEVIATION}%" >> $LOG_FILE
+       echo "Memory: Current=$CURRENT_MEM%, Baseline=$BASELINE_MEM%, Deviation=${MEM_DEVIATION}%" >> $LOG_FILE
+       echo "Load: Current=$CURRENT_LOAD, Baseline=$BASELINE_LOAD, Deviation=${LOAD_DEVIATION}%" >> $LOG_FILE
+       
+       # Alert on significant deviations
+       if (( $(echo "$CPU_DEVIATION > 50 || $CPU_DEVIATION < -50" | bc -l) )); then
+           ALERT="CPU ANOMALY: ${CPU_DEVIATION}% deviation from baseline"
+           echo "$(date): $ALERT" >> $ALERT_FILE
+       fi
+       
+       if (( $(echo "$MEM_DEVIATION > 50 || $MEM_DEVIATION < -50" | bc -l) )); then
+           ALERT="MEMORY ANOMALY: ${MEM_DEVIATION}% deviation from baseline"
+           echo "$(date): $ALERT" >> $ALERT_FILE
+       fi
+       
+       if (( $(echo "$LOAD_DEVIATION > 100 || $LOAD_DEVIATION < -50" | bc -l) )); then
+           ALERT="LOAD ANOMALY: ${LOAD_DEVIATION}% deviation from baseline"
+           echo "$(date): $ALERT" >> $ALERT_FILE
+       fi
+   else
+       echo "No baseline data available yet" >> $LOG_FILE
+   fi
+   
+   # Update baseline weekly
+   if [ $(date +%u) -eq 1 ] && [ $(date +%H) -eq 2 ]; then
+       # Calculate new baseline from last 7 days
+       find $BASELINE_DIR -name "metrics-*.log" -mtime -7 -exec cat {} \; > $BASELINE_FILE
+       echo "$(date): Updated performance baseline" >> $LOG_FILE
+   fi
+   
+   echo "---" >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/performance-anomaly-detector.sh
+
+PART D: CREATE INTELLIGENT ALERTING SYSTEM
+-------------------------------------------
+
+1. Create smart alert manager:
+   # vim /usr/local/bin/smart-alert-manager.sh
+   
+   #!/bin/bash
+   ALERT_CONFIG="/etc/monitoring/alert-config.conf"
+   ALERT_STATE_DIR="/var/lib/monitoring/alerts"
+   LOG_FILE="/var/log/smart-alert-manager.log"
+   
+   mkdir -p $ALERT_STATE_DIR
+   mkdir -p /etc/monitoring
+   
+   # Create alert configuration
+   if [ ! -f $ALERT_CONFIG ]; then
+       cat > $ALERT_CONFIG << 'EOF'
+   # Smart Alert Configuration
+   # Format: alert_type:severity:cooldown_minutes:escalation_threshold:action
+   HIGH_CPU:warning:15:3:email
+   HIGH_MEMORY:warning:15:3:email
+   HIGH_DISK:critical:5:2:email,sms
+   SERVICE_FAILURE:critical:10:2:email,restart
+   SECURITY_THREAT:critical:1:1:email,sms,block
+   PERFORMANCE_ANOMALY:info:60:5:email
+   EOF
+   fi
+   
+   echo "=== Smart Alert Manager - $(date) ===" >> $LOG_FILE
+   
+   # Process all alert files
+   for alert_file in /var/log/*-alerts.log; do
+       if [ -f "$alert_file" ]; then
+           # Get new alerts (since last check)
+           LAST_CHECK_FILE="$ALERT_STATE_DIR/$(basename $alert_file .log)-last-check"
+           
+           if [ -f $LAST_CHECK_FILE ]; then
+               LAST_CHECK=$(cat $LAST_CHECK_FILE)
+               NEW_ALERTS=$(awk -v last="$LAST_CHECK" '$0 > last' $alert_file)
+           else
+               NEW_ALERTS=$(tail -10 $alert_file)
+           fi
+           
+           if [ -n "$NEW_ALERTS" ]; then
+               echo "Processing alerts from $alert_file:" >> $LOG_FILE
+               echo "$NEW_ALERTS" | while read alert_line; do
+                   # Extract alert type from message
+                   ALERT_TYPE=$(echo "$alert_line" | grep -oE "(HIGH_CPU|HIGH_MEMORY|HIGH_DISK|SERVICE_FAILURE|SECURITY_THREAT|PERFORMANCE_ANOMALY)" | head -1)
+                   
+                   if [ -n "$ALERT_TYPE" ]; then
+                       # Get alert configuration
+                       ALERT_INFO=$(grep "^$ALERT_TYPE:" $ALERT_CONFIG)
+                       if [ -n "$ALERT_INFO" ]; then
+                           SEVERITY=$(echo $ALERT_INFO | cut -d: -f2)
+                           COOLDOWN=$(echo $ALERT_INFO | cut -d: -f3)
+                           ESCALATION=$(echo $ALERT_INFO | cut -d: -f4)
+                           ACTIONS=$(echo $ALERT_INFO | cut -d: -f5)
+                           
+                           # Check cooldown period
+                           COOLDOWN_FILE="$ALERT_STATE_DIR/$ALERT_TYPE-cooldown"
+                           CURRENT_TIME=$(date +%s)
+                           
+                           if [ -f $COOLDOWN_FILE ]; then
+                               LAST_ALERT_TIME=$(cat $COOLDOWN_FILE)
+                               TIME_DIFF=$(($CURRENT_TIME - $LAST_ALERT_TIME))
+                               COOLDOWN_SECONDS=$(($COOLDOWN * 60))
+                               
+                               if [ $TIME_DIFF -lt $COOLDOWN_SECONDS ]; then
+                                   echo "Alert $ALERT_TYPE in cooldown period" >> $LOG_FILE
+                                   continue
+                               fi
+                           fi
+                           
+                           # Process alert actions
+                           echo "Processing $SEVERITY alert: $ALERT_TYPE" >> $LOG_FILE
+                           echo "$alert_line" >> $LOG_FILE
+                           
+                           # Execute actions
+                           IFS=',' read -ra ACTION_LIST <<< "$ACTIONS"
+                           for action in "${ACTION_LIST[@]}"; do
+                               case $action in
+                                   "email")
+                                       echo "Would send email alert for $ALERT_TYPE" >> $LOG_FILE
+                                       ;;
+                                   "sms")
+                                       echo "Would send SMS alert for $ALERT_TYPE" >> $LOG_FILE
+                                       ;;
+                                   "restart")
+                                       echo "Would execute restart action for $ALERT_TYPE" >> $LOG_FILE
+                                       ;;
+                                   "block")
+                                       echo "Would execute blocking action for $ALERT_TYPE" >> $LOG_FILE
+                                       ;;
+                               esac
+                           done
+                           
+                           # Update cooldown
+                           echo $CURRENT_TIME > $COOLDOWN_FILE
+                       fi
+                   fi
+               done
+           fi
+           
+           # Update last check timestamp
+           tail -1 $alert_file > $LAST_CHECK_FILE 2>/dev/null
+       fi
+   done
+   
+   echo "---" >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/smart-alert-manager.sh
+PART E: CREATE SELF-HEALING AUTOMATION
+--------------------------------------
+
+1. Create self-healing system:
+   # vim /usr/local/bin/self-healing-system.sh
+   
+   #!/bin/bash
+   CONFIG_FILE="/etc/monitoring/self-healing.conf"
+   LOG_FILE="/var/log/self-healing.log"
+   
+   # Create self-healing configuration
+   if [ ! -f $CONFIG_FILE ]; then
+       cat > $CONFIG_FILE << 'EOF'
+   # Self-Healing Configuration
+   # Format: condition:action:max_attempts:cooldown_minutes
+   high_cpu:kill_high_cpu_processes:3:30
+   high_memory:clear_caches:5:15
+   disk_full:cleanup_temp_files:2:60
+   service_down:restart_service:3:10
+   high_load:reduce_processes:2:45
+   EOF
+   fi
+   
+   echo "=== Self-Healing System Check - $(date) ===" >> $LOG_FILE
+   
+   # Check conditions and apply healing actions
+   while IFS=':' read -r condition action max_attempts cooldown; do
+       [[ $condition =~ ^#.*$ ]] && continue
+       [[ -z $condition ]] && continue
+       
+       ATTEMPT_FILE="/tmp/healing-attempts-$condition"
+       COOLDOWN_FILE="/tmp/healing-cooldown-$condition"
+       CURRENT_TIME=$(date +%s)
+       
+       # Check cooldown
+       if [ -f $COOLDOWN_FILE ]; then
+           LAST_ACTION_TIME=$(cat $COOLDOWN_FILE)
+           TIME_DIFF=$(($CURRENT_TIME - $LAST_ACTION_TIME))
+           COOLDOWN_SECONDS=$(($cooldown * 60))
+           
+           if [ $TIME_DIFF -lt $COOLDOWN_SECONDS ]; then
+               continue
+           fi
+       fi
+       
+       # Check condition and apply action
+       case $condition in
+           "high_cpu")
+               CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 | cut -d'.' -f1)
+               if [ $CPU_USAGE -gt 90 ]; then
+                   echo "$(date): Detected high CPU usage: ${CPU_USAGE}%" >> $LOG_FILE
+                   
+                   # Get current attempt count
+                   ATTEMPTS=$(cat $ATTEMPT_FILE 2>/dev/null || echo 0)
+                   ATTEMPTS=$((ATTEMPTS + 1))
+                   
+                   if [ $ATTEMPTS -le $max_attempts ]; then
+                       echo "$(date): Executing healing action: $action (attempt $ATTEMPTS)" >> $LOG_FILE
+                       
+                       # Kill top CPU process
+                       TOP_PID=$(ps aux --sort=-%cpu | head -2 | tail -1 | awk '{print $2}')
+                       if [ -n "$TOP_PID" ] && [ "$TOP_PID" != "1" ]; then
+                           kill -TERM $TOP_PID
+                           echo "$(date): Terminated high CPU process PID $TOP_PID" >> $LOG_FILE
+                       fi
+                       
+                       echo $ATTEMPTS > $ATTEMPT_FILE
+                       echo $CURRENT_TIME > $COOLDOWN_FILE
+                   fi
+               else
+                   rm -f $ATTEMPT_FILE
+               fi
+               ;;
+               
+           "high_memory")
+               MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
+               if [ $MEMORY_USAGE -gt 90 ]; then
+                   echo "$(date): Detected high memory usage: ${MEMORY_USAGE}%" >> $LOG_FILE
+                   
+                   ATTEMPTS=$(cat $ATTEMPT_FILE 2>/dev/null || echo 0)
+                   ATTEMPTS=$((ATTEMPTS + 1))
+                   
+                   if [ $ATTEMPTS -le $max_attempts ]; then
+                       echo "$(date): Executing healing action: $action (attempt $ATTEMPTS)" >> $LOG_FILE
+                       
+                       # Clear caches
+                       sync && echo 1 > /proc/sys/vm/drop_caches
+                       echo "$(date): Cleared system caches" >> $LOG_FILE
+                       
+                       echo $ATTEMPTS > $ATTEMPT_FILE
+                       echo $CURRENT_TIME > $COOLDOWN_FILE
+                   fi
+               else
+                   rm -f $ATTEMPT_FILE
+               fi
+               ;;
+               
+           "disk_full")
+               df -h | grep -E '^/dev/' | while read line; do
+                   USAGE=$(echo $line | awk '{print $5}' | cut -d'%' -f1)
+                   FILESYSTEM=$(echo $line | awk '{print $6}')
+                   
+                   if [ $USAGE -gt 95 ]; then
+                       echo "$(date): Detected disk full: $FILESYSTEM ${USAGE}%" >> $LOG_FILE
+                       
+                       ATTEMPTS=$(cat $ATTEMPT_FILE 2>/dev/null || echo 0)
+                       ATTEMPTS=$((ATTEMPTS + 1))
+                       
+                       if [ $ATTEMPTS -le $max_attempts ]; then
+                           echo "$(date): Executing healing action: $action (attempt $ATTEMPTS)" >> $LOG_FILE
+                           
+                           # Clean temporary files
+                           find /tmp -type f -atime +1 -delete 2>/dev/null
+                           find /var/tmp -type f -atime +1 -delete 2>/dev/null
+                           find /var/log -name "*.log" -size +100M -exec truncate -s 50M {} \;
+                           
+                           echo "$(date): Cleaned temporary files and truncated large logs" >> $LOG_FILE
+                           echo $ATTEMPTS > $ATTEMPT_FILE
+                           echo $CURRENT_TIME > $COOLDOWN_FILE
+                       fi
+                   fi
+               done
+               ;;
+       esac
+       
+   done < $CONFIG_FILE
+   
+   echo "---" >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/self-healing-system.sh
+
+2. Create monitoring orchestrator:
+   # vim /usr/local/bin/monitoring-orchestrator.sh
+   
+   #!/bin/bash
+   LOG_FILE="/var/log/monitoring-orchestrator.log"
+   
+   echo "=== Monitoring Orchestrator - $(date) ===" >> $LOG_FILE
+   
+   # Run all monitoring scripts in sequence
+   SCRIPTS=(
+       "/usr/local/bin/system-health-monitor.sh"
+       "/usr/local/bin/service-monitor.sh"
+       "/usr/local/bin/security-monitor.sh"
+       "/usr/local/bin/network-security-monitor.sh"
+       "/usr/local/bin/performance-anomaly-detector.sh"
+       "/usr/local/bin/self-healing-system.sh"
+       "/usr/local/bin/smart-alert-manager.sh"
+   )
+   
+   for script in "${SCRIPTS[@]}"; do
+       if [ -x "$script" ]; then
+           echo "$(date): Running $(basename $script)" >> $LOG_FILE
+           $script
+           EXIT_CODE=$?
+           if [ $EXIT_CODE -eq 0 ]; then
+               echo "$(date): $(basename $script) completed successfully" >> $LOG_FILE
+           else
+               echo "$(date): $(basename $script) failed with exit code $EXIT_CODE" >> $LOG_FILE
+           fi
+       else
+           echo "$(date): Script $script not found or not executable" >> $LOG_FILE
+       fi
+   done
+   
+   # Generate summary report
+   echo "$(date): Monitoring cycle completed" >> $LOG_FILE
+   echo "---" >> $LOG_FILE
+   
+   # chmod +x /usr/local/bin/monitoring-orchestrator.sh
+
+PART F: CREATE MONITORING DASHBOARD
+------------------------------------
+
+1. Create monitoring dashboard:
+   # vim /usr/local/bin/monitoring-dashboard.sh
+   
+   #!/bin/bash
+   DASHBOARD_FILE="/var/www/html/monitoring-dashboard.html"
+   
+   # Create web directory if it doesn't exist
+   mkdir -p /var/www/html
+   
+   cat > $DASHBOARD_FILE << 'EOF'
+   <!DOCTYPE html>
+   <html>
+   <head>
+       <title>System Monitoring Dashboard</title>
+       <meta http-equiv="refresh" content="60">
+       <style>
+           body { font-family: Arial, sans-serif; margin: 20px; }
+           .status-ok { color: green; }
+           .status-warning { color: orange; }
+           .status-critical { color: red; }
+           .section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+           table { width: 100%; border-collapse: collapse; }
+           th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+       </style>
+   </head>
+   <body>
+       <h1>System Monitoring Dashboard</h1>
+       <p>Last Updated: $(date)</p>
+   EOF
+   
+   # System Health Section
+   echo '<div class="section"><h2>System Health</h2>' >> $DASHBOARD_FILE
+   
+   # CPU Usage
+   CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+   if (( $(echo "$CPU_USAGE > 80" | bc -l) )); then
+       CPU_CLASS="status-critical"
+   elif (( $(echo "$CPU_USAGE > 60" | bc -l) )); then
+       CPU_CLASS="status-warning"
+   else
+       CPU_CLASS="status-ok"
+   fi
+   echo "<p>CPU Usage: <span class=\"$CPU_CLASS\">${CPU_USAGE}%</span></p>" >> $DASHBOARD_FILE
+   
+   # Memory Usage
+   MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.1f", $3/$2 * 100.0)}')
+   if (( $(echo "$MEMORY_USAGE > 85" | bc -l) )); then
+       MEM_CLASS="status-critical"
+   elif (( $(echo "$MEMORY_USAGE > 70" | bc -l) )); then
+       MEM_CLASS="status-warning"
+   else
+       MEM_CLASS="status-ok"
+   fi
+   echo "<p>Memory Usage: <span class=\"$MEM_CLASS\">${MEMORY_USAGE}%</span></p>" >> $DASHBOARD_FILE
+   
+   # Load Average
+   LOAD_AVG=$(uptime | awk -F'load average:' '{print $2}')
+   echo "<p>Load Average: <span class=\"status-ok\">$LOAD_AVG</span></p>" >> $DASHBOARD_FILE
+   
+   echo '</div>' >> $DASHBOARD_FILE
+   
+   # Service Status Section
+   echo '<div class="section"><h2>Service Status</h2><table>' >> $DASHBOARD_FILE
+   echo '<tr><th>Service</th><th>Status</th></tr>' >> $DASHBOARD_FILE
+   
+   for service in sshd httpd mysqld postfix chronyd; do
+       if systemctl is-active $service >/dev/null 2>&1; then
+           STATUS="<span class=\"status-ok\">Running</span>"
+       else
+           STATUS="<span class=\"status-critical\">Stopped</span>"
+       fi
+       echo "<tr><td>$service</td><td>$STATUS</td></tr>" >> $DASHBOARD_FILE
+   done
+   
+   echo '</table></div>' >> $DASHBOARD_FILE
+   
+   # Recent Alerts Section
+   echo '<div class="section"><h2>Recent Alerts</h2>' >> $DASHBOARD_FILE
+   
+   RECENT_ALERTS=$(find /var/log -name "*-alerts.log" -exec tail -5 {} \; 2>/dev/null | tail -10)
+   if [ -n "$RECENT_ALERTS" ]; then
+       echo '<pre>' >> $DASHBOARD_FILE
+       echo "$RECENT_ALERTS" >> $DASHBOARD_FILE
+       echo '</pre>' >> $DASHBOARD_FILE
+   else
+       echo '<p>No recent alerts</p>' >> $DASHBOARD_FILE
+   fi
+   
+   echo '</div>' >> $DASHBOARD_FILE
+   
+   # Disk Usage Section
+   echo '<div class="section"><h2>Disk Usage</h2><table>' >> $DASHBOARD_FILE
+   echo '<tr><th>Filesystem</th><th>Size</th><th>Used</th><th>Available</th><th>Usage</th></tr>' >> $DASHBOARD_FILE
+   
+   df -h | grep -E '^/dev/' | while read line; do
+       FILESYSTEM=$(echo $line | awk '{print $1}')
+       SIZE=$(echo $line | awk '{print $2}')
+       USED=$(echo $line | awk '{print $3}')
+       AVAIL=$(echo $line | awk '{print $4}')
+       USAGE=$(echo $line | awk '{print $5}')
+       
+       USAGE_NUM=$(echo $USAGE | cut -d'%' -f1)
+       if [ $USAGE_NUM -gt 90 ]; then
+           USAGE_CLASS="status-critical"
+       elif [ $USAGE_NUM -gt 80 ]; then
+           USAGE_CLASS="status-warning"
+       else
+           USAGE_CLASS="status-ok"
+       fi
+       
+       echo "<tr><td>$FILESYSTEM</td><td>$SIZE</td><td>$USED</td><td>$AVAIL</td><td><span class=\"$USAGE_CLASS\">$USAGE</span></td></tr>" >> $DASHBOARD_FILE
+   done
+   
+   echo '</table></div>' >> $DASHBOARD_FILE
+   echo '</body></html>' >> $DASHBOARD_FILE
+   
+   echo "Dashboard updated: $DASHBOARD_FILE"
+   
+   # chmod +x /usr/local/bin/monitoring-dashboard.sh
+
+PART G: CONFIGURE AUTOMATED SCHEDULING
+---------------------------------------
+
+1. Create comprehensive monitoring schedule:
+   # vim /etc/cron.d/automated-monitoring
+   
+   # System health monitoring every 5 minutes
+   */5 * * * * root /usr/local/bin/system-health-monitor.sh
+   
+   # Service monitoring every 2 minutes
+   */2 * * * * root /usr/local/bin/service-monitor.sh
+   
+   # Security monitoring every 3 minutes
+   */3 * * * * root /usr/local/bin/security-monitor.sh
+   
+   # Network security monitoring every 10 minutes
+   */10 * * * * root /usr/local/bin/network-security-monitor.sh
+   
+   # Performance anomaly detection every 15 minutes
+   */15 * * * * root /usr/local/bin/performance-anomaly-detector.sh
+   
+   # Self-healing system every 5 minutes
+   */5 * * * * root /usr/local/bin/self-healing-system.sh
+   
+   # Smart alert manager every minute
+   * * * * * root /usr/local/bin/smart-alert-manager.sh
+   
+   # Monitoring orchestrator every 10 minutes
+   */10 * * * * root /usr/local/bin/monitoring-orchestrator.sh
+   
+   # Dashboard update every 2 minutes
+   */2 * * * * root /usr/local/bin/monitoring-dashboard.sh
+   
+   # Log cleanup daily at 3 AM
+   0 3 * * * root find /var/log -name "*monitor*.log" -mtime +7 -delete
+   0 3 * * * root find /var/log -name "*alert*.log" -mtime +30 -delete
+
+2. Create monitoring service:
+   # vim /etc/systemd/system/automated-monitoring.service
+   
+   [Unit]
+   Description=Automated Monitoring Service
+   After=multi-user.target
+   
+   [Service]
+   Type=simple
+   ExecStart=/usr/local/bin/monitoring-orchestrator.sh
+   Restart=always
+   RestartSec=300
+   User=root
+   
+   [Install]
+   WantedBy=multi-user.target
+
+3. Create monitoring timer:
+   # vim /etc/systemd/system/automated-monitoring.timer
+   
+   [Unit]
+   Description=Automated Monitoring Timer
+   Requires=automated-monitoring.service
+   
+   [Timer]
+   OnCalendar=*:0/10
+   Persistent=true
+   
+   [Install]
+   WantedBy=timers.target
+
+PART H: TESTING AND VALIDATION
+-------------------------------
+
+1. Test individual monitoring scripts:
+   # /usr/local/bin/system-health-monitor.sh
+   # /usr/local/bin/service-monitor.sh
+   # /usr/local/bin/security-monitor.sh
+
+2. Test self-healing system:
+   # stress --cpu 8 --timeout 60s &
+   # /usr/local/bin/self-healing-system.sh
+
+3. Test alert system:
+   # /usr/local/bin/smart-alert-manager.sh
+   # tail -f /var/log/smart-alert-manager.log
+
+4. Test monitoring orchestrator:
+   # /usr/local/bin/monitoring-orchestrator.sh
+
+5. Test dashboard generation:
+   # /usr/local/bin/monitoring-dashboard.sh
+   # cat /var/www/html/monitoring-dashboard.html
+
+6. Enable and test systemd services:
+   # systemctl enable automated-monitoring.timer
+   # systemctl start automated-monitoring.timer
+   # systemctl status automated-monitoring.timer
+
+7. Verify cron scheduling:
+   # crontab -l
+   # tail -f /var/log/cron
+
+8. Generate test alerts:
+   # echo "$(date): TEST ALERT - HIGH_CPU usage detected" >> /var/log/system-health-alerts.log
+   # /usr/local/bin/smart-alert-manager.sh
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status automated-monitoring
+# journalctl -u automated-monitoring -f
+# tail -f /var/log/monitoring-orchestrator.log
+# ls -la /var/log/*monitor*.log
+# ls -la /var/log/*alert*.log
+# crontab -l
+
+EXPECTED RESULTS:
+-----------------
+- Comprehensive automated monitoring operational
+- Self-healing system responding to issues
+- Intelligent alerting with cooldown periods
+- Security monitoring detecting threats
+- Performance anomaly detection working
+- Dashboard providing real-time status
+- All monitoring scripts scheduled and running
+
+VALIDATION CHECKLIST:
+---------------------
+□ System health monitoring active
+□ Service monitoring operational
+□ Security monitoring detecting events
+□ Performance anomaly detection working
+□ Self-healing system functional
+□ Smart alert manager processing alerts
+□ Monitoring dashboard updating
+□ Automated scheduling configured
+□ All scripts executable and working
+
+CLEANUP:
+--------
+# systemctl stop automated-monitoring.timer
+# systemctl disable automated-monitoring.timer
+# rm /etc/cron.d/automated-monitoring
+# rm /etc/systemd/system/automated-monitoring.*
+# rm /usr/local/bin/*monitor*.sh
+# rm /usr/local/bin/self-healing*.sh
+# rm /usr/local/bin/smart-alert*.sh
+# rm /usr/local/bin/monitoring-*.sh
+# rm -rf /etc/monitoring
+# rm -rf /var/lib/monitoring

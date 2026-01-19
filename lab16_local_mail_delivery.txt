@@ -1,0 +1,427 @@
+RHCE RH254 HANDS-ON LAB: LOCAL MAIL DELIVERY CONFIGURATION
+===========================================================
+
+LAB OBJECTIVE:
+Configure Postfix for local mail delivery with mailbox management, user mail directories, and local mail processing
+
+PREREQUISITES:
+- Postfix mail server installed
+- Root access to RHEL system
+- Understanding of mail delivery mechanisms
+
+LAB SCENARIO:
+Configure Postfix to handle local mail delivery using both traditional mbox format and modern Maildir format with proper user management.
+
+EQUIPMENT NEEDED:
+- RHEL system with Postfix installed
+- Local user accounts for testing
+- Mail client software (mail, mutt, etc.)
+
+LAB TASKS:
+
+PART A: CONFIGURE LOCAL DELIVERY BASICS
+----------------------------------------
+
+1. Configure Postfix for local delivery:
+   # Install Vim 
+   # yum install vim -y 
+
+   # yum install postfix mailx -y
+   # systemctl start postfix
+   # systemctl enable postfix
+   
+   # vim /etc/postfix/main.cf
+   
+# Local delivery configuration
+myhostname = mail.example.com
+mydomain = example.com
+myorigin = $mydomain
+mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain
+   
+# Local delivery settings
+local_transport = local:$myhostname
+local_recipient_maps = unix:passwd.byname $alias_maps
+   
+# Mailbox settings
+mail_spool_directory = /var/spool/mail
+mailbox_size_limit = 1073741824
+message_size_limit = 10485760
+
+2. Create local mail users:
+   # useradd -m -s /bin/bash alice
+   # useradd -m -s /bin/bash bob
+   # useradd -m -s /bin/bash charlie
+   # passwd alice
+   # passwd bob
+   # passwd charlie
+
+3. Configure mail spool permissions:
+   # chmod 1777 /var/spool/mail
+   # ls -ld /var/spool/mail
+
+PART B: CONFIGURE MAILDIR DELIVERY
+-----------------------------------
+
+1. Configure Maildir format:
+   # vim /etc/postfix/main.cf
+   
+# Maildir configuration
+home_mailbox = Maildir/
+mailbox_command = 
+   
+# Maildir creation
+mailbox_transport = 
+fallback_transport = 
+
+2. Create Maildir structure for users:
+   # mkdir -p /home/alice/Maildir/{new,cur,tmp}
+   # mkdir -p /home/bob/Maildir/{new,cur,tmp}
+   # mkdir -p /home/charlie/Maildir/{new,cur,tmp}
+   
+   # Set proper ownership and permissions
+   # chown -R alice:alice /home/alice/Maildir
+   # chown -R bob:bob /home/bob/Maildir
+   # chown -R charlie:charlie /home/charlie/Maildir
+   # chmod -R 700 /home/*/Maildir
+
+3. Configure Maildir subdirectories:
+   # su - alice
+   $ mkdir -p ~/Maildir/.Sent/{new,cur,tmp}
+   $ mkdir -p ~/Maildir/.Drafts/{new,cur,tmp}
+   $ mkdir -p ~/Maildir/.Trash/{new,cur,tmp}
+   $ exit
+   
+   # Repeat for other users
+
+PART C: CONFIGURE MAIL ALIASES
+-------------------------------
+
+1. Configure system aliases:
+   # vim /etc/aliases
+   
+# System aliases
+postmaster: root
+mailer-daemon: postmaster
+   
+# Administrative aliases
+root: alice
+admin: alice
+webmaster: alice
+   
+# Functional aliases
+support: alice,bob
+sales: bob
+info: charlie
+   
+# Mailing lists
+all-staff: alice,bob,charlie
+developers: alice,bob
+
+2. Update aliases database:
+   # newaliases
+   # postalias /etc/aliases
+
+3. Test aliases:
+   # echo "Test message to support" | mail -s "Support Test" support
+   # echo "Test message to all staff" | mail -s "All Staff Test" all-staff
+
+PART D: CONFIGURE VIRTUAL ALIASES
+----------------------------------
+
+1. Create virtual alias file:
+   # vim /etc/postfix/virtual_aliases
+   
+# Virtual aliases for local delivery
+info@example.com        charlie
+sales@example.com       bob
+support@example.com     alice,bob
+admin@example.com       alice
+   
+# Department aliases
+hr@example.com          alice
+it@example.com          alice,bob
+finance@example.com     charlie
+
+2. Configure virtual alias maps:
+   # vim /etc/postfix/main.cf
+   virtual_alias_maps = hash:/etc/postfix/virtual_aliases
+
+3. Update virtual alias database:
+   # postmap /etc/postfix/virtual_aliases
+
+PART E: CONFIGURE LOCAL DELIVERY AGENT
+---------------------------------------
+
+1. Configure custom local delivery:
+   # vim /etc/postfix/main.cf
+   
+# Local delivery agent
+local_destination_concurrency_limit = 2
+local_destination_rate_delay = 1s
+   
+# Mailbox locking
+mailbox_delivery_lock = fcntl, dotlock
+   
+# Delivery status notifications
+local_header_rewrite_clients = permit_inet_interfaces
+
+2. Configure procmail for advanced processing:
+   # yum install procmail -y
+   # vim /etc/postfix/main.cf
+   
+   # Use procmail for local delivery
+   mailbox_command = /usr/bin/procmail -a "$EXTENSION"
+
+3. Create global procmail configuration:
+   # vim /etc/procmailrc
+   
+# Global procmail settings
+MAILDIR=$HOME/Maildir
+DEFAULT=$MAILDIR/
+LOGFILE=$MAILDIR/procmail.log
+   
+# Spam filtering (basic)
+:0
+* ^Subject:.*\[SPAM\]
+.Spam/
+
+PART F: CONFIGURE MAIL QUOTAS 
+------------------------------
+
+1. Install quota tools:
+   # yum install quota -y
+
+2. Configure filesystem quotas:
+   # vim /etc/fstab
+   # Add usrquota to home partition
+   /dev/sda3 /home ext4 defaults,usrquota 1 2
+   
+   # Remount with quota support
+   # mount -o remount /home
+   # quotacheck -cum /home
+   # quotaon /home
+
+3. Set user quotas:
+   # setquota -u alice 100000 120000 0 0 /home
+   # setquota -u bob 100000 120000 0 0 /home
+   # setquota -u charlie 100000 120000 0 0 /home
+
+4. Configure Postfix quota checking:
+   # vim /etc/postfix/main.cf
+   
+   # Quota checking
+   mailbox_size_limit = 104857600
+   
+   # Virtual mailbox quota (if using virtual domains)
+   virtual_mailbox_limit = 104857600
+
+PART G: CONFIGURE MAIL FORWARDING
+----------------------------------
+
+1. Configure user-level forwarding:
+   # su - alice
+   $ echo "alice@external.com" > ~/.forward
+   $ exit
+   
+   # su - bob
+   $ echo "bob@company.com,bob" > ~/.forward  # Forward and keep local copy
+   $ exit
+
+2. Configure system-wide forwarding:
+   # vim /etc/postfix/generic
+   
+# Generic address mapping
+alice@mail.example.com    alice@external.com
+bob@mail.example.com      bob@company.com
+   
+   # postmap /etc/postfix/generic
+
+3. Update main configuration:
+   # vim /etc/postfix/main.cf
+   smtp_generic_maps = hash:/etc/postfix/generic
+
+PART H: CONFIGURE MAIL FILTERING
+---------------------------------
+
+1. Create user-specific procmail rules:
+   # su - alice
+   $ vim ~/.procmailrc
+   
+# Alice's mail filtering rules
+MAILDIR=$HOME/Maildir
+DEFAULT=$MAILDIR/
+LOGFILE=$MAILDIR/procmail.log
+   
+# Filter mailing lists
+:0
+* ^List-Id:.*linux
+.Lists.Linux/
+   
+# Filter by sender
+:0
+* ^From:.*boss@company.com
+.Important/
+   
+# Filter spam
+:0
+* ^Subject:.*(viagra|casino|lottery)
+.Spam/
+   
+$ exit
+
+2. Configure server-side filtering with Sieve:
+   # yum install dovecot-pigeonhole -y
+   # vim /etc/dovecot/conf.d/90-sieve.conf
+   
+   plugin {
+     sieve = ~/.dovecot.sieve
+     sieve_dir = ~/sieve
+   }
+
+3. Create Sieve filter example:
+   # su - alice
+   $ vim ~/.dovecot.sieve
+   
+require ["fileinto", "reject"];
+   
+# Reject spam
+if header :contains "subject" "SPAM" {
+   reject "Message rejected as spam";
+}
+   
+# File mailing lists
+if header :contains "list-id" "linux-users" {
+   fileinto "Lists.Linux";
+}
+   
+   $ exit
+
+PART I: TESTING LOCAL DELIVERY
+-------------------------------
+
+1. Test basic local delivery:
+   # echo "Test message for Alice" | mail -s "Local Test" alice
+   # echo "Test message for Bob" | mail -s "Local Test" bob
+
+2. Check mail delivery:
+   # ls -la /home/alice/Maildir/new/
+   # cat /home/alice/Maildir/new/*
+
+3. Test aliases:
+   # echo "Test support alias" | mail -s "Support Test" support
+   # echo "Test virtual alias" | mail -s "Virtual Test" info@example.com
+
+4. Test mail reading:
+   # su - alice
+   $ mail
+   $ mutt  # If installed
+   $ exit
+
+5. Test forwarding:
+   # tail -f /var/log/maillog | grep forward
+
+PART J: CONFIGURE MAIL NOTIFICATIONS
+-------------------------------------
+
+1. Configure new mail notifications:
+   # vim /etc/profile.d/mail-notify.sh
+   
+   #!/bin/bash
+   # Mail notification script
+   
+   if [ -s "$MAIL" ]; then
+       echo "You have new mail in $MAIL"
+   fi
+
+2. Configure biff for mail notifications:
+   # yum install biff -y
+   # systemctl enable biff
+   # systemctl start biff
+
+3. Create custom mail notification:
+   # vim /usr/local/bin/mail-notify.sh
+   
+   #!/bin/bash
+   # Custom mail notification
+   
+   USER=$1
+   MAILDIR="/home/$USER/Maildir/new"
+   
+   if [ -d "$MAILDIR" ] && [ "$(ls -A $MAILDIR)" ]; then
+       COUNT=$(ls -1 $MAILDIR | wc -l)
+       echo "User $USER has $COUNT new messages" | \
+       logger -t mail-notify
+   fi
+   
+   # chmod +x /usr/local/bin/mail-notify.sh
+
+PART K: MONITORING LOCAL DELIVERY
+----------------------------------
+
+1. Monitor mailbox sizes:
+   # du -sh /home/*/Maildir
+   # quota -u alice bob charlie
+
+2. Monitor delivery performance:
+   # tail -f /var/log/maillog | grep "delivered to"
+   # postqueue -p
+
+3. Create delivery monitoring script:
+   # vim /usr/local/bin/delivery-monitor.sh
+   
+   #!/bin/bash
+   # Local delivery monitoring
+   
+   LOGFILE="/var/log/maillog"
+   TODAY=$(date '+%b %d')
+   
+   echo "=== Local Delivery Report for $TODAY ==="
+   
+   # Count deliveries
+   DELIVERIES=$(grep "$TODAY" $LOGFILE | grep -c "delivered to maildir")
+   echo "Total deliveries: $DELIVERIES"
+   
+   # Check for delivery failures
+   FAILURES=$(grep "$TODAY" $LOGFILE | grep -c "bounced")
+   echo "Delivery failures: $FAILURES"
+   
+   # Mailbox sizes
+   echo "Mailbox sizes:"
+   du -sh /home/*/Maildir | sort -hr
+   
+   # chmod +x /usr/local/bin/delivery-monitor.sh
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# postfix check
+# tail -f /var/log/maillog | grep local
+# ls -la /home/*/Maildir/new/
+# quota -u username
+# postqueue -p
+# mailq
+
+EXPECTED RESULTS:
+-----------------
+- Local mail delivery working to user mailboxes
+- Maildir format properly configured
+- Mail aliases resolving correctly
+- Mail forwarding functional
+- Quota limits enforced
+- Mail filtering operational
+
+VALIDATION CHECKLIST:
+---------------------
+□ Local delivery working for all users               Done 
+□ Maildir structure created properly                 Done
+□ Aliases resolving correctly                        Done
+□ Virtual aliases functional                         Done
+□ Mail quotas enforced                               Done
+□ Forwarding rules working                           Done
+□ Filtering rules active                             Done
+
+CLEANUP:
+--------
+# userdel -r alice bob charlie
+# rm /etc/postfix/virtual_aliases*
+# rm /etc/postfix/generic*
+# quotaoff /home

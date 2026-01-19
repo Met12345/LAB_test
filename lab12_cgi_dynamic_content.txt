@@ -1,0 +1,424 @@
+RHCE RH254 HANDS-ON LAB: CGI AND DYNAMIC CONTENT CONFIGURATION
+==============================================================
+
+LAB OBJECTIVE:
+Configure Apache to serve dynamic content using CGI scripts, PHP, and other dynamic content technologies
+
+PREREQUISITES:
+- Apache HTTP Server installed and configured
+- Root access to RHEL system
+- Understanding of web scripting concepts
+
+LAB SCENARIO:
+Configure Apache to execute CGI scripts, PHP applications, and other dynamic content while maintaining security.
+
+EQUIPMENT NEEDED:
+- RHEL system with Apache installed
+- Web browser for testing dynamic content
+
+LAB TASKS:
+
+PART A: CONFIGURE CGI SUPPORT
+------------------------------
+
+1. Enable CGI module:
+   # Install Apache and Enable port
+   
+   # yum install httpd -y
+   # systemctl start httpd
+   # systemctl enable httpd
+
+   # firewall-cmd --permanent --add-service=http
+   # firewall-cmd --permanent --add-service=https
+   # firewall-cmd --reload  
+   
+   # Install Vim 
+   # yum install vim -y 
+
+   # vim /etc/httpd/conf.modules.d/01-cgi.conf
+   LoadModule cgi_module modules/mod_cgi.so
+
+2. Create CGI directory:
+   # mkdir -p /var/www/cgi-bin
+   # chmod 755 /var/www/cgi-bin
+
+3. Configure CGI directory:
+   # vim /etc/httpd/conf/httpd.conf
+   
+ScriptAlias /cgi-bin/ "/var/www/cgi-bin/"
+   
+<Directory "/var/www/cgi-bin">
+   AllowOverride None
+   Options ExecCGI
+   Require all granted
+</Directory>
+
+4. Create simple CGI script:
+   # vim /var/www/cgi-bin/hello.cgi
+   
+#!/bin/bash
+echo "Content-Type: text/html"
+echo ""
+echo "<html><head><title>CGI Test</title></head>"
+echo "<body><h1>Hello from CGI!</h1>"
+echo "<p>Current date: $(date)</p>"
+echo "<p>Server: $SERVER_NAME</p>"
+echo "<p>Remote IP: $REMOTE_ADDR</p>"
+echo "</body></html>"
+   
+   # chmod +x /var/www/cgi-bin/hello.cgi
+
+5. Create Perl CGI script:
+   # yum install perl -y
+   # vim /var/www/cgi-bin/info.pl
+   
+#!/usr/bin/perl
+print "Content-Type: text/html\n\n";
+print "<html><head><title>Perl CGI</title></head>\n";
+print "<body><h1>Perl CGI Script</h1>\n";
+print "<p>Perl Version: $]</p>\n";
+print "<p>Environment Variables:</p><ul>\n";
+foreach my $key (sort keys %ENV) {
+   print "<li><b>$key:</b> $ENV{$key}</li>\n";
+}
+print "</ul></body></html>\n";
+   
+   # chmod +x /var/www/cgi-bin/info.pl
+
+PART B: CONFIGURE PHP SUPPORT
+------------------------------
+
+1. Install PHP and modules:
+   # yum install php php-mysqlnd php-gd php-xml php-mbstring -y
+
+
+2. Verify PHP module loading:
+   # httpd -M | grep php
+   # php -v
+
+3. Create PHP info page:
+   # vim /var/www/html/info.php
+   
+<?php
+phpinfo();
+?>
+
+4. Create PHP application example:
+   # vim /var/www/html/calculator.php
+   
+<!DOCTYPE html>
+<html>
+   <head><title>PHP Calculator</title></head>
+   <body>
+   <h1>Simple Calculator</h1>
+   <form method="post">
+       <input type="number" name="num1" placeholder="First number" required>
+       <select name="operation">
+           <option value="+">+</option>
+           <option value="-">-</option>
+           <option value="*">*</option>
+           <option value="/">/</option>
+       </select>
+       <input type="number" name="num2" placeholder="Second number" required>
+       <input type="submit" value="Calculate">
+   </form>
+   
+   <?php
+   if ($_POST) {
+       $num1 = $_POST['num1'];
+       $num2 = $_POST['num2'];
+       $operation = $_POST['operation'];
+       
+       switch($operation) {
+           case '+': $result = $num1 + $num2; break;
+           case '-': $result = $num1 - $num2; break;
+           case '*': $result = $num1 * $num2; break;
+           case '/': $result = $num2 != 0 ? $num1 / $num2 : 'Error: Division by zero'; break;
+       }
+       
+       echo "<h2>Result: $num1 $operation $num2 = $result</h2>";
+   }
+   ?>
+   </body>
+</html>
+
+PART C: CONFIGURE PYTHON CGI SUPPORT
+-------------------------------------
+
+1. Install Python:
+   # yum install python3 -y
+
+2. Create Python CGI script:
+   # vim /var/www/cgi-bin/system_info.py
+   
+#!/usr/bin/python3
+import os
+import platform
+import datetime
+   
+print("Content-Type: text/html\n")
+print("<html><head><title>System Information</title></head>")
+print("<body><h1>System Information</h1>")
+print(f"<p><b>Platform:</b> {platform.platform()}</p>")
+print(f"<p><b>Python Version:</b> {platform.python_version()}</p>")
+print(f"<p><b>Current Time:</b> {datetime.datetime.now()}</p>")
+print(f"<p><b>Working Directory:</b> {os.getcwd()}</p>")
+print("<h2>Environment Variables:</h2><ul>")
+for key, value in sorted(os.environ.items()):
+   print(f"<li><b>{key}:</b> {value}</li>")
+print("</ul></body></html>")
+   
+   # chmod +x /var/www/cgi-bin/system_info.py
+
+3. Create Python web form handler:
+   # vim /var/www/cgi-bin/form_handler.py
+   
+#!/usr/bin/python3
+import cgi
+import cgitb
+   
+cgitb.enable()  # Enable CGI error reporting
+   
+print("Content-Type: text/html\n")
+   
+form = cgi.FieldStorage()
+name = form.getvalue("name", "Anonymous")
+email = form.getvalue("email", "Not provided")
+message = form.getvalue("message", "No message")
+   
+print(f"""
+<html>
+<head><title>Form Submission Result</title></head>
+<body>
+<h1>Form Submission Received</h1>
+<p><b>Name:</b> {name}</p>
+<p><b>Email:</b> {email}</p>
+<p><b>Message:</b> {message}</p>
+<a href="/contact.html">Back to form</a>
+</body>
+</html>
+""")
+   
+   # chmod +x /var/www/cgi-bin/form_handler.py
+
+PART D: CONFIGURE SERVER-SIDE INCLUDES (SSI)
+---------------------------------------------
+
+1. Enable SSI module:
+   # vim /etc/httpd/conf.modules.d/00-base.conf
+   LoadModule include_module modules/mod_include.so
+
+2. Configure SSI for HTML files:
+   # vim /etc/httpd/conf.d/ssi.conf
+   
+<Directory "/var/www/html">
+   Options +Includes
+   AddType text/html .shtml
+   AddOutputFilter INCLUDES .shtml
+</Directory>
+
+3. Create SSI example page:
+   # vim /var/www/html/ssi_example.shtml
+   
+<!DOCTYPE html>
+<html>
+<head><title>SSI Example</title></head>
+<body>
+<h1>Server-Side Includes Example</h1>
+<p>Current date: <!--#echo var="DATE_LOCAL" --></p>
+<p>Server name: <!--#echo var="SERVER_NAME" --></p>
+<p>Document name: <!--#echo var="DOCUMENT_NAME" --></p>
+<p>Last modified: <!--#flastmod file="ssi_example.shtml" --></p>
+   
+<h2>File Include Example:</h2>
+<!--#include file="header.html" -->
+   
+<h2>Command Execution:</h2>
+<p>Uptime: <!--#exec cmd="uptime" --></p>
+</body>
+</html>
+
+4. Create header file for inclusion:
+   # vim /var/www/html/header.html
+   
+<div style="background-color: #f0f0f0; padding: 10px;">
+<h3>This is an included header</h3>
+<p>Generated on: <!--#echo var="DATE_LOCAL" --></p>
+</div>
+
+PART E: CONFIGURE ADVANCED CGI FEATURES
+----------------------------------------
+
+1. Configure CGI with suEXEC:
+   # vim /etc/httpd/conf.d/suexec.conf
+   
+<Directory "/var/www/cgi-bin">
+   SuexecUserGroup apache apache
+</Directory>
+
+2. Create CGI script with file upload:
+   # vim /var/www/cgi-bin/upload.py
+   
+#!/usr/bin/python3
+import cgi
+import os
+import cgitb
+   
+cgitb.enable()
+   
+print("Content-Type: text/html\n")
+   
+form = cgi.FieldStorage()
+   
+if "file" in form:
+   fileitem = form["file"]
+      if fileitem.filename:
+         # Save uploaded file
+         upload_dir = "/var/www/html/uploads"
+         os.makedirs(upload_dir, exist_ok=True)
+           
+         filepath = os.path.join(upload_dir, fileitem.filename)
+         with open(filepath, 'wb') as f:
+            f.write(fileitem.file.read())
+           
+           print(f"<h1>File uploaded successfully!</h1>")
+           print(f"<p>Filename: {fileitem.filename}</p>")
+       else:
+           print("<h1>No file selected</h1>")
+   else:
+       print("""
+       <html>
+       <body>
+       <h1>File Upload</h1>
+       <form enctype="multipart/form-data" method="post">
+           <input type="file" name="file" required>
+           <input type="submit" value="Upload">
+       </form>
+       </body>
+       </html>
+       """)
+   
+   # chmod +x /var/www/cgi-bin/upload.py
+   # mkdir -p /var/www/html/uploads
+   # chown apache:apache /var/www/html/uploads
+
+PART F: CONFIGURE SECURITY FOR DYNAMIC CONTENT
+-----------------------------------------------
+
+1. Configure PHP security settings:
+   # vim /etc/php.ini
+   
+expose_php = Off
+display_errors = Off
+log_errors = On
+error_log = /var/log/php_errors.log
+allow_url_fopen = Off
+allow_url_include = Off
+max_execution_time = 30
+max_input_time = 60
+memory_limit = 128M
+post_max_size = 8M
+upload_max_filesize = 2M
+
+2. Configure CGI security:
+   # vim /etc/httpd/conf.d/cgi-security.conf
+   
+<Directory "/var/www/cgi-bin">
+   Options ExecCGI -Indexes
+   AllowOverride None
+   Require all granted
+       
+   # Prevent access to source files
+   <Files "*.py">
+      SetHandler cgi-script
+   </Files>
+       
+   <Files "*.pl">
+      SetHandler cgi-script
+   </Files>
+</Directory>
+
+3. Configure file upload restrictions:
+   # vim /etc/httpd/conf.d/upload-security.conf
+   
+<Directory "/var/www/html/uploads">
+   Options -ExecCGI -Indexes
+   AllowOverride None
+       
+   # Prevent execution of uploaded files
+   <Files "*">
+      SetHandler default-handler
+      ForceType text/plain
+   </Files>
+</Directory>
+
+PART G: TESTING DYNAMIC CONTENT
+--------------------------------
+
+1. Test CGI scripts:
+   # curl http://localhost/cgi-bin/hello.cgi
+   # curl http://localhost/cgi-bin/info.pl
+   # curl http://localhost/cgi-bin/system_info.py
+
+2. Test PHP functionality:
+   # curl http://localhost/info.php
+   # curl http://localhost/calculator.php
+
+3. Test SSI functionality:
+   # curl http://localhost/ssi_example.shtml
+
+4. Test file upload:
+   # curl -F "file=@/etc/hosts" http://localhost/cgi-bin/upload.py
+
+PART H: MONITORING AND PERFORMANCE
+-----------------------------------
+
+1. Monitor CGI processes:
+   # ps aux | grep -E "(python|perl|php)"
+   # top -p $(pgrep -d',' -f cgi)
+
+2. Monitor PHP performance:
+   # tail -f /var/log/php_errors.log
+   # tail -f /var/log/httpd/access_log | grep "\.php"
+
+3. Configure CGI timeout:
+   # vim /etc/httpd/conf/httpd.conf
+   Timeout 300
+   
+   # For specific CGI directory:
+   <Directory "/var/www/cgi-bin">
+       CGITimeout 60
+   </Directory>
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# httpd -M | grep -E "(cgi|php|include)"
+# tail -f /var/log/httpd/error_log
+# php -m
+# python3 --version
+# curl -I http://localhost/info.php
+
+EXPECTED RESULTS:
+-----------------
+- CGI scripts execute properly
+- PHP applications functional
+- SSI includes working
+- File uploads handled securely
+- Dynamic content served correctly
+
+VALIDATION CHECKLIST:
+---------------------
+□ CGI module loaded and working        Done
+□ PHP installed and functional         Done
+□ Python CGI scripts executing         Done
+□ SSI includes working                 Done
+□ Security measures implemented        Done
+□ File uploads working safely          Done
+
+CLEANUP:
+--------
+# rm /var/www/cgi-bin/*
+# rm /var/www/html/*.php
+# rm /var/www/html/*.shtml
+# rm -rf /var/www/html/uploads
+# systemctl reload httpd

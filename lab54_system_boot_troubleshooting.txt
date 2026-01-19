@@ -1,0 +1,922 @@
+RHCE RH254 HANDS-ON LAB: SYSTEM BOOT TROUBLESHOOTING
+====================================================
+
+LAB OBJECTIVE:
+Master comprehensive system boot troubleshooting techniques including GRUB recovery, kernel issues, systemd service failures, and emergency boot procedures for enterprise Linux environments
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of boot process and systemd
+- Knowledge of GRUB bootloader configuration
+- Familiarity with kernel parameters and initramfs
+
+LAB SCENARIO:
+Diagnose and resolve various boot-related issues that prevent systems from starting properly, including bootloader problems, kernel panics, filesystem corruption, and service startup failures.
+
+EQUIPMENT NEEDED:
+- RHEL system for testing (192.168.1.20)
+- Virtual machine for safe testing
+- Rescue media or live USB
+- Console access capability
+
+LAB TASKS:
+
+PART A: BOOT PROCESS ANALYSIS AND MONITORING
+---------------------------------------------
+
+1. Create boot diagnostics framework:
+   # mkdir -p /opt/boot-diagnostics/{scripts,logs,configs,recovery}
+   # mkdir -p /opt/boot-diagnostics/scenarios/{grub,kernel,systemd,filesystem}
+
+2. Create boot process analyzer:
+   # vim /opt/boot-diagnostics/scripts/boot-analyzer.sh
+   
+   #!/bin/bash
+   #
+   # Boot Process Analysis Tool
+   #
+   
+   DIAG_ROOT="/opt/boot-diagnostics"
+   LOG_FILE="$DIAG_ROOT/logs/boot-analysis.log"
+   
+   log_message() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
+   }
+   
+   # Analyze boot performance
+   analyze_boot_performance() {
+       log_message "INFO" "Analyzing boot performance"
+       
+       # Boot time analysis
+       systemd-analyze > "$DIAG_ROOT/logs/boot-time.txt"
+       systemd-analyze blame > "$DIAG_ROOT/logs/boot-blame.txt"
+       systemd-analyze critical-chain > "$DIAG_ROOT/logs/critical-chain.txt"
+       
+       # Generate boot timeline
+       systemd-analyze plot > "$DIAG_ROOT/logs/boot-timeline.svg"
+       
+       # Boot messages analysis
+       journalctl -b 0 --no-pager > "$DIAG_ROOT/logs/current-boot.log"
+       journalctl -b -1 --no-pager > "$DIAG_ROOT/logs/previous-boot.log" 2>/dev/null
+       
+       log_message "INFO" "Boot performance analysis completed"
+   }
+   
+   # Check boot configuration
+   check_boot_config() {
+       log_message "INFO" "Checking boot configuration"
+       
+       # GRUB configuration
+       if [ -f /boot/grub2/grub.cfg ]; then
+           grep -E "(menuentry|linux|initrd)" /boot/grub2/grub.cfg > "$DIAG_ROOT/logs/grub-entries.txt"
+       fi
+       
+       # Kernel parameters
+       cat /proc/cmdline > "$DIAG_ROOT/logs/kernel-cmdline.txt"
+       
+       # Systemd default target
+       systemctl get-default > "$DIAG_ROOT/logs/default-target.txt"
+       
+       # Failed services
+       systemctl --failed --no-pager > "$DIAG_ROOT/logs/failed-services.txt"
+       
+       log_message "INFO" "Boot configuration check completed"
+   }
+   
+   # Identify boot issues
+   identify_boot_issues() {
+       local issues_found=0
+       
+       log_message "INFO" "Identifying potential boot issues"
+       
+       # Check for failed services
+       if systemctl --failed --quiet; then
+           log_message "WARN" "Failed services detected"
+           systemctl --failed --no-legend | while read -r service; do
+               log_message "WARN" "Failed service: $service"
+           done
+           issues_found=$((issues_found + 1))
+       fi
+       
+       # Check filesystem errors
+       if dmesg | grep -i "error\|fail\|panic" >/dev/null; then
+           log_message "WARN" "Kernel errors detected in dmesg"
+           dmesg | grep -i "error\|fail\|panic" > "$DIAG_ROOT/logs/kernel-errors.txt"
+           issues_found=$((issues_found + 1))
+       fi
+       
+       # Check disk space
+       local root_usage=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
+       if [ "$root_usage" -gt 90 ]; then
+           log_message "WARN" "Root filesystem usage high: ${root_usage}%"
+           issues_found=$((issues_found + 1))
+       fi
+       
+       return $issues_found
+   }
+
+3. Create boot monitoring service:
+   # vim /etc/systemd/system/boot-monitor.service
+   
+   [Unit]
+   Description=Boot Process Monitor
+   After=multi-user.target
+   
+   [Service]
+   Type=oneshot
+   ExecStart=/opt/boot-diagnostics/scripts/boot-analyzer.sh analyze_boot_performance
+   ExecStart=/opt/boot-diagnostics/scripts/boot-analyzer.sh check_boot_config
+   ExecStart=/opt/boot-diagnostics/scripts/boot-analyzer.sh identify_boot_issues
+   RemainAfterExit=yes
+   
+   [Install]
+   WantedBy=multi-user.target
+   
+   # systemctl enable boot-monitor.service
+
+PART B: GRUB BOOTLOADER TROUBLESHOOTING
+----------------------------------------
+
+1. Create GRUB recovery toolkit:
+   # vim /opt/boot-diagnostics/scripts/grub-recovery.sh
+   
+   #!/bin/bash
+   #
+   # GRUB Bootloader Recovery Tool
+   #
+   
+   # Backup GRUB configuration
+   backup_grub_config() {
+       local backup_dir="/opt/boot-diagnostics/recovery/grub-backup-$(date +%Y%m%d_%H%M%S)"
+       mkdir -p "$backup_dir"
+       
+       # Backup GRUB files
+       cp -r /boot/grub2/ "$backup_dir/" 2>/dev/null
+       cp /etc/default/grub "$backup_dir/" 2>/dev/null
+       cp -r /etc/grub.d/ "$backup_dir/" 2>/dev/null
+       
+       log_message "INFO" "GRUB configuration backed up to: $backup_dir"
+   }
+   
+   # Regenerate GRUB configuration
+   regenerate_grub_config() {
+       log_message "INFO" "Regenerating GRUB configuration"
+       
+       # Backup current config
+       backup_grub_config
+       
+       # Regenerate configuration
+       grub2-mkconfig -o /boot/grub2/grub.cfg
+       
+       if [ $? -eq 0 ]; then
+           log_message "INFO" "GRUB configuration regenerated successfully"
+       else
+           log_message "ERROR" "Failed to regenerate GRUB configuration"
+           return 1
+       fi
+   }
+   
+   # Reinstall GRUB bootloader
+   reinstall_grub() {
+       local boot_device="$1"
+       
+       if [ -z "$boot_device" ]; then
+           boot_device=$(lsblk -no PKNAME $(findmnt -no SOURCE /boot) | head -1)
+           boot_device="/dev/$boot_device"
+       fi
+       
+       log_message "INFO" "Reinstalling GRUB to $boot_device"
+       
+       grub2-install "$boot_device"
+       
+       if [ $? -eq 0 ]; then
+           log_message "INFO" "GRUB reinstalled successfully"
+           regenerate_grub_config
+       else
+           log_message "ERROR" "Failed to reinstall GRUB"
+           return 1
+       fi
+   }
+   
+   # Fix GRUB rescue mode
+   fix_grub_rescue() {
+       cat > "$DIAG_ROOT/configs/grub-rescue-commands.txt" << 'EOF'
+   # GRUB Rescue Mode Recovery Commands
+   
+   # 1. List available partitions
+   ls
+   
+   # 2. Find Linux partition (look for /boot or /)
+   ls (hd0,msdos1)/
+   ls (hd0,msdos2)/
+   
+   # 3. Set root partition (example: hd0,msdos1)
+   set root=(hd0,msdos1)
+   
+   # 4. Set prefix (GRUB directory)
+   set prefix=(hd0,msdos1)/boot/grub2
+   
+   # 5. Load normal module
+   insmod normal
+   
+   # 6. Start normal boot
+   normal
+   
+   # Alternative: Manual boot
+   # linux /boot/vmlinuz-<version> root=/dev/sda1
+   # initrd /boot/initramfs-<version>.img
+   # boot
+   EOF
+       
+       log_message "INFO" "GRUB rescue commands saved to: $DIAG_ROOT/configs/grub-rescue-commands.txt"
+   }
+   
+   # Test GRUB configuration
+   test_grub_config() {
+       log_message "INFO" "Testing GRUB configuration"
+       
+       # Check syntax
+       grub2-script-check /boot/grub2/grub.cfg
+       
+       if [ $? -eq 0 ]; then
+           log_message "INFO" "GRUB configuration syntax is valid"
+       else
+           log_message "ERROR" "GRUB configuration has syntax errors"
+           return 1
+       fi
+       
+       # List menu entries
+       awk '/^menuentry/ {print NR ": " $0}' /boot/grub2/grub.cfg > "$DIAG_ROOT/logs/grub-menu-entries.txt"
+       
+       log_message "INFO" "GRUB menu entries saved to: $DIAG_ROOT/logs/grub-menu-entries.txt"
+   }
+
+2. Create GRUB configuration scenarios:
+   # vim /opt/boot-diagnostics/scenarios/grub/corrupt-grub.sh
+   
+   #!/bin/bash
+   # Simulate corrupted GRUB configuration
+   
+   echo "Simulating corrupted GRUB configuration..."
+   cp /boot/grub2/grub.cfg /boot/grub2/grub.cfg.backup
+   echo "# Corrupted GRUB config" > /boot/grub2/grub.cfg
+   echo "Scenario: Corrupted GRUB configuration created"
+   echo "Recovery: Run grub2-mkconfig -o /boot/grub2/grub.cfg"
+   
+   # vim /opt/boot-diagnostics/scenarios/grub/missing-grub.sh
+   
+   #!/bin/bash
+   # Simulate missing GRUB installation
+   
+   echo "Simulating missing GRUB installation..."
+   # This would typically involve removing GRUB from MBR
+   echo "Scenario: Missing GRUB bootloader"
+   echo "Recovery: Boot from rescue media and run grub2-install /dev/sda"
+
+PART C: KERNEL AND INITRAMFS TROUBLESHOOTING
+---------------------------------------------
+
+1. Create kernel diagnostics tool:
+   # vim /opt/boot-diagnostics/scripts/kernel-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Kernel Diagnostics and Recovery Tool
+   #
+   
+   # Analyze kernel issues
+   analyze_kernel_issues() {
+       log_message "INFO" "Analyzing kernel issues"
+       
+       # Check available kernels
+       ls -la /boot/vmlinuz-* > "$DIAG_ROOT/logs/available-kernels.txt"
+       
+       # Check initramfs files
+       ls -la /boot/initramfs-* > "$DIAG_ROOT/logs/available-initramfs.txt"
+       
+       # Current kernel version
+       uname -r > "$DIAG_ROOT/logs/current-kernel.txt"
+       
+       # Kernel modules
+       lsmod > "$DIAG_ROOT/logs/loaded-modules.txt"
+       
+       # Kernel parameters
+       sysctl -a > "$DIAG_ROOT/logs/kernel-parameters.txt" 2>/dev/null
+       
+       # Check for kernel panics in logs
+       journalctl -k --no-pager | grep -i "panic\|oops\|bug" > "$DIAG_ROOT/logs/kernel-panics.txt"
+       
+       log_message "INFO" "Kernel analysis completed"
+   }
+   
+   # Rebuild initramfs
+   rebuild_initramfs() {
+       local kernel_version="$1"
+       
+       if [ -z "$kernel_version" ]; then
+           kernel_version=$(uname -r)
+       fi
+       
+       log_message "INFO" "Rebuilding initramfs for kernel: $kernel_version"
+       
+       # Backup existing initramfs
+       if [ -f "/boot/initramfs-${kernel_version}.img" ]; then
+           cp "/boot/initramfs-${kernel_version}.img" "/boot/initramfs-${kernel_version}.img.backup"
+       fi
+       
+       # Rebuild initramfs
+       dracut -f "/boot/initramfs-${kernel_version}.img" "$kernel_version"
+       
+       if [ $? -eq 0 ]; then
+           log_message "INFO" "Initramfs rebuilt successfully"
+       else
+           log_message "ERROR" "Failed to rebuild initramfs"
+           return 1
+       fi
+   }
+   
+   # Install rescue kernel
+   install_rescue_kernel() {
+       log_message "INFO" "Installing rescue kernel"
+       
+       # Find latest available kernel
+       local latest_kernel=$(ls /boot/vmlinuz-* | sort -V | tail -1)
+       local kernel_version=$(basename "$latest_kernel" | sed 's/vmlinuz-//')
+       
+       # Create rescue entry in GRUB
+       cat >> /etc/grub.d/40_custom << EOF
+   
+   menuentry 'Rescue Kernel ($kernel_version)' {
+       linux /boot/vmlinuz-$kernel_version root=UUID=$(findmnt -no UUID /) ro rescue
+       initrd /boot/initramfs-$kernel_version.img
+   }
+   EOF
+       
+       # Regenerate GRUB config
+       grub2-mkconfig -o /boot/grub2/grub.cfg
+       
+       log_message "INFO" "Rescue kernel entry added to GRUB"
+   }
+   
+   # Kernel parameter testing
+   test_kernel_parameters() {
+       local test_params="$1"
+       
+       log_message "INFO" "Testing kernel parameters: $test_params"
+       
+       # Create temporary GRUB entry for testing
+       cat > "$DIAG_ROOT/configs/test-kernel-entry.txt" << EOF
+   menuentry 'Test Kernel Parameters' {
+       linux /boot/vmlinuz-$(uname -r) root=UUID=$(findmnt -no UUID /) ro $test_params
+       initrd /boot/initramfs-$(uname -r).img
+   }
+   EOF
+       
+       log_message "INFO" "Test kernel entry created. Add to GRUB manually for testing."
+   }
+
+2. Create kernel panic recovery procedures:
+   # vim /opt/boot-diagnostics/configs/kernel-panic-recovery.txt
+   
+   Kernel Panic Recovery Procedures
+   ================================
+   
+   1. Boot with Previous Kernel:
+      - Select older kernel from GRUB menu
+      - Boot with "Advanced options"
+   
+   2. Boot with Safe Parameters:
+      - Add kernel parameters: nomodeset acpi=off
+      - Remove: rhgb quiet
+   
+   3. Single User Mode:
+      - Add parameter: single or systemd.unit=rescue.target
+   
+   4. Emergency Mode:
+      - Add parameter: emergency or systemd.unit=emergency.target
+   
+   5. Memory Test:
+      - Boot with memtest86+ from GRUB menu
+   
+   6. Hardware Diagnostics:
+      - Check RAM: memtest86+
+      - Check disk: fsck /dev/sdaX
+      - Check temperature: sensors
+   
+   Common Kernel Parameters for Troubleshooting:
+   - nomodeset: Disable graphics drivers
+   - acpi=off: Disable ACPI
+   - noapic: Disable APIC
+   - nosmp: Disable SMP
+   - maxcpus=1: Use single CPU
+   - mem=512M: Limit memory usage
+
+PART D: SYSTEMD SERVICE TROUBLESHOOTING
+----------------------------------------
+
+1. Create systemd diagnostics tool:
+   # vim /opt/boot-diagnostics/scripts/systemd-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Systemd Service Diagnostics Tool
+   #
+   
+   # Analyze systemd boot issues
+   analyze_systemd_boot() {
+       log_message "INFO" "Analyzing systemd boot process"
+       
+       # Boot target analysis
+       systemctl get-default > "$DIAG_ROOT/logs/systemd-default-target.txt"
+       systemctl list-units --type=target --no-pager > "$DIAG_ROOT/logs/systemd-targets.txt"
+       
+       # Failed services
+       systemctl --failed --no-pager > "$DIAG_ROOT/logs/systemd-failed-services.txt"
+       
+       # Service dependencies
+       systemctl list-dependencies --no-pager > "$DIAG_ROOT/logs/systemd-dependencies.txt"
+       
+       # Boot jobs
+       systemctl list-jobs --no-pager > "$DIAG_ROOT/logs/systemd-jobs.txt"
+       
+       log_message "INFO" "Systemd boot analysis completed"
+   }
+   
+   # Diagnose service failures
+   diagnose_service_failure() {
+       local service_name="$1"
+       
+       if [ -z "$service_name" ]; then
+           log_message "ERROR" "Service name required"
+           return 1
+       fi
+       
+       log_message "INFO" "Diagnosing service failure: $service_name"
+       
+       # Service status
+       systemctl status "$service_name" --no-pager > "$DIAG_ROOT/logs/service-${service_name}-status.txt"
+       
+       # Service logs
+       journalctl -u "$service_name" --no-pager > "$DIAG_ROOT/logs/service-${service_name}-logs.txt"
+       
+       # Service configuration
+       systemctl cat "$service_name" > "$DIAG_ROOT/logs/service-${service_name}-config.txt"
+       
+       # Dependencies
+       systemctl list-dependencies "$service_name" --no-pager > "$DIAG_ROOT/logs/service-${service_name}-deps.txt"
+       
+       log_message "INFO" "Service diagnosis completed for: $service_name"
+   }
+   
+   # Fix common systemd issues
+   fix_systemd_issues() {
+       log_message "INFO" "Attempting to fix common systemd issues"
+       
+       # Reload systemd configuration
+       systemctl daemon-reload
+       
+       # Reset failed services
+       systemctl reset-failed
+       
+       # Check for masked services
+       systemctl list-unit-files --state=masked --no-pager > "$DIAG_ROOT/logs/masked-services.txt"
+       
+       # Check for conflicting services
+       systemctl --failed --no-legend | while read -r service; do
+           log_message "INFO" "Attempting to restart failed service: $service"
+           systemctl restart "$service" || log_message "WARN" "Failed to restart: $service"
+       done
+   }
+   
+   # Emergency systemd recovery
+   emergency_systemd_recovery() {
+       log_message "INFO" "Performing emergency systemd recovery"
+       
+       # Switch to rescue target
+       systemctl isolate rescue.target
+       
+       # Create recovery script
+       cat > "$DIAG_ROOT/recovery/systemd-recovery.sh" << 'EOF'
+   #!/bin/bash
+   # Emergency systemd recovery script
+   
+   echo "Starting emergency systemd recovery..."
+   
+   # Reload systemd
+   systemctl daemon-reload
+   
+   # Reset all failed services
+   systemctl reset-failed
+   
+   # Start essential services
+   systemctl start systemd-journald
+   systemctl start systemd-logind
+   systemctl start dbus
+   systemctl start NetworkManager
+   
+   # Return to default target
+   systemctl isolate default.target
+   
+   echo "Emergency recovery completed"
+   EOF
+       
+       chmod +x "$DIAG_ROOT/recovery/systemd-recovery.sh"
+       
+       log_message "INFO" "Emergency recovery script created: $DIAG_ROOT/recovery/systemd-recovery.sh"
+   }
+PART E: FILESYSTEM AND STORAGE TROUBLESHOOTING
+-----------------------------------------------
+
+1. Create filesystem diagnostics tool:
+   # vim /opt/boot-diagnostics/scripts/filesystem-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Filesystem Diagnostics and Recovery Tool
+   #
+   
+   # Check filesystem integrity
+   check_filesystem_integrity() {
+       log_message "INFO" "Checking filesystem integrity"
+       
+       # Check all mounted filesystems
+       mount | grep -E "ext[234]|xfs|btrfs" | while read -r line; do
+           local device=$(echo "$line" | awk '{print $1}')
+           local mountpoint=$(echo "$line" | awk '{print $3}')
+           local fstype=$(echo "$line" | awk '{print $5}')
+           
+           log_message "INFO" "Checking $device ($fstype) mounted on $mountpoint"
+           
+           case "$fstype" in
+               ext[234])
+                   tune2fs -l "$device" > "$DIAG_ROOT/logs/fs-${device##*/}-info.txt" 2>/dev/null
+                   ;;
+               xfs)
+                   xfs_info "$mountpoint" > "$DIAG_ROOT/logs/fs-${device##*/}-info.txt" 2>/dev/null
+                   ;;
+           esac
+       done
+       
+       # Check fstab
+       cat /etc/fstab > "$DIAG_ROOT/logs/fstab.txt"
+       
+       # Check disk usage
+       df -h > "$DIAG_ROOT/logs/disk-usage.txt"
+       
+       # Check inode usage
+       df -i > "$DIAG_ROOT/logs/inode-usage.txt"
+       
+       log_message "INFO" "Filesystem integrity check completed"
+   }
+   
+   # Repair filesystem
+   repair_filesystem() {
+       local device="$1"
+       local fstype="$2"
+       
+       if [ -z "$device" ] || [ -z "$fstype" ]; then
+           log_message "ERROR" "Device and filesystem type required"
+           return 1
+       fi
+       
+       log_message "INFO" "Repairing filesystem: $device ($fstype)"
+       
+       # Unmount if mounted
+       if mountpoint -q "$device" 2>/dev/null; then
+           umount "$device" || {
+               log_message "ERROR" "Cannot unmount $device"
+               return 1
+           }
+       fi
+       
+       case "$fstype" in
+           ext[234])
+               fsck.ext4 -y "$device"
+               ;;
+           xfs)
+               xfs_repair "$device"
+               ;;
+           *)
+               fsck -y "$device"
+               ;;
+       esac
+       
+       local result=$?
+       if [ $result -eq 0 ]; then
+           log_message "INFO" "Filesystem repair completed successfully"
+       else
+           log_message "ERROR" "Filesystem repair failed with exit code: $result"
+       fi
+       
+       return $result
+   }
+   
+   # Emergency filesystem recovery
+   emergency_fs_recovery() {
+       log_message "INFO" "Starting emergency filesystem recovery"
+       
+       # Create recovery environment
+       mkdir -p /mnt/recovery
+       
+       # Check root filesystem from rescue mode
+       cat > "$DIAG_ROOT/recovery/fs-recovery.sh" << 'EOF'
+   #!/bin/bash
+   # Emergency filesystem recovery script
+   
+   echo "Starting emergency filesystem recovery..."
+   
+   # Find root device
+   ROOT_DEVICE=$(findmnt -no SOURCE /)
+   
+   if [ -n "$ROOT_DEVICE" ]; then
+       echo "Root device: $ROOT_DEVICE"
+       
+       # Force filesystem check
+       fsck -y "$ROOT_DEVICE"
+       
+       # Check for bad blocks
+       badblocks -v "$ROOT_DEVICE" > /tmp/badblocks.txt
+       
+       if [ -s /tmp/badblocks.txt ]; then
+           echo "Bad blocks found. Consider replacing disk."
+           cat /tmp/badblocks.txt
+       fi
+   fi
+   
+   echo "Emergency filesystem recovery completed"
+   EOF
+       
+       chmod +x "$DIAG_ROOT/recovery/fs-recovery.sh"
+       
+       log_message "INFO" "Emergency filesystem recovery script created"
+   }
+
+2. Create storage diagnostics:
+   # vim /opt/boot-diagnostics/scripts/storage-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Storage Hardware Diagnostics
+   #
+   
+   # Check storage hardware
+   check_storage_hardware() {
+       log_message "INFO" "Checking storage hardware"
+       
+       # Disk information
+       lsblk -f > "$DIAG_ROOT/logs/block-devices.txt"
+       
+       # SMART status
+       for disk in $(lsblk -dno NAME | grep -E "sd[a-z]|nvme"); do
+           if command -v smartctl >/dev/null 2>&1; then
+               smartctl -a "/dev/$disk" > "$DIAG_ROOT/logs/smart-${disk}.txt" 2>/dev/null
+           fi
+       done
+       
+       # LVM information
+       if command -v pvs >/dev/null 2>&1; then
+           pvs > "$DIAG_ROOT/logs/lvm-pv.txt" 2>/dev/null
+           vgs > "$DIAG_ROOT/logs/lvm-vg.txt" 2>/dev/null
+           lvs > "$DIAG_ROOT/logs/lvm-lv.txt" 2>/dev/null
+       fi
+       
+       # RAID information
+       if [ -f /proc/mdstat ]; then
+           cat /proc/mdstat > "$DIAG_ROOT/logs/mdstat.txt"
+       fi
+       
+       log_message "INFO" "Storage hardware check completed"
+   }
+
+PART F: EMERGENCY BOOT PROCEDURES
+----------------------------------
+
+1. Create emergency boot toolkit:
+   # vim /opt/boot-diagnostics/scripts/emergency-boot.sh
+   
+   #!/bin/bash
+   #
+   # Emergency Boot Procedures
+   #
+   
+   # Create rescue environment
+   create_rescue_environment() {
+       log_message "INFO" "Creating rescue environment"
+       
+       # Create rescue boot entry
+       cat >> /etc/grub.d/40_custom << 'EOF'
+   
+   menuentry 'Emergency Rescue Mode' {
+       linux /boot/vmlinuz-$(uname -r) root=UUID=$(findmnt -no UUID /) ro emergency
+       initrd /boot/initramfs-$(uname -r).img
+   }
+   
+   menuentry 'Single User Mode' {
+       linux /boot/vmlinuz-$(uname -r) root=UUID=$(findmnt -no UUID /) ro single
+       initrd /boot/initramfs-$(uname -r).img
+   }
+   EOF
+       
+       # Regenerate GRUB
+       grub2-mkconfig -o /boot/grub2/grub.cfg
+       
+       log_message "INFO" "Emergency boot entries added to GRUB"
+   }
+   
+   # Password recovery procedure
+   password_recovery() {
+       cat > "$DIAG_ROOT/configs/password-recovery.txt" << 'EOF'
+   Password Recovery Procedure
+   ===========================
+   
+   1. Boot to GRUB menu
+   2. Select kernel entry and press 'e' to edit
+   3. Find line starting with 'linux' or 'linux16'
+   4. Add 'rd.break' to end of line
+   5. Press Ctrl+X to boot
+   6. At emergency prompt:
+      mount -o remount,rw /sysroot
+      chroot /sysroot
+      passwd root
+      touch /.autorelabel
+      exit
+      reboot
+   
+   Alternative method:
+   1. Add 'init=/bin/bash' to kernel line
+   2. Boot and run:
+      mount -o remount,rw /
+      passwd root
+      mount -o remount,ro /
+      reboot -f
+   EOF
+       
+       log_message "INFO" "Password recovery procedure documented"
+   }
+   
+   # System recovery checklist
+   create_recovery_checklist() {
+       cat > "$DIAG_ROOT/configs/recovery-checklist.txt" << 'EOF'
+   System Recovery Checklist
+   ==========================
+   
+   Boot Issues:
+   □ Check GRUB configuration
+   □ Verify kernel files exist
+   □ Test with previous kernel
+   □ Check filesystem integrity
+   □ Verify fstab entries
+   □ Check disk space
+   
+   Hardware Issues:
+   □ Check SMART status
+   □ Test memory (memtest86+)
+   □ Check disk connections
+   □ Verify power supply
+   □ Check temperature
+   
+   Software Issues:
+   □ Check failed services
+   □ Review system logs
+   □ Verify package integrity
+   □ Check configuration files
+   □ Test in safe mode
+   
+   Recovery Tools:
+   □ Live USB/DVD ready
+   □ Backup available
+   □ Network access
+   □ Documentation accessible
+   EOF
+       
+       log_message "INFO" "Recovery checklist created"
+   }
+
+2. Create boot scenario simulator:
+   # vim /opt/boot-diagnostics/scripts/boot-scenario-simulator.sh
+   
+   #!/bin/bash
+   #
+   # Boot Problem Scenario Simulator
+   #
+   
+   # Simulate GRUB corruption
+   simulate_grub_corruption() {
+       echo "Simulating GRUB corruption..."
+       cp /boot/grub2/grub.cfg /boot/grub2/grub.cfg.backup
+       echo "# Corrupted GRUB configuration" > /boot/grub2/grub.cfg
+       echo "Scenario created. System will not boot normally."
+       echo "Recovery: grub2-mkconfig -o /boot/grub2/grub.cfg"
+   }
+   
+   # Simulate fstab corruption
+   simulate_fstab_corruption() {
+       echo "Simulating fstab corruption..."
+       cp /etc/fstab /etc/fstab.backup
+       echo "/dev/nonexistent /mnt ext4 defaults 0 0" >> /etc/fstab
+       echo "Scenario created. System may fail to boot."
+       echo "Recovery: Edit /etc/fstab in emergency mode"
+   }
+   
+   # Simulate service failure
+   simulate_service_failure() {
+       local service_name="${1:-sshd}"
+       echo "Simulating service failure: $service_name"
+       systemctl mask "$service_name"
+       echo "Scenario created. Service $service_name is masked."
+       echo "Recovery: systemctl unmask $service_name"
+   }
+   
+   # Restore all scenarios
+   restore_scenarios() {
+       echo "Restoring all simulated scenarios..."
+       
+       # Restore GRUB
+       if [ -f /boot/grub2/grub.cfg.backup ]; then
+           mv /boot/grub2/grub.cfg.backup /boot/grub2/grub.cfg
+           echo "GRUB configuration restored"
+       fi
+       
+       # Restore fstab
+       if [ -f /etc/fstab.backup ]; then
+           mv /etc/fstab.backup /etc/fstab
+           echo "fstab restored"
+       fi
+       
+       # Unmask services
+       systemctl unmask --all
+       echo "Services unmasked"
+       
+       echo "All scenarios restored"
+   }
+
+PART G: TESTING AND VALIDATION
+-------------------------------
+
+1. Test boot diagnostics framework:
+   # chmod +x /opt/boot-diagnostics/scripts/*.sh
+   # /opt/boot-diagnostics/scripts/boot-analyzer.sh analyze_boot_performance
+   # /opt/boot-diagnostics/scripts/boot-analyzer.sh check_boot_config
+
+2. Test GRUB recovery tools:
+   # /opt/boot-diagnostics/scripts/grub-recovery.sh backup_grub_config
+   # /opt/boot-diagnostics/scripts/grub-recovery.sh test_grub_config
+
+3. Test systemd diagnostics:
+   # /opt/boot-diagnostics/scripts/systemd-diagnostics.sh analyze_systemd_boot
+   # /opt/boot-diagnostics/scripts/systemd-diagnostics.sh diagnose_service_failure sshd
+
+4. Test filesystem diagnostics:
+   # /opt/boot-diagnostics/scripts/filesystem-diagnostics.sh check_filesystem_integrity
+   # /opt/boot-diagnostics/scripts/storage-diagnostics.sh check_storage_hardware
+
+5. Create boot monitoring automation:
+   # vim /etc/cron.d/boot-monitoring
+   
+   # Boot monitoring automation
+   @reboot root /opt/boot-diagnostics/scripts/boot-analyzer.sh analyze_boot_performance
+   0 */6 * * * root /opt/boot-diagnostics/scripts/systemd-diagnostics.sh analyze_systemd_boot
+   0 2 * * * root /opt/boot-diagnostics/scripts/filesystem-diagnostics.sh check_filesystem_integrity
+
+6. Test emergency procedures:
+   # /opt/boot-diagnostics/scripts/emergency-boot.sh create_rescue_environment
+   # /opt/boot-diagnostics/scripts/emergency-boot.sh password_recovery
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemd-analyze blame
+# journalctl -b 0 -p err
+# systemctl --failed
+# dmesg | grep -i error
+# fsck -n /dev/sda1
+# grub2-script-check /boot/grub2/grub.cfg
+# dracut --regenerate-all -f
+# systemctl list-jobs
+
+EXPECTED RESULTS:
+-----------------
+- Boot process analysis and monitoring functional
+- GRUB recovery tools operational
+- Kernel diagnostics identifying issues
+- Systemd service troubleshooting working
+- Filesystem integrity checking active
+- Emergency boot procedures documented
+- Boot problem scenarios testable
+
+VALIDATION CHECKLIST:
+---------------------
+□ Boot diagnostics framework created
+□ GRUB recovery tools functional
+□ Kernel diagnostics operational
+□ Systemd troubleshooting working
+□ Filesystem diagnostics active
+□ Emergency procedures documented
+□ Boot monitoring automated
+□ Recovery scenarios tested
+
+CLEANUP:
+--------
+# /opt/boot-diagnostics/scripts/boot-scenario-simulator.sh restore_scenarios
+# systemctl disable boot-monitor.service
+# rm -rf /opt/boot-diagnostics
+# rm /etc/cron.d/boot-monitoring

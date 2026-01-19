@@ -1,0 +1,487 @@
+RHCE RH254 HANDS-ON LAB: MARIADB/MYSQL INSTALLATION AND CONFIGURATION
+====================================================================
+
+LAB OBJECTIVE:
+Install and configure MariaDB/MySQL database server with basic settings and initial database setup
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- Network connectivity
+- Understanding of database concepts
+
+LAB SCENARIO:
+Install MariaDB database server, configure basic settings, create databases and users for application use.
+
+EQUIPMENT NEEDED:
+- RHEL system (db.example.com: 192.168.1.10)
+- Sufficient disk space for database storage
+- Client systems for testing connectivity
+
+LAB TASKS:
+
+PART A: INSTALL MARIADB/MYSQL
+------------------------------
+
+1. Install MariaDB server and client:
+   # yum install mariadb-server mariadb -y
+   # systemctl enable mariadb
+
+2. Verify installation:
+   # rpm -qa | grep mariadb
+   # mysql --version
+   # mysqld --version
+
+3. Check default configuration:
+   # ls -la /etc/my.cnf*
+   # ls -la /var/lib/mysql/
+
+4. Start MariaDB service:
+   # systemctl start mariadb
+   # systemctl status mariadb
+
+PART B: SECURE MARIADB INSTALLATION
+------------------------------------
+
+1. Run secure installation script:
+   # mysql_secure_installation
+   
+   # Follow prompts:
+   # - Set root password: yes (choose strong password)
+   # - Remove anonymous users: yes
+   # - Disallow root login remotely: yes
+   # - Remove test database: yes
+   # - Reload privilege tables: yes
+
+2. Test root login:
+   # mysql -u root -p
+   MariaDB> SELECT VERSION();
+   MariaDB> SHOW DATABASES;
+   MariaDB> EXIT;
+
+3. Verify security settings:
+   # mysql -u root -p -e "SELECT User, Host FROM mysql.user;"
+
+PART C: CONFIGURE MARIADB SETTINGS
+-----------------------------------
+
+1. Configure main MariaDB settings:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Basic settings
+   bind-address = 0.0.0.0
+   port = 3306
+   
+   # Data directory
+   datadir = /var/lib/mysql
+   socket = /var/lib/mysql/mysql.sock
+   
+   # Logging
+   log-error = /var/log/mariadb/mariadb.log
+   slow_query_log = 1
+   slow_query_log_file = /var/log/mariadb/slow.log
+   long_query_time = 2
+   
+   # Character set
+   character-set-server = utf8mb4
+   collation-server = utf8mb4_unicode_ci
+   
+   # InnoDB settings
+   default-storage-engine = InnoDB
+   innodb_buffer_pool_size = 256M
+   innodb_log_file_size = 64M
+   innodb_file_per_table = 1
+   
+   # Connection settings
+   max_connections = 100
+   max_user_connections = 50
+   
+   # Query cache
+   query_cache_type = 1
+   query_cache_size = 32M
+
+2. Create log directory:
+   # mkdir -p /var/log/mariadb
+   # chown mysql:mysql /var/log/mariadb
+   # chmod 755 /var/log/mariadb
+
+3. Configure client settings:
+   # vim /etc/my.cnf
+   
+   [client]
+   default-character-set = utf8mb4
+   
+   [mysql]
+   default-character-set = utf8mb4
+
+PART D: CONFIGURE FIREWALL AND SELINUX
+---------------------------------------
+
+1. Configure firewall for MySQL:
+   # firewall-cmd --permanent --add-service=mysql
+   # firewall-cmd --reload
+   # firewall-cmd --list-services
+
+2. Configure SELinux for MariaDB:
+   # setsebool -P mysql_connect_any on
+   # semanage fcontext -a -t mysqld_db_t "/var/lib/mysql(/.*)?"
+   # restorecon -R /var/lib/mysql
+
+3. Check SELinux contexts:
+   # ls -Z /var/lib/mysql/
+   # ps auxZ | grep mysql
+
+PART E: CREATE DATABASES AND USERS
+-----------------------------------
+
+1. Create application databases:
+   # mysql -u root -p
+   
+   MariaDB> CREATE DATABASE webapp_prod;
+   MariaDB> CREATE DATABASE webapp_dev;
+   MariaDB> CREATE DATABASE webapp_test;
+   MariaDB> SHOW DATABASES;
+
+2. Create database users:
+   MariaDB> CREATE USER 'webapp_user'@'localhost' IDENTIFIED BY 'StrongPassword123!';
+   MariaDB> CREATE USER 'webapp_user'@'192.168.1.%' IDENTIFIED BY 'StrongPassword123!';
+   MariaDB> CREATE USER 'readonly_user'@'%' IDENTIFIED BY 'ReadOnlyPass123!';
+   MariaDB> CREATE USER 'backup_user'@'localhost' IDENTIFIED BY 'BackupPass123!';
+
+3. Grant privileges:
+   MariaDB> GRANT ALL PRIVILEGES ON webapp_prod.* TO 'webapp_user'@'localhost';
+   MariaDB> GRANT ALL PRIVILEGES ON webapp_prod.* TO 'webapp_user'@'192.168.1.%';
+   MariaDB> GRANT ALL PRIVILEGES ON webapp_dev.* TO 'webapp_user'@'localhost';
+   MariaDB> GRANT SELECT ON *.* TO 'readonly_user'@'%';
+   MariaDB> GRANT SELECT, LOCK TABLES, SHOW VIEW ON *.* TO 'backup_user'@'localhost';
+   MariaDB> FLUSH PRIVILEGES;
+
+4. Verify user privileges:
+   MariaDB> SHOW GRANTS FOR 'webapp_user'@'localhost';
+   MariaDB> SELECT User, Host FROM mysql.user;
+   MariaDB> EXIT;
+
+PART F: CREATE SAMPLE DATABASE STRUCTURE
+-----------------------------------------
+
+1. Create sample tables:
+   # mysql -u webapp_user -p webapp_prod
+   
+   MariaDB> CREATE TABLE users (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       username VARCHAR(50) UNIQUE NOT NULL,
+       email VARCHAR(100) UNIQUE NOT NULL,
+       password_hash VARCHAR(255) NOT NULL,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+   );
+   
+   MariaDB> CREATE TABLE products (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       name VARCHAR(100) NOT NULL,
+       description TEXT,
+       price DECIMAL(10,2) NOT NULL,
+       stock_quantity INT DEFAULT 0,
+       category_id INT,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+   );
+   
+   MariaDB> CREATE TABLE orders (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       user_id INT,
+       total_amount DECIMAL(10,2) NOT NULL,
+       status ENUM('pending', 'processing', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       FOREIGN KEY (user_id) REFERENCES users(id)
+   );
+
+2. Insert sample data:
+   MariaDB> INSERT INTO users (username, email, password_hash) VALUES
+   ('admin', 'admin@example.com', SHA2('admin123', 256)),
+   ('user1', 'user1@example.com', SHA2('user123', 256)),
+   ('user2', 'user2@example.com', SHA2('user456', 256));
+   
+   MariaDB> INSERT INTO products (name, description, price, stock_quantity) VALUES
+   ('Laptop', 'High-performance laptop', 999.99, 10),
+   ('Mouse', 'Wireless optical mouse', 29.99, 50),
+   ('Keyboard', 'Mechanical keyboard', 79.99, 25);
+   
+   MariaDB> INSERT INTO orders (user_id, total_amount, status) VALUES
+   (2, 999.99, 'processing'),
+   (3, 109.98, 'shipped');
+
+3. Verify data:
+   MariaDB> SELECT * FROM users;
+   MariaDB> SELECT * FROM products;
+   MariaDB> SELECT * FROM orders;
+   MariaDB> EXIT;
+
+PART G: CONFIGURE DATABASE MONITORING
+--------------------------------------
+
+1. Enable performance schema:
+   # vim /etc/my.cnf
+   
+   [mysqld]
+   # Performance monitoring
+   performance_schema = ON
+   performance_schema_max_table_instances = 400
+   performance_schema_max_table_handles = 4000
+
+2. Create monitoring user:
+   # mysql -u root -p
+   
+   MariaDB> CREATE USER 'monitor'@'localhost' IDENTIFIED BY 'MonitorPass123!';
+   MariaDB> GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'monitor'@'localhost';
+   MariaDB> GRANT SELECT ON performance_schema.* TO 'monitor'@'localhost';
+   MariaDB> FLUSH PRIVILEGES;
+   MariaDB> EXIT;
+
+3. Create database monitoring script:
+   # vim /usr/local/bin/db-monitor.sh
+   
+   #!/bin/bash
+   # Database monitoring script
+   
+   DB_USER="monitor"
+   DB_PASS="MonitorPass123!"
+   
+   echo "=== MariaDB Status Report ==="
+   echo "Date: $(date)"
+   echo
+   
+   # Connection status
+   echo "Active Connections:"
+   mysql -u$DB_USER -p$DB_PASS -e "SHOW STATUS LIKE 'Threads_connected';"
+   echo
+   
+   # Database sizes
+   echo "Database Sizes:"
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       table_schema AS 'Database',
+       ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)'
+   FROM information_schema.tables 
+   GROUP BY table_schema;"
+   echo
+   
+   # Slow queries
+   echo "Slow Query Status:"
+   mysql -u$DB_USER -p$DB_PASS -e "SHOW STATUS LIKE 'Slow_queries';"
+   echo
+   
+   # InnoDB status
+   echo "InnoDB Buffer Pool Usage:"
+   mysql -u$DB_USER -p$DB_PASS -e "
+   SELECT 
+       VARIABLE_NAME, 
+       VARIABLE_VALUE 
+   FROM information_schema.GLOBAL_STATUS 
+   WHERE VARIABLE_NAME IN ('Innodb_buffer_pool_pages_total', 'Innodb_buffer_pool_pages_free');"
+   
+   # chmod +x /usr/local/bin/db-monitor.sh
+
+PART H: CONFIGURE BACKUP STRATEGY
+----------------------------------
+
+1. Create backup directory:
+   # mkdir -p /var/backups/mysql
+   # chown mysql:mysql /var/backups/mysql
+   # chmod 750 /var/backups/mysql
+
+2. Create backup script:
+   # vim /usr/local/bin/mysql-backup.sh
+   
+   #!/bin/bash
+   # MySQL backup script
+   
+   BACKUP_DIR="/var/backups/mysql"
+   DB_USER="backup_user"
+   DB_PASS="BackupPass123!"
+   DATE=$(date +%Y%m%d_%H%M%S)
+   
+   # Full backup of all databases
+   echo "Starting MySQL backup at $(date)"
+   
+   mysqldump -u$DB_USER -p$DB_PASS --all-databases \
+             --single-transaction --routines --triggers \
+             --lock-tables=false > $BACKUP_DIR/full_backup_$DATE.sql
+   
+   if [ $? -eq 0 ]; then
+       echo "Backup completed successfully"
+       gzip $BACKUP_DIR/full_backup_$DATE.sql
+       
+       # Remove backups older than 7 days
+       find $BACKUP_DIR -name "*.sql.gz" -mtime +7 -delete
+       
+       echo "Backup file: $BACKUP_DIR/full_backup_$DATE.sql.gz"
+   else
+       echo "Backup failed!"
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/mysql-backup.sh
+
+3. Schedule backup:
+   # crontab -e
+   # Add: 0 2 * * * /usr/local/bin/mysql-backup.sh
+
+4. Test backup:
+   # /usr/local/bin/mysql-backup.sh
+   # ls -la /var/backups/mysql/
+
+PART I: RESTART AND TEST CONFIGURATION
+---------------------------------------
+
+1. Restart MariaDB with new configuration:
+   # systemctl restart mariadb
+   # systemctl status mariadb
+
+2. Verify configuration:
+   # mysql -u root -p -e "SHOW VARIABLES LIKE 'character_set%';"
+   # mysql -u root -p -e "SHOW VARIABLES LIKE 'innodb%';"
+
+3. Test remote connectivity:
+   # mysql -u webapp_user -p -h 192.168.1.10 webapp_prod
+   MariaDB> SELECT COUNT(*) FROM users;
+   MariaDB> EXIT;
+
+4. Test read-only user:
+   # mysql -u readonly_user -p
+   MariaDB> USE webapp_prod;
+   MariaDB> SELECT * FROM users;
+   MariaDB> INSERT INTO users (username, email, password_hash) VALUES ('test', 'test@test.com', 'hash');
+   # Should fail with permission error
+   MariaDB> EXIT;
+
+PART J: PERFORMANCE TUNING
+---------------------------
+
+1. Analyze current performance:
+   # mysql -u root -p
+   
+   MariaDB> SHOW ENGINE INNODB STATUS\G
+   MariaDB> SHOW PROCESSLIST;
+   MariaDB> SHOW STATUS LIKE 'Qcache%';
+   MariaDB> EXIT;
+
+2. Create performance tuning script:
+   # vim /usr/local/bin/mysql-tuning.sh
+   
+   #!/bin/bash
+   # MySQL performance analysis
+   
+   echo "=== MySQL Performance Analysis ==="
+   
+   mysql -u root -p -e "
+   SELECT 
+       ROUND(((data_length + index_length) / 1024 / 1024), 2) AS 'DB Size in MB' 
+   FROM information_schema.tables 
+   WHERE table_schema='webapp_prod';"
+   
+   echo
+   echo "Query Cache Statistics:"
+   mysql -u root -p -e "
+   SHOW STATUS WHERE Variable_name IN (
+       'Qcache_queries_in_cache',
+       'Qcache_inserts',
+       'Qcache_hits',
+       'Qcache_lowmem_prunes'
+   );"
+   
+   echo
+   echo "Connection Statistics:"
+   mysql -u root -p -e "
+   SHOW STATUS WHERE Variable_name IN (
+       'Connections',
+       'Max_used_connections',
+       'Threads_connected'
+   );"
+   
+   # chmod +x /usr/local/bin/mysql-tuning.sh
+
+3. Configure slow query log analysis:
+   # vim /usr/local/bin/analyze-slow-queries.sh
+   
+   #!/bin/bash
+   # Analyze slow query log
+   
+   SLOW_LOG="/var/log/mariadb/slow.log"
+   
+   if [ -f "$SLOW_LOG" ]; then
+       echo "=== Slow Query Analysis ==="
+       echo "Total slow queries: $(grep -c "Query_time" $SLOW_LOG)"
+       echo
+       echo "Top 10 slowest queries:"
+       mysqldumpslow -s t -t 10 $SLOW_LOG
+   else
+       echo "Slow query log not found or empty"
+   fi
+   
+   # chmod +x /usr/local/bin/analyze-slow-queries.sh
+
+PART K: TESTING AND VALIDATION
+-------------------------------
+
+1. Test database connectivity:
+   # mysql -u webapp_user -p webapp_prod -e "SELECT 'Connection successful' AS status;"
+
+2. Test application queries:
+   # mysql -u webapp_user -p webapp_prod -e "
+   SELECT u.username, COUNT(o.id) as order_count 
+   FROM users u 
+   LEFT JOIN orders o ON u.id = o.user_id 
+   GROUP BY u.id;"
+
+3. Test backup and restore:
+   # /usr/local/bin/mysql-backup.sh
+   # mysql -u root -p -e "CREATE DATABASE test_restore;"
+   # zcat /var/backups/mysql/full_backup_*.sql.gz | mysql -u root -p test_restore
+   # mysql -u root -p -e "DROP DATABASE test_restore;"
+
+4. Monitor database performance:
+   # /usr/local/bin/db-monitor.sh
+   # /usr/local/bin/mysql-tuning.sh
+
+5. Check log files:
+   # tail -f /var/log/mariadb/mariadb.log
+   # tail -f /var/log/mariadb/slow.log
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status mariadb
+# tail -f /var/log/mariadb/mariadb.log
+# mysql -u root -p -e "SHOW PROCESSLIST;"
+# mysql -u root -p -e "SHOW ENGINE INNODB STATUS\G"
+# netstat -tulpn | grep :3306
+# ss -tulpn | grep :3306
+
+EXPECTED RESULTS:
+-----------------
+- MariaDB server installed and running
+- Secure installation completed
+- Databases and users created with proper privileges
+- Remote connectivity working
+- Backup strategy implemented
+- Performance monitoring operational
+
+VALIDATION CHECKLIST:
+---------------------
+□ MariaDB service running
+□ Root password set and secure
+□ Application databases created
+□ Users with appropriate privileges
+□ Remote connectivity working
+□ Firewall allows MySQL traffic
+□ Backup script functional
+□ Monitoring tools operational
+
+CLEANUP:
+--------
+# systemctl stop mariadb
+# systemctl disable mariadb
+# rm /usr/local/bin/mysql-*.sh
+# rm /usr/local/bin/db-monitor.sh
+# rm /usr/local/bin/analyze-*.sh
+# firewall-cmd --permanent --remove-service=mysql
+# firewall-cmd --reload

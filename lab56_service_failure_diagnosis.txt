@@ -1,0 +1,797 @@
+RHCE RH254 HANDS-ON LAB: SERVICE FAILURE DIAGNOSIS
+==================================================
+
+LAB OBJECTIVE:
+Master comprehensive service failure diagnosis techniques including systemd service analysis, dependency resolution, configuration validation, resource conflicts, and automated service recovery in enterprise Linux environments
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of systemd service management
+- Knowledge of service dependencies and configuration
+- Familiarity with system logs and debugging tools
+
+LAB SCENARIO:
+Diagnose and resolve various service failure scenarios including startup failures, runtime crashes, dependency issues, resource conflicts, and configuration errors that prevent services from operating correctly.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20) - Primary diagnostic system
+- Test services for failure simulation
+- System monitoring tools
+- Log analysis utilities
+
+LAB TASKS:
+
+PART A: SERVICE DIAGNOSTICS FRAMEWORK
+--------------------------------------
+
+1. Create service diagnostics structure:
+   # mkdir -p /opt/service-diagnostics/{scripts,logs,configs,scenarios}
+   # mkdir -p /opt/service-diagnostics/analysis/{systemd,dependencies,resources,configs}
+
+2. Create service analyzer tool:
+   # vim /opt/service-diagnostics/scripts/service-analyzer.sh
+   
+   #!/bin/bash
+   #
+   # Service Failure Analysis Tool
+   #
+   
+   DIAG_ROOT="/opt/service-diagnostics"
+   LOG_FILE="$DIAG_ROOT/logs/service-analysis.log"
+   
+   log_message() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
+   }
+   
+   # Analyze service status
+   analyze_service_status() {
+       local service_name="$1"
+       
+       if [ -z "$service_name" ]; then
+           log_message "ERROR" "Service name required"
+           return 1
+       fi
+       
+       log_message "INFO" "Analyzing service status: $service_name"
+       
+       # Basic service information
+       systemctl status "$service_name" --no-pager > "$DIAG_ROOT/logs/status-${service_name}.txt" 2>&1
+       
+       # Service properties
+       systemctl show "$service_name" > "$DIAG_ROOT/logs/properties-${service_name}.txt"
+       
+       # Service configuration
+       systemctl cat "$service_name" > "$DIAG_ROOT/logs/config-${service_name}.txt" 2>/dev/null
+       
+       # Service logs
+       journalctl -u "$service_name" --no-pager -n 100 > "$DIAG_ROOT/logs/journal-${service_name}.txt"
+       
+       # Failed service details
+       if systemctl is-failed "$service_name" >/dev/null 2>&1; then
+           systemctl status "$service_name" -l --no-pager > "$DIAG_ROOT/logs/failed-${service_name}.txt"
+           log_message "WARN" "Service $service_name is in failed state"
+       fi
+       
+       log_message "INFO" "Service status analysis completed for: $service_name"
+   }
+   
+   # Analyze all failed services
+   analyze_all_failed_services() {
+       log_message "INFO" "Analyzing all failed services"
+       
+       # Get list of failed services
+       systemctl --failed --no-legend --no-pager | awk '{print $1}' > "$DIAG_ROOT/logs/failed-services-list.txt"
+       
+       # Analyze each failed service
+       while read -r service; do
+           if [ -n "$service" ]; then
+               analyze_service_status "$service"
+           fi
+       done < "$DIAG_ROOT/logs/failed-services-list.txt"
+       
+       # Generate failed services summary
+       systemctl --failed --no-pager > "$DIAG_ROOT/logs/failed-services-summary.txt"
+       
+       log_message "INFO" "Failed services analysis completed"
+   }
+   
+   # Check service dependencies
+   check_service_dependencies() {
+       local service_name="$1"
+       
+       log_message "INFO" "Checking dependencies for service: $service_name"
+       
+       # Service dependencies
+       systemctl list-dependencies "$service_name" --no-pager > "$DIAG_ROOT/logs/deps-${service_name}.txt"
+       
+       # Reverse dependencies
+       systemctl list-dependencies "$service_name" --reverse --no-pager > "$DIAG_ROOT/logs/rdeps-${service_name}.txt"
+       
+       # Check if dependencies are met
+       systemctl show "$service_name" -p Requires,Wants,After,Before > "$DIAG_ROOT/logs/dep-details-${service_name}.txt"
+       
+       # Analyze dependency failures
+       local deps=$(systemctl show "$service_name" -p Requires --value)
+       for dep in $deps; do
+           if systemctl is-failed "$dep" >/dev/null 2>&1; then
+               log_message "WARN" "Dependency $dep is failed for service $service_name"
+           fi
+       done
+       
+       log_message "INFO" "Dependency check completed for: $service_name"
+   }
+
+3. Create service health monitor:
+   # vim /opt/service-diagnostics/scripts/service-health-monitor.sh
+   
+   #!/bin/bash
+   #
+   # Service Health Monitoring Tool
+   #
+   
+   # Monitor service health
+   monitor_service_health() {
+       local service_name="$1"
+       local check_interval="${2:-60}"
+       
+       log_message "INFO" "Starting health monitoring for service: $service_name"
+       
+       while true; do
+           local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+           local status=$(systemctl is-active "$service_name")
+           local enabled=$(systemctl is-enabled "$service_name")
+           
+           # Log service state
+           echo "$timestamp,$service_name,$status,$enabled" >> "$DIAG_ROOT/logs/health-monitor.csv"
+           
+           # Check for state changes
+           if [ "$status" != "active" ]; then
+               log_message "WARN" "Service $service_name is not active: $status"
+               
+               # Trigger detailed analysis
+               analyze_service_status "$service_name"
+               
+               # Attempt automatic recovery
+               attempt_service_recovery "$service_name"
+           fi
+           
+           sleep "$check_interval"
+       done
+   }
+   
+   # Check resource usage by service
+   check_service_resources() {
+       local service_name="$1"
+       
+       log_message "INFO" "Checking resource usage for service: $service_name"
+       
+       # Get service PID
+       local main_pid=$(systemctl show "$service_name" -p MainPID --value)
+       
+       if [ "$main_pid" != "0" ] && [ -n "$main_pid" ]; then
+           # CPU and memory usage
+           ps -p "$main_pid" -o pid,ppid,pcpu,pmem,vsz,rss,comm > "$DIAG_ROOT/logs/resources-${service_name}.txt"
+           
+           # Process tree
+           pstree -p "$main_pid" >> "$DIAG_ROOT/logs/resources-${service_name}.txt" 2>/dev/null
+           
+           # File descriptors
+           ls -la "/proc/$main_pid/fd/" > "$DIAG_ROOT/logs/fds-${service_name}.txt" 2>/dev/null
+           
+           # Memory maps
+           cat "/proc/$main_pid/maps" > "$DIAG_ROOT/logs/maps-${service_name}.txt" 2>/dev/null
+       else
+           log_message "WARN" "No main PID found for service: $service_name"
+       fi
+       
+       # Systemd resource limits
+       systemctl show "$service_name" -p MemoryLimit,CPUQuota,TasksMax > "$DIAG_ROOT/logs/limits-${service_name}.txt"
+       
+       log_message "INFO" "Resource check completed for: $service_name"
+   }
+
+PART B: SYSTEMD SERVICE TROUBLESHOOTING
+----------------------------------------
+
+1. Create systemd diagnostics tool:
+   # vim /opt/service-diagnostics/scripts/systemd-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Systemd Service Diagnostics
+   #
+   
+   # Analyze systemd configuration
+   analyze_systemd_config() {
+       local service_name="$1"
+       
+       log_message "INFO" "Analyzing systemd configuration for: $service_name"
+       
+       # Service unit file location
+       local unit_file=$(systemctl show "$service_name" -p FragmentPath --value)
+       if [ -n "$unit_file" ] && [ -f "$unit_file" ]; then
+           cat "$unit_file" > "$DIAG_ROOT/logs/unit-file-${service_name}.txt"
+           
+           # Check unit file syntax
+           systemd-analyze verify "$unit_file" > "$DIAG_ROOT/logs/verify-${service_name}.txt" 2>&1
+       fi
+       
+       # Drop-in directories
+       systemctl show "$service_name" -p DropInPaths --value > "$DIAG_ROOT/logs/dropins-${service_name}.txt"
+       
+       # Service environment
+       systemctl show-environment > "$DIAG_ROOT/logs/systemd-environment.txt"
+       
+       # Check for conflicts
+       systemctl list-units --all | grep "$service_name" > "$DIAG_ROOT/logs/conflicts-${service_name}.txt"
+       
+       log_message "INFO" "Systemd configuration analysis completed"
+   }
+   
+   # Check service startup sequence
+   check_startup_sequence() {
+       local service_name="$1"
+       
+       log_message "INFO" "Checking startup sequence for: $service_name"
+       
+       # Boot analysis for service
+       systemd-analyze critical-chain "$service_name" > "$DIAG_ROOT/logs/critical-chain-${service_name}.txt" 2>/dev/null
+       
+       # Service timing
+       systemd-analyze blame | grep "$service_name" > "$DIAG_ROOT/logs/timing-${service_name}.txt"
+       
+       # Check ordering
+       systemctl show "$service_name" -p After,Before,Wants,Requires > "$DIAG_ROOT/logs/ordering-${service_name}.txt"
+       
+       log_message "INFO" "Startup sequence check completed"
+   }
+   
+   # Fix common systemd issues
+   fix_systemd_issues() {
+       local service_name="$1"
+       
+       log_message "INFO" "Attempting to fix systemd issues for: $service_name"
+       
+       # Reload systemd configuration
+       systemctl daemon-reload
+       
+       # Reset failed state
+       systemctl reset-failed "$service_name"
+       
+       # Check if service is masked
+       if systemctl is-masked "$service_name" >/dev/null 2>&1; then
+           log_message "WARN" "Service $service_name is masked"
+           systemctl unmask "$service_name"
+       fi
+       
+       # Check if service is enabled
+       if ! systemctl is-enabled "$service_name" >/dev/null 2>&1; then
+           log_message "INFO" "Enabling service: $service_name"
+           systemctl enable "$service_name"
+       fi
+       
+       # Attempt to start service
+       if systemctl start "$service_name"; then
+           log_message "INFO" "Service $service_name started successfully"
+       else
+           log_message "ERROR" "Failed to start service: $service_name"
+           return 1
+       fi
+   }
+
+2. Create service configuration validator:
+   # vim /opt/service-diagnostics/scripts/config-validator.sh
+   
+   #!/bin/bash
+   #
+   # Service Configuration Validator
+   #
+   
+   # Validate service configuration
+   validate_service_config() {
+       local service_name="$1"
+       
+       log_message "INFO" "Validating configuration for service: $service_name"
+       
+       local validation_errors=0
+       
+       # Check unit file syntax
+       local unit_file=$(systemctl show "$service_name" -p FragmentPath --value)
+       if [ -n "$unit_file" ] && [ -f "$unit_file" ]; then
+           if ! systemd-analyze verify "$unit_file" >/dev/null 2>&1; then
+               log_message "ERROR" "Unit file syntax error: $unit_file"
+               validation_errors=$((validation_errors + 1))
+           fi
+       fi
+       
+       # Check executable paths
+       local exec_start=$(systemctl show "$service_name" -p ExecStart --value)
+       if [ -n "$exec_start" ]; then
+           local executable=$(echo "$exec_start" | awk '{print $2}' | sed 's/^path=//')
+           if [ ! -x "$executable" ]; then
+               log_message "ERROR" "Executable not found or not executable: $executable"
+               validation_errors=$((validation_errors + 1))
+           fi
+       fi
+       
+       # Check user and group
+       local user=$(systemctl show "$service_name" -p User --value)
+       local group=$(systemctl show "$service_name" -p Group --value)
+       
+       if [ -n "$user" ] && ! id "$user" >/dev/null 2>&1; then
+           log_message "ERROR" "Service user does not exist: $user"
+           validation_errors=$((validation_errors + 1))
+       fi
+       
+       if [ -n "$group" ] && ! getent group "$group" >/dev/null 2>&1; then
+           log_message "ERROR" "Service group does not exist: $group"
+           validation_errors=$((validation_errors + 1))
+       fi
+       
+       # Check working directory
+       local working_dir=$(systemctl show "$service_name" -p WorkingDirectory --value)
+       if [ -n "$working_dir" ] && [ ! -d "$working_dir" ]; then
+           log_message "ERROR" "Working directory does not exist: $working_dir"
+           validation_errors=$((validation_errors + 1))
+       fi
+       
+       return $validation_errors
+   }
+
+PART C: APPLICATION-SPECIFIC DIAGNOSTICS
+-----------------------------------------
+
+1. Create application diagnostics tool:
+   # vim /opt/service-diagnostics/scripts/app-diagnostics.sh
+   
+   #!/bin/bash
+   #
+   # Application-Specific Diagnostics
+   #
+   
+   # Diagnose web services
+   diagnose_web_service() {
+       local service_name="$1"
+       
+       log_message "INFO" "Diagnosing web service: $service_name"
+       
+       # Check listening ports
+       ss -tlnp | grep -E "(httpd|nginx|apache)" > "$DIAG_ROOT/logs/web-ports-${service_name}.txt"
+       
+       # Test HTTP connectivity
+       local ports=$(ss -tlnp | grep -E "(httpd|nginx|apache)" | awk '{print $4}' | cut -d: -f2)
+       for port in $ports; do
+           curl -I "http://localhost:$port" > "$DIAG_ROOT/logs/http-test-${port}.txt" 2>&1
+       done
+       
+       # Check configuration files
+       case "$service_name" in
+           "httpd"|"apache2")
+               httpd -t > "$DIAG_ROOT/logs/httpd-config-test.txt" 2>&1
+               ;;
+           "nginx")
+               nginx -t > "$DIAG_ROOT/logs/nginx-config-test.txt" 2>&1
+               ;;
+       esac
+       
+       log_message "INFO" "Web service diagnosis completed"
+   }
+   
+   # Diagnose database services
+   diagnose_database_service() {
+       local service_name="$1"
+       
+       log_message "INFO" "Diagnosing database service: $service_name"
+       
+       # Check database ports
+       ss -tlnp | grep -E "(mysql|mariadb|postgres)" > "$DIAG_ROOT/logs/db-ports-${service_name}.txt"
+       
+       # Check database processes
+       ps aux | grep -E "(mysql|mariadb|postgres)" > "$DIAG_ROOT/logs/db-processes-${service_name}.txt"
+       
+       # Test database connectivity
+       case "$service_name" in
+           "mariadb"|"mysql")
+               mysqladmin ping > "$DIAG_ROOT/logs/mysql-ping.txt" 2>&1
+               ;;
+           "postgresql")
+               sudo -u postgres pg_isready > "$DIAG_ROOT/logs/postgres-ready.txt" 2>&1
+               ;;
+       esac
+       
+       log_message "INFO" "Database service diagnosis completed"
+   }
+   
+   # Diagnose mail services
+   diagnose_mail_service() {
+       local service_name="$1"
+       
+       log_message "INFO" "Diagnosing mail service: $service_name"
+       
+       # Check mail ports
+       ss -tlnp | grep -E ":25|:587|:993|:995" > "$DIAG_ROOT/logs/mail-ports-${service_name}.txt"
+       
+       # Check mail queue
+       case "$service_name" in
+           "postfix")
+               postqueue -p > "$DIAG_ROOT/logs/postfix-queue.txt" 2>&1
+               postconf -n > "$DIAG_ROOT/logs/postfix-config.txt" 2>&1
+               ;;
+           "sendmail")
+               mailq > "$DIAG_ROOT/logs/sendmail-queue.txt" 2>&1
+               ;;
+       esac
+       
+       log_message "INFO" "Mail service diagnosis completed"
+   }
+
+2. Create service recovery procedures:
+   # vim /opt/service-diagnostics/scripts/service-recovery.sh
+   
+   #!/bin/bash
+   #
+   # Service Recovery Procedures
+   #
+   
+   # Attempt service recovery
+   attempt_service_recovery() {
+       local service_name="$1"
+       local recovery_level="${2:-basic}"
+       
+       log_message "INFO" "Attempting recovery for service: $service_name (level: $recovery_level)"
+       
+       case "$recovery_level" in
+           "basic")
+               basic_recovery "$service_name"
+               ;;
+           "advanced")
+               advanced_recovery "$service_name"
+               ;;
+           "full")
+               full_recovery "$service_name"
+               ;;
+       esac
+   }
+   
+   # Basic recovery procedures
+   basic_recovery() {
+       local service_name="$1"
+       
+       log_message "INFO" "Performing basic recovery for: $service_name"
+       
+       # Stop service
+       systemctl stop "$service_name"
+       
+       # Reset failed state
+       systemctl reset-failed "$service_name"
+       
+       # Reload systemd
+       systemctl daemon-reload
+       
+       # Start service
+       if systemctl start "$service_name"; then
+           log_message "INFO" "Basic recovery successful for: $service_name"
+           return 0
+       else
+           log_message "WARN" "Basic recovery failed for: $service_name"
+           return 1
+       fi
+   }
+   
+   # Advanced recovery procedures
+   advanced_recovery() {
+       local service_name="$1"
+       
+       log_message "INFO" "Performing advanced recovery for: $service_name"
+       
+       # Kill any remaining processes
+       pkill -f "$service_name" 2>/dev/null
+       
+       # Clean temporary files
+       find /tmp -name "*${service_name}*" -delete 2>/dev/null
+       
+       # Reset permissions
+       local unit_file=$(systemctl show "$service_name" -p FragmentPath --value)
+       if [ -n "$unit_file" ] && [ -f "$unit_file" ]; then
+           chmod 644 "$unit_file"
+       fi
+       
+       # Attempt basic recovery
+       if basic_recovery "$service_name"; then
+           log_message "INFO" "Advanced recovery successful for: $service_name"
+           return 0
+       else
+           log_message "WARN" "Advanced recovery failed for: $service_name"
+           return 1
+       fi
+   }
+   
+   # Full recovery procedures
+   full_recovery() {
+       local service_name="$1"
+       
+       log_message "INFO" "Performing full recovery for: $service_name"
+       
+       # Backup current configuration
+       local backup_dir="/opt/service-diagnostics/backups/${service_name}-$(date +%Y%m%d_%H%M%S)"
+       mkdir -p "$backup_dir"
+       
+       # Find and backup configuration files
+       case "$service_name" in
+           "httpd"|"apache2")
+               cp -r /etc/httpd/ "$backup_dir/" 2>/dev/null
+               ;;
+           "nginx")
+               cp -r /etc/nginx/ "$backup_dir/" 2>/dev/null
+               ;;
+           "mariadb"|"mysql")
+               cp -r /etc/mysql/ "$backup_dir/" 2>/dev/null
+               ;;
+       esac
+       
+       # Reinstall service package
+       local package_name=$(rpm -qf "$(which systemctl)" --queryformat '%{NAME}' 2>/dev/null)
+       if [ -n "$package_name" ]; then
+           dnf reinstall -y "$package_name" 2>/dev/null
+       fi
+       
+       # Attempt advanced recovery
+       if advanced_recovery "$service_name"; then
+           log_message "INFO" "Full recovery successful for: $service_name"
+           return 0
+       else
+           log_message "ERROR" "Full recovery failed for: $service_name"
+           return 1
+       fi
+   }
+
+PART D: DEPENDENCY AND CONFLICT RESOLUTION
+-------------------------------------------
+
+1. Create dependency analyzer:
+   # vim /opt/service-diagnostics/scripts/dependency-analyzer.sh
+   
+   #!/bin/bash
+   #
+   # Service Dependency Analyzer
+   #
+   
+   # Analyze dependency chain
+   analyze_dependency_chain() {
+       local service_name="$1"
+       
+       log_message "INFO" "Analyzing dependency chain for: $service_name"
+       
+       # Create dependency graph
+       systemctl list-dependencies "$service_name" --all --plain > "$DIAG_ROOT/logs/dep-graph-${service_name}.txt"
+       
+       # Check each dependency
+       local deps=$(systemctl show "$service_name" -p Requires,Wants --value | tr ' ' '\n')
+       
+       for dep in $deps; do
+           if [ -n "$dep" ]; then
+               local dep_status=$(systemctl is-active "$dep" 2>/dev/null)
+               echo "$dep: $dep_status" >> "$DIAG_ROOT/logs/dep-status-${service_name}.txt"
+               
+               if [ "$dep_status" = "failed" ]; then
+                   log_message "WARN" "Dependency $dep is failed for service $service_name"
+                   analyze_service_status "$dep"
+               fi
+           fi
+       done
+       
+       log_message "INFO" "Dependency chain analysis completed"
+   }
+   
+   # Resolve dependency conflicts
+   resolve_dependency_conflicts() {
+       local service_name="$1"
+       
+       log_message "INFO" "Resolving dependency conflicts for: $service_name"
+       
+       # Check for circular dependencies
+       systemctl list-dependencies "$service_name" --all | grep -E "●|○" > "$DIAG_ROOT/logs/circular-deps-${service_name}.txt"
+       
+       # Start dependencies in order
+       local deps=$(systemctl show "$service_name" -p Requires --value)
+       for dep in $deps; do
+           if [ -n "$dep" ] && ! systemctl is-active "$dep" >/dev/null 2>&1; then
+               log_message "INFO" "Starting dependency: $dep"
+               systemctl start "$dep"
+           fi
+       done
+       
+       log_message "INFO" "Dependency conflict resolution completed"
+   }
+
+PART E: RESOURCE CONFLICT DIAGNOSIS
+------------------------------------
+
+1. Create resource conflict analyzer:
+   # vim /opt/service-diagnostics/scripts/resource-analyzer.sh
+   
+   #!/bin/bash
+   #
+   # Resource Conflict Analyzer
+   #
+   
+   # Check port conflicts
+   check_port_conflicts() {
+       local service_name="$1"
+       
+       log_message "INFO" "Checking port conflicts for: $service_name"
+       
+       # Get expected ports for service
+       local config_ports=$(systemctl show "$service_name" -p Environment --value | grep -o 'PORT=[0-9]*' | cut -d= -f2)
+       
+       # Check if ports are in use
+       for port in $config_ports; do
+           local port_user=$(ss -tlnp | grep ":$port " | awk '{print $6}')
+           if [ -n "$port_user" ]; then
+               echo "Port $port in use by: $port_user" >> "$DIAG_ROOT/logs/port-conflicts-${service_name}.txt"
+               log_message "WARN" "Port conflict detected: $port used by $port_user"
+           fi
+       done
+       
+       log_message "INFO" "Port conflict check completed"
+   }
+   
+   # Check file conflicts
+   check_file_conflicts() {
+       local service_name="$1"
+       
+       log_message "INFO" "Checking file conflicts for: $service_name"
+       
+       # Check PID file conflicts
+       local pid_file=$(systemctl show "$service_name" -p PIDFile --value)
+       if [ -n "$pid_file" ] && [ -f "$pid_file" ]; then
+           local existing_pid=$(cat "$pid_file")
+           if kill -0 "$existing_pid" 2>/dev/null; then
+               log_message "WARN" "PID file conflict: $pid_file contains active PID $existing_pid"
+           fi
+       fi
+       
+       # Check lock files
+       find /var/lock -name "*${service_name}*" > "$DIAG_ROOT/logs/lock-files-${service_name}.txt" 2>/dev/null
+       
+       log_message "INFO" "File conflict check completed"
+   }
+
+PART F: AUTOMATED SERVICE RECOVERY
+-----------------------------------
+
+1. Create automated recovery system:
+   # vim /opt/service-diagnostics/scripts/auto-recovery.sh
+   
+   #!/bin/bash
+   #
+   # Automated Service Recovery System
+   #
+   
+   # Monitor and auto-recover services
+   auto_recovery_daemon() {
+       local config_file="${1:-/opt/service-diagnostics/configs/auto-recovery.conf}"
+       
+       log_message "INFO" "Starting automated recovery daemon"
+       
+       while true; do
+           if [ -f "$config_file" ]; then
+               while read -r service_name recovery_level max_attempts; do
+                   # Skip comments and empty lines
+                   [[ "$service_name" =~ ^#.*$ ]] && continue
+                   [[ -z "$service_name" ]] && continue
+                   
+                   if ! systemctl is-active "$service_name" >/dev/null 2>&1; then
+                       log_message "WARN" "Service $service_name is not active, attempting recovery"
+                       
+                       local attempts=0
+                       while [ $attempts -lt "${max_attempts:-3}" ]; do
+                           if attempt_service_recovery "$service_name" "$recovery_level"; then
+                               log_message "INFO" "Auto-recovery successful for: $service_name"
+                               break
+                           fi
+                           attempts=$((attempts + 1))
+                           sleep 30
+                       done
+                       
+                       if [ $attempts -eq "${max_attempts:-3}" ]; then
+                           log_message "ERROR" "Auto-recovery failed for: $service_name after $attempts attempts"
+                       fi
+                   fi
+               done < "$config_file"
+           fi
+           
+           sleep 60
+       done
+   }
+
+2. Create recovery configuration:
+   # vim /opt/service-diagnostics/configs/auto-recovery.conf
+   
+   # Automated Recovery Configuration
+   # Format: service_name recovery_level max_attempts
+   
+   httpd basic 3
+   nginx basic 3
+   mariadb advanced 2
+   postfix basic 3
+   sshd advanced 2
+   named basic 3
+
+PART G: TESTING AND VALIDATION
+-------------------------------
+
+1. Test service diagnostics framework:
+   # chmod +x /opt/service-diagnostics/scripts/*.sh
+   # /opt/service-diagnostics/scripts/service-analyzer.sh analyze_all_failed_services
+
+2. Test specific service analysis:
+   # /opt/service-diagnostics/scripts/service-analyzer.sh analyze_service_status sshd
+   # /opt/service-diagnostics/scripts/service-analyzer.sh check_service_dependencies sshd
+
+3. Test systemd diagnostics:
+   # /opt/service-diagnostics/scripts/systemd-diagnostics.sh analyze_systemd_config sshd
+   # /opt/service-diagnostics/scripts/config-validator.sh validate_service_config sshd
+
+4. Test application diagnostics:
+   # /opt/service-diagnostics/scripts/app-diagnostics.sh diagnose_web_service httpd
+
+5. Test recovery procedures:
+   # /opt/service-diagnostics/scripts/service-recovery.sh attempt_service_recovery sshd basic
+
+6. Create service monitoring:
+   # vim /etc/systemd/system/service-monitor.service
+   
+   [Unit]
+   Description=Service Failure Monitor
+   After=multi-user.target
+   
+   [Service]
+   Type=simple
+   ExecStart=/opt/service-diagnostics/scripts/auto-recovery.sh
+   Restart=always
+   RestartSec=30
+   
+   [Install]
+   WantedBy=multi-user.target
+   
+   # systemctl enable --now service-monitor.service
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl --failed
+# systemctl status service_name -l
+# journalctl -u service_name -f
+# systemctl show service_name
+# systemctl list-dependencies service_name
+# systemd-analyze verify /path/to/unit/file
+# systemctl daemon-reload
+# systemctl reset-failed
+
+EXPECTED RESULTS:
+-----------------
+- Service diagnostics framework operational
+- Failed service analysis working
+- Dependency resolution functional
+- Resource conflict detection active
+- Application-specific diagnostics working
+- Automated recovery system operational
+- Comprehensive service monitoring active
+
+VALIDATION CHECKLIST:
+---------------------
+□ Service diagnostics framework created
+□ Service status analysis working
+□ Dependency checking functional
+□ Configuration validation active
+□ Application diagnostics operational
+□ Recovery procedures tested
+□ Automated monitoring running
+□ Resource conflict detection working
+
+CLEANUP:
+--------
+# systemctl stop service-monitor.service
+# systemctl disable service-monitor.service
+# rm -rf /opt/service-diagnostics
+# rm /etc/systemd/system/service-monitor.service

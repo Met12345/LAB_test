@@ -1,0 +1,647 @@
+RHCE RH254 HANDS-ON LAB: SYSTEM LOGGING AND MONITORING
+========================================================
+
+LAB OBJECTIVE:
+Configure comprehensive system logging and monitoring using rsyslog, journald, and log analysis tools
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- Understanding of logging concepts
+- Network connectivity for remote logging
+
+LAB SCENARIO:
+Configure centralized logging, log rotation, monitoring, and alerting for system security and troubleshooting.
+
+EQUIPMENT NEEDED:
+- RHEL system (log server: 192.168.1.10)
+- Client systems for remote logging
+- Log analysis tools
+
+LAB TASKS:
+
+PART A: CONFIGURE RSYSLOG BASICS
+---------------------------------
+
+1. Check rsyslog status and configuration:
+   # systemctl status rsyslog
+   # cat /etc/rsyslog.conf
+   # ls -la /etc/rsyslog.d/
+
+2. Configure basic rsyslog settings:
+   # vim /etc/rsyslog.conf
+   
+   # Global directives
+   $ModLoad imuxsock # provides support for local system logging
+   $ModLoad imklog   # provides kernel logging support
+   
+   # Use traditional timestamp format
+   $ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat
+   
+   # File syncing capability is disabled by default
+   $ActionFileEnableSync on
+   
+   # Include all config files in /etc/rsyslog.d/
+   $IncludeConfig /etc/rsyslog.d/*.conf
+
+3. Configure facility and priority rules:
+   # vim /etc/rsyslog.conf
+   
+   # Log all kernel messages to the console
+   kern.*                                                 /dev/console
+   
+   # Log anything (except mail) of level info or higher
+   *.info;mail.none;authpriv.none;cron.none                /var/log/messages
+   
+   # The authpriv file has restricted access
+   authpriv.*                                              /var/log/secure
+   
+   # Log all the mail messages in one place
+   mail.*                                                  -/var/log/maillog
+   
+   # Log cron stuff
+   cron.*                                                  /var/log/cron
+   
+   # Everybody gets emergency messages
+   *.emerg                                                 :omusrmsg:*
+   
+   # Save news errors of level crit and higher in a special file
+   uucp,news.crit                                          /var/log/spooler
+   
+   # Save boot messages also to boot.log
+   local7.*                                                /var/log/boot.log
+
+PART B: CONFIGURE CUSTOM LOGGING RULES
+---------------------------------------
+
+1. Create custom log files:
+   # vim /etc/rsyslog.d/custom.conf
+   
+   # Security-related logs
+   auth,authpriv.*                     /var/log/auth.log
+   
+   # Network-related logs
+   daemon.*                            /var/log/daemon.log
+   
+   # Application logs
+   local0.*                            /var/log/application.log
+   local1.*                            /var/log/database.log
+   local2.*                            /var/log/webserver.log
+   
+   # High priority messages
+   *.crit                              /var/log/critical.log
+   
+   # Debug messages (separate file)
+   *.debug                             /var/log/debug.log
+
+2. Configure log filtering:
+   # vim /etc/rsyslog.d/filters.conf
+   
+   # Filter out noisy messages
+   :msg, contains, "DHCPDISCOVER"      ~
+   :msg, contains, "DHCPOFFER"         ~
+   
+   # Filter by program name
+   :programname, isequal, "sshd"       /var/log/ssh.log
+   :programname, isequal, "httpd"      /var/log/apache.log
+   
+   # Filter by hostname
+   :hostname, isequal, "webserver"     /var/log/webserver-host.log
+
+3. Configure structured logging:
+   # vim /etc/rsyslog.d/structured.conf
+   
+   # JSON format template
+   template(name="json-template"
+            type="list") {
+       constant(value="{")
+       constant(value="\"timestamp\":\"")      property(name="timereported" dateFormat="rfc3339")
+       constant(value="\",\"host\":\"")        property(name="hostname")
+       constant(value="\",\"severity\":\"")    property(name="syslogseverity-text")
+       constant(value="\",\"facility\":\"")    property(name="syslogfacility-text")
+       constant(value="\",\"program\":\"")     property(name="programname")
+       constant(value="\",\"message\":\"")     property(name="msg" format="json")
+       constant(value="\"}")
+       constant(value="\n")
+   }
+   
+   # Use JSON template for specific logs
+   local3.*    /var/log/structured.log;json-template
+
+PART C: CONFIGURE REMOTE LOGGING
+---------------------------------
+
+1. Configure rsyslog server (log collector):
+   # vim /etc/rsyslog.conf
+   
+   # Enable UDP syslog reception
+   $ModLoad imudp
+   $UDPServerRun 514
+   $UDPServerAddress 0.0.0.0
+   
+   # Enable TCP syslog reception
+   $ModLoad imtcp
+   $InputTCPServerRun 514
+
+2. Configure remote log storage:
+   # vim /etc/rsyslog.d/remote.conf
+   
+   # Template for remote logs
+   $template RemoteHost,"/var/log/remote/%hostname%/%programname%.log"
+   
+   # Store remote logs by hostname
+   *.* ?RemoteHost
+   
+   # Stop processing after storing remote logs
+   & stop
+
+3. Configure rsyslog client (log sender):
+   # vim /etc/rsyslog.d/remote-client.conf
+   
+   # Send all logs to remote server via UDP
+   *.* @192.168.1.10:514
+   
+   # Send critical logs via TCP (more reliable)
+   *.crit @@192.168.1.10:514
+   
+   # Send specific facility to remote server
+   local0.* @@192.168.1.10:514
+
+4. Configure firewall for remote logging:
+   # firewall-cmd --permanent --add-port=514/udp
+   # firewall-cmd --permanent --add-port=514/tcp
+   # firewall-cmd --reload
+
+PART D: CONFIGURE JOURNALD INTEGRATION
+---------------------------------------
+
+1. Configure systemd journal:
+   # vim /etc/systemd/journald.conf
+   
+   [Journal]
+   Storage=persistent
+   Compress=yes
+   SplitMode=uid
+   SyncIntervalSec=5m
+   RateLimitInterval=30s
+   RateLimitBurst=1000
+   SystemMaxUse=4G
+   SystemKeepFree=1G
+   SystemMaxFileSize=128M
+   RuntimeMaxUse=1G
+   RuntimeKeepFree=256M
+   MaxRetentionSec=1month
+   MaxFileSec=1week
+   ForwardToSyslog=yes
+   ForwardToKMsg=no
+   ForwardToConsole=no
+   ForwardToWall=yes
+
+2. Configure journal forwarding to rsyslog:
+   # vim /etc/rsyslog.d/journal.conf
+   
+   # Load journal input module
+   $ModLoad imjournal
+   
+   # Journal workaround
+   $IMJournalStateFile imjournal.state
+   
+   # Forward journal to rsyslog
+   $IMJournalRatelimitInterval 600
+   $IMJournalRatelimitBurst 20000
+
+3. Restart services:
+   # systemctl restart systemd-journald
+   # systemctl restart rsyslog
+
+PART E: CONFIGURE LOG ROTATION
+-------------------------------
+
+1. Configure logrotate for system logs:
+   # vim /etc/logrotate.d/rsyslog
+   
+   /var/log/messages
+   /var/log/secure
+   /var/log/maillog
+   /var/log/spooler
+   /var/log/boot.log
+   /var/log/cron
+   {
+       daily
+       missingok
+       rotate 52
+       compress
+       delaycompress
+       sharedscripts
+       postrotate
+           /bin/kill -HUP `cat /var/run/rsyslogd.pid 2> /dev/null` 2> /dev/null || true
+       endscript
+   }
+
+2. Configure logrotate for custom logs:
+   # vim /etc/logrotate.d/custom-logs
+   
+   /var/log/auth.log
+   /var/log/daemon.log
+   /var/log/application.log
+   /var/log/database.log
+   /var/log/webserver.log
+   {
+       weekly
+       missingok
+       rotate 12
+       compress
+       delaycompress
+       notifempty
+       create 644 root root
+       postrotate
+           /bin/kill -HUP `cat /var/run/rsyslogd.pid 2> /dev/null` 2> /dev/null || true
+       endscript
+   }
+
+3. Configure logrotate for remote logs:
+   # vim /etc/logrotate.d/remote-logs
+   
+   /var/log/remote/*/*.log {
+       daily
+       missingok
+       rotate 30
+       compress
+       delaycompress
+       notifempty
+       create 644 root root
+       sharedscripts
+       postrotate
+           /bin/kill -HUP `cat /var/run/rsyslogd.pid 2> /dev/null` 2> /dev/null || true
+       endscript
+   }
+
+PART F: IMPLEMENT LOG MONITORING
+---------------------------------
+
+1. Create log monitoring script:
+   # vim /usr/local/bin/log-monitor.sh
+   
+   #!/bin/bash
+   # System log monitoring script
+   
+   LOG_DIR="/var/log"
+   ALERT_EMAIL="admin@example.com"
+   
+   echo "=== System Log Monitor - $(date) ==="
+   
+   # Check for critical errors
+   CRITICAL_ERRORS=$(grep -i "critical\|fatal\|panic" $LOG_DIR/messages | grep "$(date '+%b %d')" | wc -l)
+   if [ $CRITICAL_ERRORS -gt 0 ]; then
+       echo "ALERT: $CRITICAL_ERRORS critical errors found today"
+       grep -i "critical\|fatal\|panic" $LOG_DIR/messages | grep "$(date '+%b %d')" | \
+       mail -s "Critical System Errors" $ALERT_EMAIL
+   fi
+   
+   # Check for authentication failures
+   AUTH_FAILURES=$(grep -i "authentication failure\|failed password" $LOG_DIR/secure | grep "$(date '+%b %d')" | wc -l)
+   if [ $AUTH_FAILURES -gt 20 ]; then
+       echo "ALERT: $AUTH_FAILURES authentication failures today"
+       echo "High authentication failure rate: $AUTH_FAILURES" | \
+       mail -s "Authentication Alert" $ALERT_EMAIL
+   fi
+   
+   # Check disk space for logs
+   LOG_USAGE=$(df $LOG_DIR | tail -1 | awk '{print $5}' | sed 's/%//')
+   if [ $LOG_USAGE -gt 80 ]; then
+       echo "ALERT: Log directory usage at $LOG_USAGE%"
+       echo "Log directory usage critical: $LOG_USAGE%" | \
+       mail -s "Disk Space Alert" $ALERT_EMAIL
+   fi
+   
+   # Check for service failures
+   SERVICE_FAILURES=$(grep -i "failed\|error" $LOG_DIR/messages | grep "$(date '+%b %d')" | wc -l)
+   echo "Service failures today: $SERVICE_FAILURES"
+   
+   # chmod +x /usr/local/bin/log-monitor.sh
+
+2. Create security log analyzer:
+   # vim /usr/local/bin/security-log-analyzer.sh
+   
+   #!/bin/bash
+   # Security log analyzer
+   
+   SECURE_LOG="/var/log/secure"
+   AUTH_LOG="/var/log/auth.log"
+   
+   echo "=== Security Log Analysis - $(date) ==="
+   echo
+   
+   # Failed SSH attempts
+   echo "Failed SSH attempts today:"
+   if [ -f "$SECURE_LOG" ]; then
+       grep "$(date '+%b %d')" $SECURE_LOG | grep -i "failed password" | \
+       awk '{print $11}' | sort | uniq -c | sort -nr | head -10
+   fi
+   echo
+   
+   # Successful logins
+   echo "Successful logins today:"
+   if [ -f "$SECURE_LOG" ]; then
+       grep "$(date '+%b %d')" $SECURE_LOG | grep -i "accepted password" | \
+       awk '{print $9, $11}' | sort | uniq -c | sort -nr
+   fi
+   echo
+   
+   # Root access attempts
+   echo "Root access attempts:"
+   if [ -f "$SECURE_LOG" ]; then
+       grep "$(date '+%b %d')" $SECURE_LOG | grep -i "root" | wc -l
+   fi
+   echo
+   
+   # Sudo usage
+   echo "Sudo usage today:"
+   if [ -f "$SECURE_LOG" ]; then
+       grep "$(date '+%b %d')" $SECURE_LOG | grep -i "sudo" | \
+       awk '{print $5, $6}' | sort | uniq -c | sort -nr | head -10
+   fi
+   
+   # chmod +x /usr/local/bin/security-log-analyzer.sh
+
+3. Create log statistics script:
+   # vim /usr/local/bin/log-statistics.sh
+   
+   #!/bin/bash
+   # Generate log statistics
+   
+   echo "=== System Log Statistics - $(date) ==="
+   echo
+   
+   # Log file sizes
+   echo "Log file sizes:"
+   du -sh /var/log/*.log 2>/dev/null | sort -hr | head -10
+   echo
+   
+   # Log growth rate
+   echo "Log entries today by facility:"
+   grep "$(date '+%b %d')" /var/log/messages | \
+   awk '{print $5}' | cut -d'[' -f1 | sort | uniq -c | sort -nr | head -10
+   echo
+   
+   # Error summary
+   echo "Error summary today:"
+   grep "$(date '+%b %d')" /var/log/messages | grep -i error | \
+   awk '{for(i=6;i<=NF;i++) printf "%s ", $i; print ""}' | \
+   sort | uniq -c | sort -nr | head -10
+   echo
+   
+   # Journal statistics
+   echo "Journal statistics:"
+   journalctl --since today --no-pager | wc -l | awk '{print "Total journal entries today: " $1}'
+   journalctl --since today --priority=err --no-pager | wc -l | awk '{print "Error entries today: " $1}'
+   
+   # chmod +x /usr/local/bin/log-statistics.sh
+
+PART G: CONFIGURE LOG ALERTING
+-------------------------------
+
+1. Create real-time log alerting:
+   # vim /usr/local/bin/realtime-log-alert.sh
+   
+   #!/bin/bash
+   # Real-time log alerting
+   
+   ALERT_EMAIL="admin@example.com"
+   
+   # Monitor critical messages in real-time
+   tail -F /var/log/messages | while read line; do
+       # Check for critical keywords
+       if echo "$line" | grep -qi "panic\|oops\|segfault\|out of memory"; then
+           echo "CRITICAL: $line" | mail -s "Critical System Alert" $ALERT_EMAIL
+       fi
+       
+       # Check for security events
+       if echo "$line" | grep -qi "authentication failure\|invalid user"; then
+           echo "SECURITY: $line" | mail -s "Security Alert" $ALERT_EMAIL
+       fi
+       
+       # Check for service failures
+       if echo "$line" | grep -qi "service.*failed\|daemon.*died"; then
+           echo "SERVICE: $line" | mail -s "Service Alert" $ALERT_EMAIL
+       fi
+   done &
+   
+   # chmod +x /usr/local/bin/realtime-log-alert.sh
+
+2. Create log threshold monitoring:
+   # vim /usr/local/bin/log-threshold-monitor.sh
+   
+   #!/bin/bash
+   # Monitor log thresholds
+   
+   MESSAGES_LOG="/var/log/messages"
+   SECURE_LOG="/var/log/secure"
+   ALERT_EMAIL="admin@example.com"
+   
+   # Define thresholds
+   ERROR_THRESHOLD=50
+   AUTH_FAILURE_THRESHOLD=20
+   CRITICAL_THRESHOLD=5
+   
+   # Count today's events
+   TODAY=$(date '+%b %d')
+   
+   ERROR_COUNT=$(grep "$TODAY" $MESSAGES_LOG | grep -ci error)
+   AUTH_FAILURE_COUNT=$(grep "$TODAY" $SECURE_LOG | grep -ci "authentication failure")
+   CRITICAL_COUNT=$(grep "$TODAY" $MESSAGES_LOG | grep -ci "critical\|panic\|fatal")
+   
+   # Check thresholds and alert
+   if [ $ERROR_COUNT -gt $ERROR_THRESHOLD ]; then
+       echo "High error count: $ERROR_COUNT (threshold: $ERROR_THRESHOLD)" | \
+       mail -s "Log Threshold Alert: Errors" $ALERT_EMAIL
+   fi
+   
+   if [ $AUTH_FAILURE_COUNT -gt $AUTH_FAILURE_THRESHOLD ]; then
+       echo "High authentication failure count: $AUTH_FAILURE_COUNT (threshold: $AUTH_FAILURE_THRESHOLD)" | \
+       mail -s "Log Threshold Alert: Auth Failures" $ALERT_EMAIL
+   fi
+   
+   if [ $CRITICAL_COUNT -gt $CRITICAL_THRESHOLD ]; then
+       echo "High critical message count: $CRITICAL_COUNT (threshold: $CRITICAL_THRESHOLD)" | \
+       mail -s "Log Threshold Alert: Critical" $ALERT_EMAIL
+   fi
+   
+   # chmod +x /usr/local/bin/log-threshold-monitor.sh
+
+PART H: IMPLEMENT LOG ANALYSIS TOOLS
+-------------------------------------
+
+1. Install and configure log analysis tools:
+   # yum install logwatch -y
+
+2. Configure logwatch:
+   # vim /etc/logwatch/conf/logwatch.conf
+   
+   LogDir = /var/log
+   TmpDir = /var/cache/logwatch
+   MailTo = admin@example.com
+   MailFrom = logwatch@$(hostname)
+   Print = No
+   Save = /var/cache/logwatch
+   Range = yesterday
+   Detail = Med
+   Service = All
+   mailer = "/usr/sbin/sendmail -t"
+
+3. Create custom log parser:
+   # vim /usr/local/bin/parse-logs.sh
+   
+   #!/bin/bash
+   # Custom log parser
+   
+   LOG_FILE="$1"
+   PATTERN="$2"
+   
+   if [ $# -ne 2 ]; then
+       echo "Usage: $0 <log_file> <pattern>"
+       exit 1
+   fi
+   
+   echo "=== Log Analysis for $LOG_FILE ==="
+   echo "Pattern: $PATTERN"
+   echo "Date: $(date)"
+   echo
+   
+   # Count matches
+   MATCH_COUNT=$(grep -c "$PATTERN" "$LOG_FILE")
+   echo "Total matches: $MATCH_COUNT"
+   echo
+   
+   # Show recent matches
+   echo "Recent matches (last 20):"
+   grep "$PATTERN" "$LOG_FILE" | tail -20
+   echo
+   
+   # Time distribution
+   echo "Hourly distribution today:"
+   grep "$(date '+%b %d')" "$LOG_FILE" | grep "$PATTERN" | \
+   awk '{print $3}' | cut -d':' -f1 | sort | uniq -c
+   
+   # chmod +x /usr/local/bin/parse-logs.sh
+
+PART I: CONFIGURE LOG BACKUP AND ARCHIVAL
+------------------------------------------
+
+1. Create log backup script:
+   # vim /usr/local/bin/backup-logs.sh
+   
+   #!/bin/bash
+   # Backup system logs
+   
+   BACKUP_DIR="/var/backups/logs"
+   DATE=$(date +%Y%m%d)
+   
+   mkdir -p $BACKUP_DIR
+   
+   echo "Starting log backup for $DATE"
+   
+   # Backup current logs
+   tar -czf $BACKUP_DIR/logs_$DATE.tar.gz \
+       /var/log/messages* \
+       /var/log/secure* \
+       /var/log/maillog* \
+       /var/log/cron* \
+       /var/log/boot.log* \
+       /var/log/auth.log* \
+       /var/log/daemon.log* 2>/dev/null
+   
+   # Backup journal
+   journalctl --since="1 day ago" --until="now" > $BACKUP_DIR/journal_$DATE.log
+   gzip $BACKUP_DIR/journal_$DATE.log
+   
+   # Backup remote logs
+   if [ -d /var/log/remote ]; then
+       tar -czf $BACKUP_DIR/remote_logs_$DATE.tar.gz /var/log/remote/
+   fi
+   
+   echo "Log backup completed: $BACKUP_DIR"
+   
+   # Remove old backups (keep 90 days)
+   find $BACKUP_DIR -name "*.tar.gz" -mtime +90 -delete
+   find $BACKUP_DIR -name "*.log.gz" -mtime +90 -delete
+   
+   # chmod +x /usr/local/bin/backup-logs.sh
+
+2. Schedule log management tasks:
+   # crontab -e
+   # Add: */15 * * * * /usr/local/bin/log-monitor.sh
+   # Add: 0 */6 * * * /usr/local/bin/log-threshold-monitor.sh
+   # Add: 0 1 * * * /usr/local/bin/backup-logs.sh
+   # Add: 0 6 * * * /usr/local/bin/security-log-analyzer.sh > /var/log/security-analysis.log
+
+PART J: TESTING AND VALIDATION
+-------------------------------
+
+1. Test logging configuration:
+   # systemctl restart rsyslog
+   # systemctl status rsyslog
+   # logger -p local0.info "Test message for local0 facility"
+
+2. Test remote logging:
+   # logger -p local1.warning "Test remote log message"
+   # ssh client-system "logger -p local2.error 'Remote client test message'"
+
+3. Test log monitoring:
+   # /usr/local/bin/log-monitor.sh
+   # /usr/local/bin/security-log-analyzer.sh
+   # /usr/local/bin/log-statistics.sh
+
+4. Test log rotation:
+   # logrotate -d /etc/logrotate.d/rsyslog
+   # logrotate -f /etc/logrotate.d/custom-logs
+
+5. Test journald integration:
+   # journalctl --since "1 hour ago"
+   # journalctl -u rsyslog --since today
+
+6. Generate test events:
+   # logger -p auth.warning "Test authentication warning"
+   # logger -p daemon.error "Test daemon error"
+   # logger -p kern.crit "Test critical kernel message"
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# systemctl status rsyslog
+# journalctl -u rsyslog -f
+# rsyslogd -N1  # Test configuration
+# logger -p facility.priority "test message"
+# tail -f /var/log/messages
+# netstat -tulpn | grep :514
+
+EXPECTED RESULTS:
+-----------------
+- Centralized logging operational
+- Remote log collection working
+- Log rotation preventing disk full
+- Real-time monitoring and alerting
+- Security events tracked and analyzed
+- Log backup and archival functional
+
+VALIDATION CHECKLIST:
+---------------------
+□ Rsyslog service running
+□ Custom log rules working
+□ Remote logging functional
+□ Journald integration active
+□ Log rotation configured
+□ Monitoring scripts operational
+□ Alerting system working
+□ Backup procedures functional
+
+CLEANUP:
+--------
+# rm /usr/local/bin/log-*.sh
+# rm /usr/local/bin/security-*.sh
+# rm /usr/local/bin/parse-logs.sh
+# rm /usr/local/bin/realtime-*.sh
+# rm /usr/local/bin/backup-logs.sh
+# rm /etc/rsyslog.d/custom.conf
+# rm /etc/rsyslog.d/filters.conf
+# rm /etc/rsyslog.d/structured.conf
+# rm /etc/rsyslog.d/remote.conf
+# crontab -e  # Remove monitoring entries

@@ -1,0 +1,229 @@
+RHCE RH254 HANDS-ON LAB: SAMBA/CIFS FILE SHARING CONFIGURATION
+===============================================================
+
+LAB OBJECTIVE:
+Configure Samba server for Windows/Linux file sharing and configure clients to access shares
+
+PREREQUISITES:
+- RHEL 7/8 system with root access
+- Network connectivity
+- Understanding of file permissions and user management
+
+LAB SCENARIO:
+Configure server1 as Samba server with public and private shares.
+Configure authentication and access controls for different user groups.
+
+EQUIPMENT NEEDED:
+- RHEL system (server1: 192.168.1.10)
+- Windows or Linux client for testing
+
+LAB TASKS:
+
+PART A: INSTALL AND CONFIGURE SAMBA SERVER
+-------------------------------------------
+
+1. Install Samba packages:
+   # yum install samba samba-client samba-common -y
+   # systemctl enable smb nmb
+
+2. Create shared directories:
+   # mkdir -p /srv/samba/public
+   # mkdir -p /srv/samba/private
+   # mkdir -p /srv/samba/group-share
+
+3. Set directory permissions:
+   # chmod 755 /srv/samba/public
+   # chmod 750 /srv/samba/private
+   # chmod 770 /srv/samba/group-share
+
+4. Create Samba users and groups:
+   # useradd -s /sbin/nologin sambauser1
+   # useradd -s /sbin/nologin sambauser2
+   # groupadd sambagroup
+   # usermod -G sambagroup sambauser1
+   # usermod -G sambagroup sambauser2
+
+5. Set Samba passwords:
+   # smbpasswd -a sambauser1
+   # smbpasswd -a sambauser2
+   # smbpasswd -e sambauser1
+   # smbpasswd -e sambauser2
+
+6. Configure SELinux for Samba:
+   # setsebool -P samba_enable_home_dirs on
+   # setsebool -P samba_export_all_rw on
+   # semanage fcontext -a -t samba_share_t "/srv/samba(/.*)?"
+   # restorecon -R /srv/samba
+
+PART B: CONFIGURE SAMBA SHARES
+-------------------------------
+
+1. Backup original configuration:
+   # cp /etc/samba/smb.conf /etc/samba/smb.conf.backup
+
+2. Configure main Samba settings (/etc/samba/smb.conf):
+   # install vim 
+   # yum install vim 
+   # vim /etc/samba/smb.conf
+   
+   [global]
+   workgroup = WORKGROUP
+   server string = Samba Server %v
+   netbios name = server1
+   security = user
+   map to guest = bad user
+   dns proxy = no
+   
+   # Logging
+   log file = /var/log/samba/log.%m
+   max log size = 1000
+   
+   # Authentication
+   passdb backend = tdbsam
+
+3. Add share configurations:
+   # vim /etc/samba/smb.conf
+   
+   [public]
+   comment = Public Share
+   path = /srv/samba/public
+   browseable = yes
+   writable = yes
+   guest ok = yes
+   read only = no
+   create mask = 0644
+   directory mask = 0755
+   
+   [private]
+   comment = Private Share
+   path = /srv/samba/private
+   browseable = no
+   writable = yes
+   guest ok = no
+   valid users = sambauser1
+   read only = no
+   create mask = 0600
+   directory mask = 0700
+   
+   [group-share]
+   comment = Group Share
+   path = /srv/samba/group-share
+   browseable = yes
+   writable = yes
+   guest ok = no
+   valid users = @sambagroup
+   read only = no
+   create mask = 0664
+   directory mask = 0775
+
+4. Test Samba configuration:
+   # testparm
+   # testparm -s
+
+PART C: CONFIGURE FIREWALL AND START SERVICES
+----------------------------------------------
+
+1. Configure firewall:
+   # firewall-cmd --permanent --add-service=samba
+   # firewall-cmd --reload
+
+2. Start Samba services:
+   # systemctl start smb nmb
+   # systemctl status smb nmb
+
+3. Verify Samba is listening:
+   # netstat -tulpn | grep -E ':(139|445|137|138)'  (Not Needed )
+   # ss -tulpn | grep -E ':(139|445)'
+
+PART D: CLIENT CONFIGURATION AND TESTING
+-----------------------------------------
+
+1. Install CIFS utilities on client:
+   # yum install cifs-utils -y
+
+2. Create mount points:
+   # mkdir -p /mnt/samba-public
+   # mkdir -p /mnt/samba-private
+   # mkdir -p /mnt/samba-group
+
+   # chown -R nobody:nobody /srv/samba/public
+   # chown -R sambauser1:sambauser1 /srv/samba/private
+   # chown -R :sambagroup /srv/samba/group-share
+
+
+
+3. Test Samba connectivity:
+   # smbclient -L 20.192.233.129
+   # smbclient -L 20.192.233.129 -U sambauser1
+
+
+4. Mount shares manually:
+   # mount -t cifs //20.192.233.129/public /mnt/samba-public -o username=guest,password=
+   # mount -t cifs //20.192.233.129/private /mnt/samba-private -o username=sambauser1
+   # mount -t cifs //20.192.233.129/group-share /mnt/samba-group -o username=sambauser1
+
+5. Configure persistent mounts with credentials:
+   # vim /etc/samba/credentials
+   username=sambauser1
+   password=sambauser1
+   domain=WORKGROUP
+   
+   # chmod 600 /etc/samba/credentials
+
+6. Add to /etc/fstab:
+   # vim /etc/fstab
+   //192.168.1.10/private /mnt/samba-private cifs credentials=/etc/samba/credentials,uid=1000,gid=1000 0 0
+
+PART E: TESTING AND VERIFICATION
+---------------------------------
+
+1. Test file operations:
+   # echo "Test from client" > /mnt/samba-public/test.txt
+   # ls -la /mnt/samba-public/
+
+2. Test permissions:
+   # touch /mnt/samba-private/private-test.txt
+   # ls -la /mnt/samba-private/
+
+3. Monitor Samba connections:
+   # smbstatus
+   # smbstatus -S
+   # smbstatus -u sambauser1
+
+4. Check Samba logs:
+   # tail -f /var/log/samba/log.smbd
+   # tail -f /var/log/samba/log.nmbd
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# testparm -v
+# smbclient -L localhost
+# pdbedit -L
+# systemctl status smb nmb
+# tail -f /var/log/samba/log.smbd
+# sealert -a /var/log/audit/audit.log
+
+EXPECTED RESULTS:
+-----------------
+- Samba server accepts connections
+- Public share accessible without authentication
+- Private share requires valid user credentials
+- Group share accessible to group members only
+- File operations work correctly
+
+VALIDATION CHECKLIST:
+---------------------
+□ Samba services running            Done
+□ Shares accessible from client     Done 
+□ Authentication working correctly  Done
+□ File permissions enforced         Done
+□ SELinux contexts correct          Done
+□ Firewall allows Samba traffic     Done
+
+CLEANUP:
+--------
+# umount /mnt/samba-*
+# systemctl stop smb nmb
+# systemctl disable smb nmb
+# smbpasswd -x sambauser1 sambauser2
+# userdel sambauser1 sambauser2

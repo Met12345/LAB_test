@@ -1,0 +1,283 @@
+RHCE RH254 HANDS-ON LAB: VIRTUAL HOSTS CONFIGURATION
+===================================================
+
+LAB OBJECTIVE:
+Configure Apache virtual hosts for hosting multiple websites on a single server
+
+PREREQUISITES:
+- Apache HTTP Server installed and running
+- Root access to RHEL system
+- Understanding of DNS concepts
+
+LAB SCENARIO:
+Configure name-based and IP-based virtual hosts to serve multiple websites from one Apache server.
+
+EQUIPMENT NEEDED:
+- RHEL system with Apache installed
+- Multiple IP addresses or DNS names for testing
+
+LAB TASKS:
+
+PART A: PREPARE FOR VIRTUAL HOSTS
+----------------------------------
+
+1. Create directory structure for virtual hosts:
+   # mkdir -p /var/www/site1.example.com/html
+   # mkdir -p /var/www/site2.example.com/html
+   # mkdir -p /var/www/site3.example.com/html
+   # mkdir -p /var/www/logs
+
+2. Create web content for each site:
+   # install vim 
+   # yum install vim -y
+   
+   # vim /var/www/site1.example.com/html/index.html
+<!DOCTYPE html>
+<html><head><title>Site 1</title></head>
+<body><h1>Welcome to Site1.example.com</h1></body></html>
+   
+   # vim /var/www/site2.example.com/html/index.html
+<!DOCTYPE html>
+<html><head><title>Site 2</title></head>
+<body><h1>Welcome to Site2.example.com</h1></body></html>
+   
+   # vim /var/www/site3.example.com/html/index.html
+<!DOCTYPE html>
+<html><head><title>Site 3</title></head>
+<body><h1>Welcome to Site3.example.com</h1></body></html>
+
+3. Set proper permissions:
+   # chown -R apache:apache /var/www/
+   # chmod -R 644 /var/www/*/html/*
+   # find /var/www -type d -exec chmod 755 {} \;
+
+PART B: CONFIGURE NAME-BASED VIRTUAL HOSTS
+-------------------------------------------
+
+1. Create virtual host configuration file:
+   # vim /etc/httpd/conf.d/vhosts.conf
+   
+# Enable name-based virtual hosting
+NameVirtualHost *:80
+   
+# Default virtual host
+<VirtualHost *:80>
+   ServerName default.example.com
+   DocumentRoot /var/www/html
+   ErrorLog logs/default_error.log
+   CustomLog logs/default_access.log combined
+</VirtualHost>
+   
+   # Site 1 Virtual Host
+<VirtualHost *:80>
+   ServerName site1.example.com
+   ServerAlias www.site1.example.com
+   DocumentRoot /var/www/site1.example.com/html
+   ErrorLog logs/site1_error.log
+   CustomLog logs/site1_access.log combined
+       
+   <Directory "/var/www/site1.example.com/html">
+      Options Indexes FollowSymLinks
+      AllowOverride All
+      Require all granted
+   </Directory>
+</VirtualHost>
+   
+   # Site 2 Virtual Host
+<VirtualHost *:80>
+   ServerName site2.example.com
+   ServerAlias www.site2.example.com
+   DocumentRoot /var/www/site2.example.com/html
+   ErrorLog logs/site2_error.log
+   CustomLog logs/site2_access.log combined
+       
+   <Directory "/var/www/site2.example.com/html">
+      Options Indexes FollowSymLinks
+      AllowOverride All
+      Require all granted
+   </Directory>
+</VirtualHost>
+
+2. Test configuration:
+   # httpd -t
+   # apachectl configtest
+
+3. Reload Apache configuration:
+   # systemctl reload httpd
+
+PART C: CONFIGURE IP-BASED VIRTUAL HOSTS
+-----------------------------------------
+
+1. Add additional IP address (if available):
+   # ip a
+   # check which is using in your ip etho or ens5 
+   # ip addr add 192.168.1.11/24 dev eth0      (change etho to your Interface)
+   # ip addr add 192.168.1.12/24 dev eth0      (change etho to your Interface)
+
+2. Configure IP-based virtual hosts:
+   # vim /etc/httpd/conf.d/ip-vhosts.conf
+   
+   # IP-based Virtual Host 1
+   <VirtualHost 192.168.1.10:80>
+       ServerName site1.example.com
+       DocumentRoot /var/www/site1.example.com/html
+       ErrorLog logs/ip1_error.log
+       CustomLog logs/ip1_access.log combined
+   </VirtualHost>
+   
+   # IP-based Virtual Host 2
+   <VirtualHost 192.168.1.11:80>
+       ServerName site2.example.com
+       DocumentRoot /var/www/site2.example.com/html
+       ErrorLog logs/ip2_error.log
+       CustomLog logs/ip2_access.log combined
+   </VirtualHost>
+   
+   # IP-based Virtual Host 3
+   <VirtualHost 192.168.1.12:80>
+       ServerName site3.example.com
+       DocumentRoot /var/www/site3.example.com/html
+       ErrorLog logs/ip3_error.log
+       CustomLog logs/ip3_access.log combined
+   </VirtualHost>
+
+3. Update main Apache configuration:
+   # vim /etc/httpd/conf/httpd.conf
+   Listen 192.168.1.10:80
+   Listen 192.168.1.11:80
+   Listen 192.168.1.12:80
+
+PART D: CONFIGURE PORT-BASED VIRTUAL HOSTS
+-------------------------------------------
+
+1. Configure Apache to listen on multiple ports:
+   # vim /etc/httpd/conf/httpd.conf
+   Listen 80
+   Listen 8080
+   Listen 8081
+
+2. Create port-based virtual hosts:
+   # vim /etc/httpd/conf.d/port-vhosts.conf
+   
+<VirtualHost *:8080>
+   ServerName site1.example.com:8080
+   DocumentRoot /var/www/site1.example.com/html
+   ErrorLog logs/port8080_error.log
+   CustomLog logs/port8080_access.log combined
+</VirtualHost>
+   
+<VirtualHost *:8081>
+   ServerName site2.example.com:8081
+   DocumentRoot /var/www/site2.example.com/html
+   ErrorLog logs/port8081_error.log
+   CustomLog logs/port8081_access.log combined
+</VirtualHost>
+
+3. Configure firewall for additional ports:
+   # install firewall
+   # yum install firewalld -y
+   # systemctl start firewalld 
+   # systemctl enable firewalld
+
+   # firewall-cmd --permanent --add-port=8080/tcp
+   # firewall-cmd --permanent --add-port=8081/tcp
+   # firewall-cmd --reload
+
+PART E: CONFIGURE DNS/HOSTS FOR TESTING
+----------------------------------------
+
+1. Configure local DNS resolution:
+   # vim /etc/hosts
+   192.168.1.10 site1.example.com www.site1.example.com
+   192.168.1.10 site2.example.com www.site2.example.com
+   192.168.1.11 site2.example.com
+   192.168.1.12 site3.example.com
+
+2. Test DNS resolution:
+   # install nslookup & dig packge 
+   # yum install -y bind-utils
+   # nslookup site1.example.com
+   # dig site1.example.com
+
+PART F: TESTING VIRTUAL HOSTS
+------------------------------
+
+1. Test name-based virtual hosts:
+   # curl -H "Host: site1.example.com" http://192.168.1.10
+   # curl -H "Host: site2.example.com" http://192.168.1.10
+   # curl http://site1.example.com
+   # curl http://site2.example.com
+
+2. Test IP-based virtual hosts:
+   # curl http://192.168.1.10
+   # curl http://192.168.1.11
+   # curl http://192.168.1.12
+
+3. Test port-based virtual hosts:
+   # curl http://192.168.1.10:8080
+   # curl http://192.168.1.10:8081
+
+4. Test with web browser:
+   # Open browser and test:
+   http://site1.example.com
+   http://site2.example.com
+   http://192.168.1.10:8080
+
+PART G: ADVANCED VIRTUAL HOST FEATURES
+---------------------------------------
+
+1. Configure virtual host with custom error pages:
+   # mkdir -p /var/www/site1.example.com/errors
+   # echo "<h1>404 - Page Not Found</h1>" > /var/www/site1.example.com/errors/404.html
+   
+   # vim /etc/httpd/conf.d/vhosts.conf
+   # Add to site1 virtual host:
+   ErrorDocument 404 /errors/404.html
+
+2. Configure directory-specific settings:
+   # vim /etc/httpd/conf.d/vhosts.conf
+   # Add to virtual host:
+<Directory "/var/www/site1.example.com/html/admin">
+   Options -Indexes
+   AllowOverride None
+   Require ip 192.168.1.0/24
+</Directory>
+
+3. Configure virtual host aliases:
+   # vim /etc/httpd/conf.d/vhosts.conf
+   # Add multiple ServerAlias entries:
+   ServerAlias site1.local
+   ServerAlias *.site1.example.com
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# httpd -S
+# curl -I http://site1.example.com
+# tail -f /var/log/httpd/site1_error.log
+# ss -tulpn | grep httpd
+
+EXPECTED RESULTS:
+-----------------
+- Multiple websites served from single Apache server
+- Name-based virtual hosts working correctly
+- IP-based virtual hosts functional (if multiple IPs available)
+- Port-based virtual hosts accessible
+- Separate logging for each virtual host
+
+VALIDATION CHECKLIST:
+---------------------
+□ Virtual host configuration syntax valid          Done 
+□ Name-based virtual hosts working                 Done 
+□ IP-based virtual hosts configured                Done
+□ Port-based virtual hosts accessible              Done
+□ Separate logs for each virtual host              Done
+□ DNS/hosts resolution working                     Done
+
+CLEANUP:
+--------
+# rm /etc/httpd/conf.d/vhosts.conf
+# rm /etc/httpd/conf.d/ip-vhosts.conf
+# rm /etc/httpd/conf.d/port-vhosts.conf
+# systemctl reload httpd
+# ip addr del 192.168.1.11/24 dev eth0
+# ip addr del 192.168.1.12/24 dev eth0

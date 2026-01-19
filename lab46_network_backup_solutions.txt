@@ -1,0 +1,900 @@
+RHCE RH254 HANDS-ON LAB: NETWORK-BASED BACKUP SOLUTIONS
+======================================================
+
+LAB OBJECTIVE:
+Configure comprehensive network-based backup solutions including NFS backup storage, SSH-based remote backups, FTP backup transfers, and centralized backup management systems
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Network connectivity to backup servers
+- Understanding of network protocols and security
+- Basic knowledge of backup strategies
+
+LAB SCENARIO:
+Deploy enterprise network-based backup infrastructure with multiple protocols, centralized management, automated transfers, and secure remote storage capabilities.
+
+EQUIPMENT NEEDED:
+- RHEL client system (192.168.1.20)
+- Backup server system (192.168.1.10)
+- NFS server for backup storage
+- FTP server for backup transfers
+- SSH access between systems
+
+LAB TASKS:
+
+PART A: CONFIGURE NFS-BASED BACKUP STORAGE
+-------------------------------------------
+
+1. Set up NFS backup server:
+   # dnf install nfs-utils -y
+   # systemctl enable nfs-server rpcbind
+   # systemctl start nfs-server rpcbind
+
+2. Configure NFS exports for backup:
+   # mkdir -p /srv/nfs-backups/{full,incremental,logs}
+   # chown -R nobody:nobody /srv/nfs-backups
+   # chmod -R 755 /srv/nfs-backups
+   
+   # vim /etc/exports
+   /srv/nfs-backups 192.168.1.0/24(rw,sync,no_root_squash,no_subtree_check)
+   /srv/nfs-backups/full 192.168.1.0/24(rw,sync,no_root_squash,no_subtree_check)
+   /srv/nfs-backups/incremental 192.168.1.0/24(rw,sync,no_root_squash,no_subtree_check)
+   
+   # exportfs -ra
+   # exportfs -v
+
+3. Configure firewall for NFS:
+   # firewall-cmd --add-service=nfs --permanent
+   # firewall-cmd --add-service=rpc-bind --permanent
+   # firewall-cmd --add-service=mountd --permanent
+   # firewall-cmd --reload
+
+4. Create NFS backup client script:
+   # vim /usr/local/bin/nfs-backup-client.sh
+   
+   #!/bin/bash
+   NFS_SERVER="192.168.1.10"
+   NFS_EXPORT="/srv/nfs-backups"
+   LOCAL_MOUNT="/mnt/nfs-backup"
+   SOURCE_DIR=$1
+   BACKUP_TYPE=${2:-"full"}
+   
+   if [ -z "$SOURCE_DIR" ]; then
+       echo "Usage: $0 <source_directory> [backup_type]"
+       echo "Backup types: full, incremental"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/var/log/nfs-backup-$TIMESTAMP.log"
+   
+   echo "=== NFS Network Backup - $(date) ===" | tee $LOG_FILE
+   
+   # Create mount point
+   mkdir -p $LOCAL_MOUNT
+   
+   # Mount NFS share
+   echo "Mounting NFS backup storage..." | tee -a $LOG_FILE
+   if mount -t nfs $NFS_SERVER:$NFS_EXPORT $LOCAL_MOUNT; then
+       echo "NFS mount successful" | tee -a $LOG_FILE
+   else
+       echo "NFS mount failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # Perform backup based on type
+   case $BACKUP_TYPE in
+       "full")
+           BACKUP_DIR="$LOCAL_MOUNT/full"
+           BACKUP_FILE="$BACKUP_DIR/full-backup-$TIMESTAMP.tar.gz"
+           echo "Creating full backup: $BACKUP_FILE" | tee -a $LOG_FILE
+           
+           tar -czf "$BACKUP_FILE" \
+               --exclude="*.tmp" \
+               --exclude="*.log" \
+               "$SOURCE_DIR" 2>&1 | tee -a $LOG_FILE
+           ;;
+       "incremental")
+           BACKUP_DIR="$LOCAL_MOUNT/incremental"
+           BACKUP_FILE="$BACKUP_DIR/incremental-backup-$TIMESTAMP.tar.gz"
+           REFERENCE_FILE="$LOCAL_MOUNT/last-backup-reference"
+           
+           echo "Creating incremental backup: $BACKUP_FILE" | tee -a $LOG_FILE
+           
+           if [ -f "$REFERENCE_FILE" ]; then
+               find "$SOURCE_DIR" -newer "$REFERENCE_FILE" -type f > /tmp/changed-files-$$
+               tar -czf "$BACKUP_FILE" -T /tmp/changed-files-$$ 2>&1 | tee -a $LOG_FILE
+               rm -f /tmp/changed-files-$$
+           else
+               echo "No reference file found, creating full backup instead" | tee -a $LOG_FILE
+               tar -czf "$BACKUP_FILE" "$SOURCE_DIR" 2>&1 | tee -a $LOG_FILE
+           fi
+           
+           # Update reference file
+           touch "$REFERENCE_FILE"
+           ;;
+       *)
+           echo "Invalid backup type: $BACKUP_TYPE" | tee -a $LOG_FILE
+           umount $LOCAL_MOUNT
+           exit 1
+           ;;
+   esac
+   
+   if [ $? -eq 0 ]; then
+       echo "Backup completed successfully" | tee -a $LOG_FILE
+       echo "Backup file: $BACKUP_FILE" | tee -a $LOG_FILE
+       echo "Backup size: $(du -h "$BACKUP_FILE" | cut -f1)" | tee -a $LOG_FILE
+       
+       # Create backup manifest
+       MANIFEST_FILE="${BACKUP_FILE}.manifest"
+       echo "Backup Date: $(date)" > $MANIFEST_FILE
+       echo "Source: $SOURCE_DIR" >> $MANIFEST_FILE
+       echo "Type: $BACKUP_TYPE" >> $MANIFEST_FILE
+       echo "Size: $(du -h "$BACKUP_FILE" | cut -f1)" >> $MANIFEST_FILE
+       tar -tzf "$BACKUP_FILE" >> $MANIFEST_FILE
+       
+   else
+       echo "Backup failed" | tee -a $LOG_FILE
+   fi
+   
+   # Unmount NFS share
+   umount $LOCAL_MOUNT
+   echo "NFS backup process completed" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/nfs-backup-client.sh
+
+PART B: CONFIGURE SSH-BASED REMOTE BACKUPS
+-------------------------------------------
+
+1. Set up SSH key authentication:
+   # ssh-keygen -t rsa -b 4096 -f /root/.ssh/backup_key -N ""
+   # ssh-copy-id -i /root/.ssh/backup_key.pub root@192.168.1.10
+
+2. Create SSH backup script:
+   # vim /usr/local/bin/ssh-backup.sh
+   
+   #!/bin/bash
+   REMOTE_HOST=$1
+   REMOTE_PATH=$2
+   SOURCE_DIR=$3
+   SSH_KEY="/root/.ssh/backup_key"
+   
+   if [ $# -lt 3 ]; then
+       echo "Usage: $0 <remote_host> <remote_path> <source_directory>"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/var/log/ssh-backup-$TIMESTAMP.log"
+   TEMP_ARCHIVE="/tmp/ssh-backup-$TIMESTAMP.tar.gz"
+   
+   echo "=== SSH Remote Backup - $(date) ===" | tee $LOG_FILE
+   echo "Remote host: $REMOTE_HOST" | tee -a $LOG_FILE
+   echo "Remote path: $REMOTE_PATH" | tee -a $LOG_FILE
+   echo "Source: $SOURCE_DIR" | tee -a $LOG_FILE
+   
+   # Test SSH connectivity
+   echo "Testing SSH connectivity..." | tee -a $LOG_FILE
+   if ssh -i $SSH_KEY -o ConnectTimeout=10 $REMOTE_HOST "echo 'SSH test successful'" >/dev/null 2>&1; then
+       echo "SSH connectivity verified" | tee -a $LOG_FILE
+   else
+       echo "SSH connectivity failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # Create local archive
+   echo "Creating local archive..." | tee -a $LOG_FILE
+   tar -czf $TEMP_ARCHIVE \
+       --exclude="*.tmp" \
+       --exclude="*.cache" \
+       "$SOURCE_DIR" 2>&1 | tee -a $LOG_FILE
+   
+   if [ $? -eq 0 ]; then
+       echo "Local archive created: $TEMP_ARCHIVE" | tee -a $LOG_FILE
+       echo "Archive size: $(du -h $TEMP_ARCHIVE | cut -f1)" | tee -a $LOG_FILE
+       
+       # Transfer archive to remote host
+       echo "Transferring archive to remote host..." | tee -a $LOG_FILE
+       REMOTE_FILE="$REMOTE_PATH/ssh-backup-$TIMESTAMP.tar.gz"
+       
+       if scp -i $SSH_KEY $TEMP_ARCHIVE $REMOTE_HOST:$REMOTE_FILE 2>&1 | tee -a $LOG_FILE; then
+           echo "Archive transfer completed successfully" | tee -a $LOG_FILE
+           
+           # Verify remote file
+           REMOTE_SIZE=$(ssh -i $SSH_KEY $REMOTE_HOST "du -h $REMOTE_FILE | cut -f1")
+           echo "Remote file size: $REMOTE_SIZE" | tee -a $LOG_FILE
+           
+           # Create remote manifest
+           ssh -i $SSH_KEY $REMOTE_HOST "cat > ${REMOTE_FILE}.manifest << EOF
+   Backup Date: $(date)
+   Source Host: $(hostname)
+   Source Directory: $SOURCE_DIR
+   Transfer Method: SSH/SCP
+   File Size: $REMOTE_SIZE
+   EOF"
+           
+           echo "Remote manifest created" | tee -a $LOG_FILE
+           
+       else
+           echo "Archive transfer failed" | tee -a $LOG_FILE
+           rm -f $TEMP_ARCHIVE
+           exit 1
+       fi
+       
+   else
+       echo "Local archive creation failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # Cleanup local temporary file
+   rm -f $TEMP_ARCHIVE
+   echo "SSH backup process completed" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/ssh-backup.sh
+
+3. Create SSH incremental backup:
+   # vim /usr/local/bin/ssh-incremental-backup.sh
+   
+   #!/bin/bash
+   REMOTE_HOST=$1
+   REMOTE_PATH=$2
+   SOURCE_DIR=$3
+   SSH_KEY="/root/.ssh/backup_key"
+   
+   if [ $# -lt 3 ]; then
+       echo "Usage: $0 <remote_host> <remote_path> <source_directory>"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/var/log/ssh-incremental-$TIMESTAMP.log"
+   
+   echo "=== SSH Incremental Backup - $(date) ===" | tee $LOG_FILE
+   
+   # Use rsync for efficient incremental backup over SSH
+   echo "Starting incremental backup using rsync over SSH..." | tee -a $LOG_FILE
+   
+   rsync -avz \
+         --progress \
+         --stats \
+         --delete \
+         --backup \
+         --backup-dir="$REMOTE_PATH/incremental-$(date +%Y%m%d)" \
+         -e "ssh -i $SSH_KEY" \
+         "$SOURCE_DIR/" \
+         "$REMOTE_HOST:$REMOTE_PATH/current/" \
+         2>&1 | tee -a $LOG_FILE
+   
+   if [ $? -eq 0 ]; then
+       echo "SSH incremental backup completed successfully" | tee -a $LOG_FILE
+       
+       # Create remote log entry
+       ssh -i $SSH_KEY $REMOTE_HOST "echo '$(date): Incremental backup from $(hostname):$SOURCE_DIR' >> $REMOTE_PATH/backup.log"
+       
+   else
+       echo "SSH incremental backup failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/ssh-incremental-backup.sh
+
+PART C: CONFIGURE FTP-BASED BACKUP TRANSFERS
+---------------------------------------------
+
+1. Install FTP client tools:
+   # dnf install ftp lftp -y
+
+2. Create FTP backup script:
+   # vim /usr/local/bin/ftp-backup.sh
+   
+   #!/bin/bash
+   FTP_SERVER=$1
+   FTP_USER=$2
+   FTP_PASS=$3
+   REMOTE_DIR=$4
+   SOURCE_DIR=$5
+   
+   if [ $# -lt 5 ]; then
+       echo "Usage: $0 <ftp_server> <username> <password> <remote_dir> <source_dir>"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/var/log/ftp-backup-$TIMESTAMP.log"
+   TEMP_ARCHIVE="/tmp/ftp-backup-$TIMESTAMP.tar.gz"
+   
+   echo "=== FTP Backup Transfer - $(date) ===" | tee $LOG_FILE
+   echo "FTP Server: $FTP_SERVER" | tee -a $LOG_FILE
+   echo "Remote Directory: $REMOTE_DIR" | tee -a $LOG_FILE
+   echo "Source: $SOURCE_DIR" | tee -a $LOG_FILE
+   
+   # Create local archive
+   echo "Creating backup archive..." | tee -a $LOG_FILE
+   tar -czf $TEMP_ARCHIVE \
+       --exclude="*.tmp" \
+       --exclude="*.log" \
+       "$SOURCE_DIR" 2>&1 | tee -a $LOG_FILE
+   
+   if [ $? -eq 0 ]; then
+       echo "Archive created: $TEMP_ARCHIVE" | tee -a $LOG_FILE
+       echo "Archive size: $(du -h $TEMP_ARCHIVE | cut -f1)" | tee -a $LOG_FILE
+       
+       # Transfer via FTP using lftp
+       REMOTE_FILE="ftp-backup-$TIMESTAMP.tar.gz"
+       echo "Transferring to FTP server..." | tee -a $LOG_FILE
+       
+       lftp -c "
+       set ftp:ssl-allow no
+       open ftp://$FTP_USER:$FTP_PASS@$FTP_SERVER
+       cd $REMOTE_DIR
+       put $TEMP_ARCHIVE -o $REMOTE_FILE
+       quit
+       " 2>&1 | tee -a $LOG_FILE
+       
+       if [ $? -eq 0 ]; then
+           echo "FTP transfer completed successfully" | tee -a $LOG_FILE
+           
+           # Verify remote file
+           REMOTE_SIZE=$(lftp -c "
+           set ftp:ssl-allow no
+           open ftp://$FTP_USER:$FTP_PASS@$FTP_SERVER
+           cd $REMOTE_DIR
+           ls -l $REMOTE_FILE
+           quit
+           " | awk '{print $5}')
+           
+           echo "Remote file size: $(numfmt --to=iec $REMOTE_SIZE)" | tee -a $LOG_FILE
+           
+           # Create remote manifest
+           MANIFEST_CONTENT="Backup Date: $(date)
+   Source Host: $(hostname)
+   Source Directory: $SOURCE_DIR
+   Transfer Method: FTP
+   File Size: $(numfmt --to=iec $REMOTE_SIZE)"
+           
+           echo "$MANIFEST_CONTENT" | lftp -c "
+           set ftp:ssl-allow no
+           open ftp://$FTP_USER:$FTP_PASS@$FTP_SERVER
+           cd $REMOTE_DIR
+           put /dev/stdin -o ${REMOTE_FILE}.manifest
+           quit
+           "
+           
+       else
+           echo "FTP transfer failed" | tee -a $LOG_FILE
+           rm -f $TEMP_ARCHIVE
+           exit 1
+       fi
+       
+   else
+       echo "Archive creation failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # Cleanup
+   rm -f $TEMP_ARCHIVE
+   echo "FTP backup process completed" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/ftp-backup.sh
+
+3. Create secure FTP backup (SFTP):
+   # vim /usr/local/bin/sftp-backup.sh
+   
+   #!/bin/bash
+   SFTP_SERVER=$1
+   SFTP_USER=$2
+   REMOTE_DIR=$3
+   SOURCE_DIR=$4
+   SSH_KEY="/root/.ssh/backup_key"
+   
+   if [ $# -lt 4 ]; then
+       echo "Usage: $0 <sftp_server> <username> <remote_dir> <source_dir>"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/var/log/sftp-backup-$TIMESTAMP.log"
+   TEMP_ARCHIVE="/tmp/sftp-backup-$TIMESTAMP.tar.gz"
+   
+   echo "=== SFTP Secure Backup Transfer - $(date) ===" | tee $LOG_FILE
+   
+   # Create archive
+   echo "Creating backup archive..." | tee -a $LOG_FILE
+   tar -czf $TEMP_ARCHIVE "$SOURCE_DIR" 2>&1 | tee -a $LOG_FILE
+   
+   if [ $? -eq 0 ]; then
+       REMOTE_FILE="sftp-backup-$TIMESTAMP.tar.gz"
+       
+       # Transfer via SFTP
+       echo "Transferring via SFTP..." | tee -a $LOG_FILE
+       
+       sftp -i $SSH_KEY $SFTP_USER@$SFTP_SERVER << EOF 2>&1 | tee -a $LOG_FILE
+   cd $REMOTE_DIR
+   put $TEMP_ARCHIVE $REMOTE_FILE
+   ls -l $REMOTE_FILE
+   quit
+   EOF
+       
+       if [ $? -eq 0 ]; then
+           echo "SFTP transfer completed successfully" | tee -a $LOG_FILE
+       else
+           echo "SFTP transfer failed" | tee -a $LOG_FILE
+           exit 1
+       fi
+   fi
+   
+   # Cleanup
+   rm -f $TEMP_ARCHIVE
+   
+   # chmod +x /usr/local/bin/sftp-backup.sh
+PART D: CONFIGURE CENTRALIZED BACKUP MANAGEMENT
+-----------------------------------------------
+
+1. Create centralized backup controller:
+   # vim /usr/local/bin/centralized-backup-controller.sh
+   
+   #!/bin/bash
+   CONFIG_FILE="/etc/network-backup.conf"
+   
+   # Create default configuration
+   if [ ! -f $CONFIG_FILE ]; then
+       cat > $CONFIG_FILE << 'EOF'
+   # Network Backup Configuration
+   
+   # NFS Backup Settings
+   NFS_ENABLED=true
+   NFS_SERVER=192.168.1.10
+   NFS_EXPORT=/srv/nfs-backups
+   NFS_SOURCES="/home /etc"
+   
+   # SSH Backup Settings
+   SSH_ENABLED=true
+   SSH_SERVER=192.168.1.10
+   SSH_PATH=/backup/ssh-backups
+   SSH_SOURCES="/opt /var/www"
+   
+   # FTP Backup Settings
+   FTP_ENABLED=false
+   FTP_SERVER=ftp.backup.com
+   FTP_USER=backup_user
+   FTP_PASS=backup_pass
+   FTP_DIR=/backups
+   FTP_SOURCES="/usr/local"
+   
+   # Backup Schedule
+   BACKUP_SCHEDULE="daily"
+   RETENTION_DAYS=30
+   NOTIFICATION_EMAIL="admin@example.com"
+   EOF
+   fi
+   
+   source $CONFIG_FILE
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/var/log/centralized-backup-$TIMESTAMP.log"
+   
+   echo "=== CENTRALIZED BACKUP CONTROLLER - $(date) ===" | tee $LOG_FILE
+   
+   BACKUP_SUCCESS=0
+   BACKUP_FAILURES=0
+   
+   # NFS Backups
+   if [ "$NFS_ENABLED" = "true" ]; then
+       echo "Starting NFS backups..." | tee -a $LOG_FILE
+       for source in $NFS_SOURCES; do
+           echo "Backing up $source via NFS..." | tee -a $LOG_FILE
+           if /usr/local/bin/nfs-backup-client.sh "$source" "full" 2>&1 | tee -a $LOG_FILE; then
+               BACKUP_SUCCESS=$((BACKUP_SUCCESS + 1))
+           else
+               BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+           fi
+       done
+   fi
+   
+   # SSH Backups
+   if [ "$SSH_ENABLED" = "true" ]; then
+       echo "Starting SSH backups..." | tee -a $LOG_FILE
+       for source in $SSH_SOURCES; do
+           echo "Backing up $source via SSH..." | tee -a $LOG_FILE
+           if /usr/local/bin/ssh-backup.sh "$SSH_SERVER" "$SSH_PATH" "$source" 2>&1 | tee -a $LOG_FILE; then
+               BACKUP_SUCCESS=$((BACKUP_SUCCESS + 1))
+           else
+               BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+           fi
+       done
+   fi
+   
+   # FTP Backups
+   if [ "$FTP_ENABLED" = "true" ]; then
+       echo "Starting FTP backups..." | tee -a $LOG_FILE
+       for source in $FTP_SOURCES; do
+           echo "Backing up $source via FTP..." | tee -a $LOG_FILE
+           if /usr/local/bin/ftp-backup.sh "$FTP_SERVER" "$FTP_USER" "$FTP_PASS" "$FTP_DIR" "$source" 2>&1 | tee -a $LOG_FILE; then
+               BACKUP_SUCCESS=$((BACKUP_SUCCESS + 1))
+           else
+               BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+           fi
+       done
+   fi
+   
+   # Summary
+   echo >> $LOG_FILE
+   echo "=== BACKUP SUMMARY ===" | tee -a $LOG_FILE
+   echo "Successful backups: $BACKUP_SUCCESS" | tee -a $LOG_FILE
+   echo "Failed backups: $BACKUP_FAILURES" | tee -a $LOG_FILE
+   echo "Total backups: $((BACKUP_SUCCESS + BACKUP_FAILURES))" | tee -a $LOG_FILE
+   
+   if [ $BACKUP_FAILURES -eq 0 ]; then
+       echo "All backups completed successfully" | tee -a $LOG_FILE
+       exit 0
+   else
+       echo "Some backups failed - check logs for details" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/centralized-backup-controller.sh
+
+2. Create backup status monitor:
+   # vim /usr/local/bin/network-backup-monitor.sh
+   
+   #!/bin/bash
+   REPORT_FILE="/var/log/network-backup-status-$(date +%Y%m%d).log"
+   
+   echo "=== NETWORK BACKUP STATUS REPORT - $(date) ===" > $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Check NFS backup status
+   echo "NFS BACKUP STATUS:" >> $REPORT_FILE
+   NFS_MOUNT="/mnt/nfs-backup"
+   if mount -t nfs 192.168.1.10:/srv/nfs-backups $NFS_MOUNT 2>/dev/null; then
+       echo "  NFS connectivity: OK" >> $REPORT_FILE
+       
+       # Check recent backups
+       RECENT_NFS=$(find $NFS_MOUNT -name "*.tar.gz" -mtime -1 | wc -l)
+       echo "  Recent backups (24h): $RECENT_NFS" >> $REPORT_FILE
+       
+       # Check storage usage
+       NFS_USAGE=$(df -h $NFS_MOUNT | tail -1 | awk '{print $5}')
+       echo "  Storage usage: $NFS_USAGE" >> $REPORT_FILE
+       
+       umount $NFS_MOUNT 2>/dev/null
+   else
+       echo "  NFS connectivity: FAILED" >> $REPORT_FILE
+   fi
+   echo >> $REPORT_FILE
+   
+   # Check SSH backup status
+   echo "SSH BACKUP STATUS:" >> $REPORT_FILE
+   if ssh -i /root/.ssh/backup_key -o ConnectTimeout=5 192.168.1.10 "echo 'SSH test'" >/dev/null 2>&1; then
+       echo "  SSH connectivity: OK" >> $REPORT_FILE
+       
+       # Check remote backup directory
+       REMOTE_BACKUPS=$(ssh -i /root/.ssh/backup_key 192.168.1.10 "find /backup/ssh-backups -name '*.tar.gz' -mtime -1 | wc -l" 2>/dev/null)
+       echo "  Recent SSH backups (24h): $REMOTE_BACKUPS" >> $REPORT_FILE
+       
+       # Check remote storage
+       REMOTE_USAGE=$(ssh -i /root/.ssh/backup_key 192.168.1.10 "df -h /backup | tail -1 | awk '{print \$5}'" 2>/dev/null)
+       echo "  Remote storage usage: $REMOTE_USAGE" >> $REPORT_FILE
+   else
+       echo "  SSH connectivity: FAILED" >> $REPORT_FILE
+   fi
+   echo >> $REPORT_FILE
+   
+   # Check recent backup activity
+   echo "RECENT BACKUP ACTIVITY:" >> $REPORT_FILE
+   find /var/log -name "*backup*.log" -mtime -1 -exec basename {} \; | sort | uniq >> $REPORT_FILE
+   echo >> $REPORT_FILE
+   
+   # Check backup failures
+   echo "BACKUP FAILURES (Last 24 hours):" >> $REPORT_FILE
+   grep -i "failed\|error" /var/log/*backup*.log 2>/dev/null | grep "$(date +%Y-%m-%d)" | tail -10 >> $REPORT_FILE
+   
+   echo "Network backup status report generated: $REPORT_FILE"
+   
+   # chmod +x /usr/local/bin/network-backup-monitor.sh
+
+3. Create backup verification system:
+   # vim /usr/local/bin/network-backup-verifier.sh
+   
+   #!/bin/bash
+   VERIFICATION_LOG="/var/log/backup-verification-$(date +%Y%m%d).log"
+   
+   echo "=== NETWORK BACKUP VERIFICATION - $(date) ===" | tee $VERIFICATION_LOG
+   
+   VERIFICATION_ERRORS=0
+   
+   # Verify NFS backups
+   echo "Verifying NFS backups..." | tee -a $VERIFICATION_LOG
+   NFS_MOUNT="/mnt/nfs-backup"
+   if mount -t nfs 192.168.1.10:/srv/nfs-backups $NFS_MOUNT 2>/dev/null; then
+       # Find recent backups
+       find $NFS_MOUNT -name "*.tar.gz" -mtime -7 | head -5 | while read backup_file; do
+           echo "Verifying: $(basename "$backup_file")" | tee -a $VERIFICATION_LOG
+           
+           if tar -tzf "$backup_file" >/dev/null 2>&1; then
+               echo "  Integrity: PASSED" | tee -a $VERIFICATION_LOG
+           else
+               echo "  Integrity: FAILED" | tee -a $VERIFICATION_LOG
+               VERIFICATION_ERRORS=$((VERIFICATION_ERRORS + 1))
+           fi
+           
+           # Check manifest
+           if [ -f "${backup_file}.manifest" ]; then
+               echo "  Manifest: FOUND" | tee -a $VERIFICATION_LOG
+           else
+               echo "  Manifest: MISSING" | tee -a $VERIFICATION_LOG
+           fi
+       done
+       
+       umount $NFS_MOUNT
+   else
+       echo "NFS mount failed for verification" | tee -a $VERIFICATION_LOG
+       VERIFICATION_ERRORS=$((VERIFICATION_ERRORS + 1))
+   fi
+   
+   # Verify SSH backups
+   echo "Verifying SSH backups..." | tee -a $VERIFICATION_LOG
+   if ssh -i /root/.ssh/backup_key 192.168.1.10 "echo 'SSH verification test'" >/dev/null 2>&1; then
+       # List and verify recent SSH backups
+       ssh -i /root/.ssh/backup_key 192.168.1.10 "find /backup/ssh-backups -name '*.tar.gz' -mtime -7" | head -3 | while read remote_backup; do
+           echo "Verifying remote: $(basename "$remote_backup")" | tee -a $VERIFICATION_LOG
+           
+           if ssh -i /root/.ssh/backup_key 192.168.1.10 "tar -tzf '$remote_backup'" >/dev/null 2>&1; then
+               echo "  Remote integrity: PASSED" | tee -a $VERIFICATION_LOG
+           else
+               echo "  Remote integrity: FAILED" | tee -a $VERIFICATION_LOG
+               VERIFICATION_ERRORS=$((VERIFICATION_ERRORS + 1))
+           fi
+       done
+   else
+       echo "SSH connection failed for verification" | tee -a $VERIFICATION_LOG
+       VERIFICATION_ERRORS=$((VERIFICATION_ERRORS + 1))
+   fi
+   
+   # Summary
+   echo >> $VERIFICATION_LOG
+   if [ $VERIFICATION_ERRORS -eq 0 ]; then
+       echo "All backup verifications PASSED" | tee -a $VERIFICATION_LOG
+   else
+       echo "Backup verification found $VERIFICATION_ERRORS errors" | tee -a $VERIFICATION_LOG
+   fi
+   
+   # chmod +x /usr/local/bin/network-backup-verifier.sh
+
+PART E: CONFIGURE BACKUP SYNCHRONIZATION
+-----------------------------------------
+
+1. Create multi-site backup synchronization:
+   # vim /usr/local/bin/backup-sync-manager.sh
+   
+   #!/bin/bash
+   PRIMARY_SITE="192.168.1.10"
+   SECONDARY_SITE="192.168.2.10"
+   SYNC_PATH="/backup/sync"
+   SSH_KEY="/root/.ssh/backup_key"
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/var/log/backup-sync-$TIMESTAMP.log"
+   
+   echo "=== BACKUP SYNCHRONIZATION MANAGER - $(date) ===" | tee $LOG_FILE
+   
+   # Sync from primary to secondary site
+   echo "Synchronizing backups from primary to secondary site..." | tee -a $LOG_FILE
+   
+   rsync -avz \
+         --progress \
+         --delete \
+         --backup \
+         --backup-dir="$SYNC_PATH/deleted-$(date +%Y%m%d)" \
+         -e "ssh -i $SSH_KEY" \
+         "$PRIMARY_SITE:/backup/" \
+         "$SECONDARY_SITE:/backup/mirror/" \
+         2>&1 | tee -a $LOG_FILE
+   
+   if [ $? -eq 0 ]; then
+       echo "Backup synchronization completed successfully" | tee -a $LOG_FILE
+       
+       # Verify synchronization
+       echo "Verifying synchronization..." | tee -a $LOG_FILE
+       PRIMARY_COUNT=$(ssh -i $SSH_KEY $PRIMARY_SITE "find /backup -name '*.tar.gz' | wc -l")
+       SECONDARY_COUNT=$(ssh -i $SSH_KEY $SECONDARY_SITE "find /backup/mirror -name '*.tar.gz' | wc -l")
+       
+       echo "Primary site backups: $PRIMARY_COUNT" | tee -a $LOG_FILE
+       echo "Secondary site backups: $SECONDARY_COUNT" | tee -a $LOG_FILE
+       
+       if [ $PRIMARY_COUNT -eq $SECONDARY_COUNT ]; then
+           echo "Synchronization verification: PASSED" | tee -a $LOG_FILE
+       else
+           echo "Synchronization verification: WARNING (count mismatch)" | tee -a $LOG_FILE
+       fi
+   else
+       echo "Backup synchronization failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/backup-sync-manager.sh
+
+2. Create backup rotation manager:
+   # vim /usr/local/bin/network-backup-rotation.sh
+   
+   #!/bin/bash
+   source /etc/network-backup.conf
+   
+   ROTATION_LOG="/var/log/backup-rotation-$(date +%Y%m%d).log"
+   
+   echo "=== NETWORK BACKUP ROTATION - $(date) ===" | tee $ROTATION_LOG
+   
+   # Rotate NFS backups
+   if [ "$NFS_ENABLED" = "true" ]; then
+       echo "Rotating NFS backups..." | tee -a $ROTATION_LOG
+       NFS_MOUNT="/mnt/nfs-backup"
+       
+       if mount -t nfs $NFS_SERVER:$NFS_EXPORT $NFS_MOUNT 2>/dev/null; then
+           # Remove old backups
+           find $NFS_MOUNT -name "*.tar.gz" -mtime +$RETENTION_DAYS -type f | while read old_backup; do
+               echo "Removing old NFS backup: $(basename "$old_backup")" | tee -a $ROTATION_LOG
+               rm -f "$old_backup" "${old_backup}.manifest"
+           done
+           
+           umount $NFS_MOUNT
+       fi
+   fi
+   
+   # Rotate SSH backups
+   if [ "$SSH_ENABLED" = "true" ]; then
+       echo "Rotating SSH backups..." | tee -a $ROTATION_LOG
+       
+       ssh -i /root/.ssh/backup_key $SSH_SERVER "find $SSH_PATH -name '*.tar.gz' -mtime +$RETENTION_DAYS -type f" | while read old_backup; do
+           echo "Removing old SSH backup: $(basename "$old_backup")" | tee -a $ROTATION_LOG
+           ssh -i /root/.ssh/backup_key $SSH_SERVER "rm -f '$old_backup' '${old_backup}.manifest'"
+       done
+   fi
+   
+   echo "Backup rotation completed" | tee -a $ROTATION_LOG
+   
+   # chmod +x /usr/local/bin/network-backup-rotation.sh
+
+PART F: CONFIGURE BACKUP AUTOMATION
+------------------------------------
+
+1. Create network backup scheduler:
+   # vim /etc/cron.d/network-backups
+   
+   # NFS backups - every 6 hours
+   0 */6 * * * root /usr/local/bin/nfs-backup-client.sh /home full
+   30 */6 * * * root /usr/local/bin/nfs-backup-client.sh /etc incremental
+   
+   # SSH backups - daily at 2 AM
+   0 2 * * * root /usr/local/bin/ssh-backup.sh 192.168.1.10 /backup/ssh-backups /opt
+   30 2 * * * root /usr/local/bin/ssh-incremental-backup.sh 192.168.1.10 /backup/ssh-backups /var/www
+   
+   # Centralized backup controller - daily at 3 AM
+   0 3 * * * root /usr/local/bin/centralized-backup-controller.sh
+   
+   # Backup monitoring - every 4 hours
+   0 */4 * * * root /usr/local/bin/network-backup-monitor.sh
+   
+   # Backup verification - daily at 6 AM
+   0 6 * * * root /usr/local/bin/network-backup-verifier.sh
+   
+   # Backup synchronization - daily at 4 AM
+   0 4 * * * root /usr/local/bin/backup-sync-manager.sh
+   
+   # Backup rotation - weekly on Sunday at 5 AM
+   0 5 * * 0 root /usr/local/bin/network-backup-rotation.sh
+
+2. Create backup notification system:
+   # vim /usr/local/bin/backup-notification.sh
+   
+   #!/bin/bash
+   NOTIFICATION_TYPE=$1
+   MESSAGE=$2
+   EMAIL_RECIPIENT="admin@example.com"
+   
+   case $NOTIFICATION_TYPE in
+       "success")
+           SUBJECT="Network Backup Success - $(hostname)"
+           ;;
+       "failure")
+           SUBJECT="Network Backup Failure - $(hostname)"
+           ;;
+       "warning")
+           SUBJECT="Network Backup Warning - $(hostname)"
+           ;;
+       *)
+           echo "Invalid notification type"
+           exit 1
+           ;;
+   esac
+   
+   # Send email notification
+   if command -v mail >/dev/null 2>&1; then
+       echo -e "Network Backup Notification\n\nTimestamp: $(date)\nHost: $(hostname)\nType: $NOTIFICATION_TYPE\n\nMessage:\n$MESSAGE" | \
+       mail -s "$SUBJECT" "$EMAIL_RECIPIENT"
+   fi
+   
+   # Log notification
+   echo "$(date): $NOTIFICATION_TYPE - $MESSAGE" >> /var/log/backup-notifications.log
+   
+   # chmod +x /usr/local/bin/backup-notification.sh
+
+PART G: TESTING AND VALIDATION
+-------------------------------
+
+1. Test NFS backup operations:
+   # mkdir -p /test-data/nfs-test
+   # echo "NFS test data" > /test-data/nfs-test/test.txt
+   # /usr/local/bin/nfs-backup-client.sh /test-data/nfs-test full
+   # /usr/local/bin/nfs-backup-client.sh /test-data/nfs-test incremental
+
+2. Test SSH backup operations:
+   # mkdir -p /test-data/ssh-test
+   # echo "SSH test data" > /test-data/ssh-test/test.txt
+   # /usr/local/bin/ssh-backup.sh 192.168.1.10 /backup/ssh-backups /test-data/ssh-test
+   # /usr/local/bin/ssh-incremental-backup.sh 192.168.1.10 /backup/ssh-backups /test-data/ssh-test
+
+3. Test FTP backup operations:
+   # mkdir -p /test-data/ftp-test
+   # echo "FTP test data" > /test-data/ftp-test/test.txt
+   # /usr/local/bin/ftp-backup.sh ftp.example.com testuser testpass /backups /test-data/ftp-test
+
+4. Test centralized backup controller:
+   # /usr/local/bin/centralized-backup-controller.sh
+
+5. Test monitoring and verification:
+   # /usr/local/bin/network-backup-monitor.sh
+   # /usr/local/bin/network-backup-verifier.sh
+
+6. Test backup synchronization:
+   # /usr/local/bin/backup-sync-manager.sh
+
+7. Verify backup integrity:
+   # mount -t nfs 192.168.1.10:/srv/nfs-backups /mnt/nfs-backup
+   # tar -tzf /mnt/nfs-backup/full/full-backup-*.tar.gz | head -10
+   # umount /mnt/nfs-backup
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# showmount -e 192.168.1.10
+# ssh -i /root/.ssh/backup_key 192.168.1.10 "ls -la /backup"
+# lftp -c "open ftp://user:pass@server; ls"
+# tail -f /var/log/*backup*.log
+# df -h /mnt/nfs-backup
+# netstat -an | grep :21
+
+EXPECTED RESULTS:
+-----------------
+- NFS-based backup storage operational
+- SSH remote backups working securely
+- FTP backup transfers functional
+- Centralized backup management active
+- Backup synchronization between sites
+- Automated scheduling and monitoring
+- Backup verification and rotation working
+
+VALIDATION CHECKLIST:
+---------------------
+□ NFS backup server configured
+□ SSH key authentication working
+□ FTP backup transfers operational
+□ Centralized backup controller functional
+□ Backup monitoring and verification active
+□ Multi-site synchronization working
+□ Automated scheduling configured
+□ Backup rotation policies applied
+
+CLEANUP:
+--------
+# rm /etc/cron.d/network-backups
+# umount /mnt/nfs-backup 2>/dev/null
+# rm -rf /srv/nfs-backups
+# rm /usr/local/bin/nfs-backup-client.sh
+# rm /usr/local/bin/ssh-backup.sh
+# rm /usr/local/bin/ssh-incremental-backup.sh
+# rm /usr/local/bin/ftp-backup.sh
+# rm /usr/local/bin/sftp-backup.sh
+# rm /usr/local/bin/centralized-backup-controller.sh
+# rm /usr/local/bin/network-backup-*.sh
+# rm /usr/local/bin/backup-sync-manager.sh
+# rm /usr/local/bin/backup-notification.sh
+# rm /etc/network-backup.conf

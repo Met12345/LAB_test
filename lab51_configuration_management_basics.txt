@@ -1,0 +1,1379 @@
+RHCE RH254 HANDS-ON LAB: CONFIGURATION MANAGEMENT BASICS
+========================================================
+
+LAB OBJECTIVE:
+Implement basic configuration management using native Linux tools, version control, templates, and automated configuration deployment for consistent system management
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of system configuration files
+- Basic knowledge of version control concepts
+- Familiarity with templating and scripting
+
+LAB SCENARIO:
+Deploy configuration management system using native tools to maintain consistent configurations across systems, track changes, and automate deployment processes.
+
+EQUIPMENT NEEDED:
+- RHEL system (192.168.1.20)
+- Git repository for configuration storage
+- Template files and configuration examples
+
+LAB TASKS:
+
+PART A: CONFIGURATION MANAGEMENT INFRASTRUCTURE
+------------------------------------------------
+
+1. Create configuration management directory structure:
+   # mkdir -p /opt/config-mgmt/{templates,configs,scripts,backups,logs}
+   # mkdir -p /opt/config-mgmt/environments/{dev,test,prod}
+   # mkdir -p /opt/config-mgmt/roles/{web,db,mail,dns}
+   # chmod 755 /opt/config-mgmt
+   # chmod 700 /opt/config-mgmt/scripts
+
+2. Initialize Git repository for configuration tracking:
+   # cd /opt/config-mgmt
+   # git init
+   # git config user.name "Config Manager"
+   # git config user.email "config@example.com"
+   
+   # Create .gitignore
+   # vim .gitignore
+   *.log
+   *.tmp
+   .DS_Store
+   backups/
+   
+   # git add .gitignore
+   # git commit -m "Initial configuration management setup"
+
+3. Create configuration management framework:
+   # vim /opt/config-mgmt/scripts/config-framework.sh
+   
+   #!/bin/bash
+   #
+   # Configuration Management Framework
+   #
+   
+   # Framework configuration
+   readonly CONFIG_ROOT="/opt/config-mgmt"
+   readonly TEMPLATES_DIR="$CONFIG_ROOT/templates"
+   readonly CONFIGS_DIR="$CONFIG_ROOT/configs"
+   readonly BACKUPS_DIR="$CONFIG_ROOT/backups"
+   readonly LOG_FILE="$CONFIG_ROOT/logs/config-mgmt.log"
+   
+   # Environment and role detection
+   ENVIRONMENT="${ENVIRONMENT:-prod}"
+   ROLE="${ROLE:-generic}"
+   HOSTNAME=$(hostname -s)
+   
+   # Logging function
+   log_message() {
+       local level="$1"
+       local message="$2"
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] $message" | tee -a "$LOG_FILE"
+   }
+   
+   # Backup existing configuration
+   backup_config() {
+       local config_file="$1"
+       local backup_name="${2:-$(basename "$config_file")}"
+       
+       if [ -f "$config_file" ]; then
+           local timestamp=$(date +%Y%m%d_%H%M%S)
+           local backup_file="$BACKUPS_DIR/${backup_name}.${timestamp}.bak"
+           
+           cp "$config_file" "$backup_file"
+           log_message "INFO" "Backed up $config_file to $backup_file"
+           echo "$backup_file"
+       else
+           log_message "WARN" "Config file not found for backup: $config_file"
+           return 1
+       fi
+   }
+   
+   # Template processing
+   process_template() {
+       local template_file="$1"
+       local output_file="$2"
+       local variables_file="${3:-}"
+       
+       if [ ! -f "$template_file" ]; then
+           log_message "ERROR" "Template file not found: $template_file"
+           return 1
+       fi
+       
+       log_message "INFO" "Processing template: $template_file -> $output_file"
+       
+       # Load variables if provided
+       if [ -n "$variables_file" ] && [ -f "$variables_file" ]; then
+           source "$variables_file"
+       fi
+       
+       # Process template with environment variable substitution
+       envsubst < "$template_file" > "$output_file"
+       
+       if [ $? -eq 0 ]; then
+           log_message "INFO" "Template processed successfully"
+           return 0
+       else
+           log_message "ERROR" "Template processing failed"
+           return 1
+       fi
+   }
+   
+   # Configuration validation
+   validate_config() {
+       local config_file="$1"
+       local config_type="$2"
+       
+       case "$config_type" in
+           "apache")
+               httpd -t -f "$config_file" >/dev/null 2>&1
+               ;;
+           "nginx")
+               nginx -t -c "$config_file" >/dev/null 2>&1
+               ;;
+           "ssh")
+               sshd -t -f "$config_file" >/dev/null 2>&1
+               ;;
+           "json")
+               python3 -m json.tool "$config_file" >/dev/null 2>&1
+               ;;
+           *)
+               # Basic syntax check for shell scripts
+               if [[ "$config_file" == *.sh ]]; then
+                   bash -n "$config_file" >/dev/null 2>&1
+               else
+                   return 0  # No validation available
+               fi
+               ;;
+       esac
+       
+       local result=$?
+       if [ $result -eq 0 ]; then
+           log_message "INFO" "Configuration validation passed: $config_file"
+       else
+           log_message "ERROR" "Configuration validation failed: $config_file"
+       fi
+       
+       return $result
+   }
+   
+   # Deploy configuration
+   deploy_config() {
+       local source_file="$1"
+       local target_file="$2"
+       local service_name="${3:-}"
+       local config_type="${4:-}"
+       
+       log_message "INFO" "Deploying configuration: $source_file -> $target_file"
+       
+       # Backup existing configuration
+       backup_config "$target_file"
+       
+       # Validate configuration before deployment
+       if [ -n "$config_type" ]; then
+           if ! validate_config "$source_file" "$config_type"; then
+               log_message "ERROR" "Configuration validation failed, deployment aborted"
+               return 1
+           fi
+       fi
+       
+       # Deploy configuration
+       cp "$source_file" "$target_file"
+       
+       if [ $? -eq 0 ]; then
+           log_message "INFO" "Configuration deployed successfully"
+           
+           # Restart service if specified
+           if [ -n "$service_name" ]; then
+               systemctl restart "$service_name"
+               if [ $? -eq 0 ]; then
+                   log_message "INFO" "Service $service_name restarted successfully"
+               else
+                   log_message "ERROR" "Failed to restart service $service_name"
+                   return 1
+               fi
+           fi
+           
+           return 0
+       else
+           log_message "ERROR" "Configuration deployment failed"
+           return 1
+       fi
+   }
+
+4. Create configuration variables system:
+   # vim /opt/config-mgmt/scripts/config-variables.sh
+   
+   #!/bin/bash
+   #
+   # Configuration Variables Management
+   #
+   
+   VARIABLES_DIR="/opt/config-mgmt/environments"
+   
+   # Load environment-specific variables
+   load_environment_vars() {
+       local environment="$1"
+       local env_file="$VARIABLES_DIR/$environment/variables.conf"
+       
+       if [ -f "$env_file" ]; then
+           source "$env_file"
+           log_message "INFO" "Loaded environment variables for: $environment"
+       else
+           log_message "WARN" "Environment variables file not found: $env_file"
+       fi
+   }
+   
+   # Load role-specific variables
+   load_role_vars() {
+       local role="$1"
+       local role_file="$CONFIG_ROOT/roles/$role/variables.conf"
+       
+       if [ -f "$role_file" ]; then
+           source "$role_file"
+           log_message "INFO" "Loaded role variables for: $role"
+       else
+           log_message "WARN" "Role variables file not found: $role_file"
+       fi
+   }
+   
+   # Load host-specific variables
+   load_host_vars() {
+       local hostname="$1"
+       local host_file="$VARIABLES_DIR/hosts/$hostname.conf"
+       
+       if [ -f "$host_file" ]; then
+           source "$host_file"
+           log_message "INFO" "Loaded host variables for: $hostname"
+       else
+           log_message "DEBUG" "No host-specific variables for: $hostname"
+       fi
+   }
+   
+   # Generate variables summary
+   generate_vars_summary() {
+       local output_file="$1"
+       
+       cat > "$output_file" << EOF
+   # Configuration Variables Summary
+   # Generated: $(date)
+   
+   # Environment: $ENVIRONMENT
+   # Role: $ROLE
+   # Hostname: $HOSTNAME
+   
+   # System Variables
+   export HOSTNAME="$HOSTNAME"
+   export ENVIRONMENT="$ENVIRONMENT"
+   export ROLE="$ROLE"
+   export CONFIG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+   
+   EOF
+       
+       # Add environment variables
+       if [ -f "$VARIABLES_DIR/$ENVIRONMENT/variables.conf" ]; then
+           echo "# Environment Variables" >> "$output_file"
+           cat "$VARIABLES_DIR/$ENVIRONMENT/variables.conf" >> "$output_file"
+           echo >> "$output_file"
+       fi
+       
+       # Add role variables
+       if [ -f "$CONFIG_ROOT/roles/$ROLE/variables.conf" ]; then
+           echo "# Role Variables" >> "$output_file"
+           cat "$CONFIG_ROOT/roles/$ROLE/variables.conf" >> "$output_file"
+           echo >> "$output_file"
+       fi
+       
+       log_message "INFO" "Variables summary generated: $output_file"
+   }
+
+PART B: TEMPLATE SYSTEM
+-----------------------
+
+1. Create template engine:
+   # vim /opt/config-mgmt/scripts/template-engine.sh
+   
+   #!/bin/bash
+   #
+   # Simple Template Engine
+   #
+   
+   # Advanced template processing with conditionals
+   process_advanced_template() {
+       local template_file="$1"
+       local output_file="$2"
+       local temp_file=$(mktemp)
+       
+       # Process conditionals and loops
+       awk '
+       BEGIN { in_if = 0; if_condition = 0 }
+       /^#if / {
+           condition = substr($0, 5)
+           if_condition = system("test " condition) == 0
+           in_if = 1
+           next
+       }
+       /^#endif/ {
+           in_if = 0
+           next
+       }
+       /^#else/ {
+           if (in_if) if_condition = !if_condition
+           next
+       }
+       {
+           if (!in_if || if_condition) print
+       }
+       ' "$template_file" > "$temp_file"
+       
+       # Process variable substitution
+       envsubst < "$temp_file" > "$output_file"
+       
+       rm -f "$temp_file"
+   }
+   
+   # Template validation
+   validate_template() {
+       local template_file="$1"
+       
+       # Check for undefined variables
+       local undefined_vars=$(grep -o '\$[A-Z_][A-Z0-9_]*' "$template_file" | sort -u)
+       local missing_vars=()
+       
+       for var in $undefined_vars; do
+           var_name=${var#$}
+           if [ -z "${!var_name}" ]; then
+               missing_vars+=("$var_name")
+           fi
+       done
+       
+       if [ ${#missing_vars[@]} -gt 0 ]; then
+           log_message "WARN" "Template has undefined variables: ${missing_vars[*]}"
+           return 1
+       fi
+       
+       return 0
+   }
+
+2. Create configuration templates:
+   # vim /opt/config-mgmt/templates/httpd.conf.template
+   
+   # Apache HTTP Server Configuration Template
+   # Generated: $(date)
+   # Environment: $ENVIRONMENT
+   # Role: $ROLE
+   
+   ServerRoot "/etc/httpd"
+   Listen ${HTTP_PORT:-80}
+   
+   #if [ "$ENVIRONMENT" = "prod" ]
+   ServerTokens Prod
+   ServerSignature Off
+   #else
+   ServerTokens Full
+   ServerSignature On
+   #endif
+   
+   User apache
+   Group apache
+   
+   ServerAdmin ${ADMIN_EMAIL:-admin@example.com}
+   ServerName ${SERVER_NAME:-$(hostname -f)}
+   
+   DocumentRoot "${DOCUMENT_ROOT:-/var/www/html}"
+   
+   <Directory "${DOCUMENT_ROOT:-/var/www/html}">
+       Options ${DIRECTORY_OPTIONS:-Indexes FollowSymLinks}
+       AllowOverride ${ALLOW_OVERRIDE:-None}
+       Require all granted
+   </Directory>
+   
+   ErrorLog logs/error_log
+   LogLevel ${LOG_LEVEL:-warn}
+   
+   LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+   CustomLog logs/access_log combined
+   
+   #if [ "$ENABLE_SSL" = "true" ]
+   LoadModule ssl_module modules/mod_ssl.so
+   Listen 443 ssl
+   
+   <VirtualHost *:443>
+       ServerName ${SERVER_NAME:-$(hostname -f)}
+       DocumentRoot ${DOCUMENT_ROOT:-/var/www/html}
+       SSLEngine on
+       SSLCertificateFile ${SSL_CERT:-/etc/pki/tls/certs/server.crt}
+       SSLCertificateKeyFile ${SSL_KEY:-/etc/pki/tls/private/server.key}
+   </VirtualHost>
+   #endif
+
+3. Create SSH configuration template:
+   # vim /opt/config-mgmt/templates/sshd_config.template
+   
+   # SSH Server Configuration Template
+   # Generated: $(date)
+   # Environment: $ENVIRONMENT
+   
+   Port ${SSH_PORT:-22}
+   Protocol 2
+   
+   #if [ "$ENVIRONMENT" = "prod" ]
+   PermitRootLogin no
+   PasswordAuthentication no
+   ChallengeResponseAuthentication no
+   #else
+   PermitRootLogin yes
+   PasswordAuthentication yes
+   #endif
+   
+   PubkeyAuthentication yes
+   AuthorizedKeysFile .ssh/authorized_keys
+   
+   UsePAM yes
+   X11Forwarding ${X11_FORWARDING:-no}
+   PrintMotd no
+   
+   AcceptEnv LANG LC_*
+   
+   Subsystem sftp ${SFTP_SERVER:-/usr/libexec/openssh/sftp-server}
+   
+   #if [ -n "$ALLOWED_USERS" ]
+   AllowUsers ${ALLOWED_USERS}
+   #endif
+   
+   #if [ -n "$ALLOWED_GROUPS" ]
+   AllowGroups ${ALLOWED_GROUPS}
+   #endif
+   
+   ClientAliveInterval ${CLIENT_ALIVE_INTERVAL:-300}
+   ClientAliveCountMax ${CLIENT_ALIVE_COUNT:-3}
+   
+   MaxAuthTries ${MAX_AUTH_TRIES:-3}
+   MaxSessions ${MAX_SESSIONS:-10}
+
+4. Create environment-specific variables:
+   # vim /opt/config-mgmt/environments/dev/variables.conf
+   
+   # Development Environment Variables
+   export ENVIRONMENT="dev"
+   export HTTP_PORT="8080"
+   export ADMIN_EMAIL="dev-admin@example.com"
+   export LOG_LEVEL="debug"
+   export ENABLE_SSL="false"
+   export SSH_PORT="2222"
+   export X11_FORWARDING="yes"
+   export CLIENT_ALIVE_INTERVAL="600"
+   
+   # vim /opt/config-mgmt/environments/prod/variables.conf
+   
+   # Production Environment Variables
+   export ENVIRONMENT="prod"
+   export HTTP_PORT="80"
+   export ADMIN_EMAIL="admin@example.com"
+   export LOG_LEVEL="warn"
+   export ENABLE_SSL="true"
+   export SSL_CERT="/etc/pki/tls/certs/production.crt"
+   export SSL_KEY="/etc/pki/tls/private/production.key"
+   export SSH_PORT="22"
+   export X11_FORWARDING="no"
+   export ALLOWED_GROUPS="wheel admin"
+   export MAX_AUTH_TRIES="3"
+
+PART C: CONFIGURATION DEPLOYMENT SYSTEM
+----------------------------------------
+
+1. Create deployment orchestrator:
+   # vim /opt/config-mgmt/scripts/deploy-configs.sh
+   
+   #!/bin/bash
+   #
+   # Configuration Deployment Orchestrator
+   #
+   
+   source /opt/config-mgmt/scripts/config-framework.sh
+   source /opt/config-mgmt/scripts/config-variables.sh
+   source /opt/config-mgmt/scripts/template-engine.sh
+   
+   # Deployment configuration
+   DEPLOYMENT_PLAN="/opt/config-mgmt/configs/deployment-plan.conf"
+   
+   # Load deployment plan
+   load_deployment_plan() {
+       if [ -f "$DEPLOYMENT_PLAN" ]; then
+           source "$DEPLOYMENT_PLAN"
+           log_message "INFO" "Loaded deployment plan"
+       else
+           log_message "ERROR" "Deployment plan not found: $DEPLOYMENT_PLAN"
+           return 1
+       fi
+   }
+   
+   # Deploy single configuration
+   deploy_single_config() {
+       local config_name="$1"
+       local template_file="$TEMPLATES_DIR/${config_name}.template"
+       local temp_config="/tmp/${config_name}.tmp"
+       
+       # Load variables
+       load_environment_vars "$ENVIRONMENT"
+       load_role_vars "$ROLE"
+       load_host_vars "$HOSTNAME"
+       
+       # Process template
+       if process_advanced_template "$template_file" "$temp_config"; then
+           # Get deployment target from plan
+           local target_file=$(eval echo "\$${config_name^^}_TARGET")
+           local service_name=$(eval echo "\$${config_name^^}_SERVICE")
+           local config_type=$(eval echo "\$${config_name^^}_TYPE")
+           
+           if [ -n "$target_file" ]; then
+               deploy_config "$temp_config" "$target_file" "$service_name" "$config_type"
+           else
+               log_message "ERROR" "No target file defined for $config_name"
+               return 1
+           fi
+       else
+           log_message "ERROR" "Template processing failed for $config_name"
+           return 1
+       fi
+       
+       rm -f "$temp_config"
+   }
+   
+   # Deploy all configurations
+   deploy_all_configs() {
+       local configs_to_deploy="${1:-$DEFAULT_CONFIGS}"
+       local failed_deployments=0
+       
+       log_message "INFO" "Starting deployment for environment: $ENVIRONMENT, role: $ROLE"
+       
+       for config in $configs_to_deploy; do
+           log_message "INFO" "Deploying configuration: $config"
+           
+           if deploy_single_config "$config"; then
+               log_message "INFO" "Successfully deployed: $config"
+           else
+               log_message "ERROR" "Failed to deploy: $config"
+               failed_deployments=$((failed_deployments + 1))
+           fi
+       done
+       
+       if [ $failed_deployments -eq 0 ]; then
+           log_message "INFO" "All configurations deployed successfully"
+           return 0
+       else
+           log_message "ERROR" "$failed_deployments configuration(s) failed to deploy"
+           return 1
+       fi
+   }
+   
+   # Rollback configuration
+   rollback_config() {
+       local config_name="$1"
+       local target_file=$(eval echo "\$${config_name^^}_TARGET")
+       local service_name=$(eval echo "\$${config_name^^}_SERVICE")
+       
+       if [ -n "$target_file" ]; then
+           # Find latest backup
+           local latest_backup=$(find "$BACKUPS_DIR" -name "$(basename "$target_file").*.bak" -type f | sort | tail -1)
+           
+           if [ -n "$latest_backup" ]; then
+               log_message "INFO" "Rolling back $config_name using $latest_backup"
+               cp "$latest_backup" "$target_file"
+               
+               if [ -n "$service_name" ]; then
+                   systemctl restart "$service_name"
+               fi
+               
+               log_message "INFO" "Rollback completed for $config_name"
+           else
+               log_message "ERROR" "No backup found for rollback: $config_name"
+               return 1
+           fi
+       else
+           log_message "ERROR" "No target file defined for $config_name"
+           return 1
+       fi
+   }
+   
+   # Main deployment function
+   main() {
+       local action="${1:-deploy}"
+       local target="${2:-all}"
+       
+       # Load deployment plan
+       load_deployment_plan || exit 1
+       
+       case "$action" in
+           "deploy")
+               if [ "$target" = "all" ]; then
+                   deploy_all_configs
+               else
+                   deploy_single_config "$target"
+               fi
+               ;;
+           "rollback")
+               rollback_config "$target"
+               ;;
+           "validate")
+               validate_template "$TEMPLATES_DIR/${target}.template"
+               ;;
+           *)
+               echo "Usage: $0 {deploy|rollback|validate} [config_name|all]"
+               exit 1
+               ;;
+       esac
+   }
+   
+   main "$@"
+2. Create deployment plan configuration:
+   # vim /opt/config-mgmt/configs/deployment-plan.conf
+   
+   # Configuration Deployment Plan
+   
+   # Default configurations to deploy
+   DEFAULT_CONFIGS="httpd sshd rsyslog"
+   
+   # Apache HTTP Server
+   HTTPD_TARGET="/etc/httpd/conf/httpd.conf"
+   HTTPD_SERVICE="httpd"
+   HTTPD_TYPE="apache"
+   
+   # SSH Server
+   SSHD_TARGET="/etc/ssh/sshd_config"
+   SSHD_SERVICE="sshd"
+   SSHD_TYPE="ssh"
+   
+   # Rsyslog
+   RSYSLOG_TARGET="/etc/rsyslog.conf"
+   RSYSLOG_SERVICE="rsyslog"
+   RSYSLOG_TYPE=""
+   
+   # Firewall
+   FIREWALL_TARGET="/etc/firewalld/firewalld.conf"
+   FIREWALL_SERVICE="firewalld"
+   FIREWALL_TYPE=""
+
+PART D: VERSION CONTROL INTEGRATION
+------------------------------------
+
+1. Create Git integration for configurations:
+   # vim /opt/config-mgmt/scripts/config-version-control.sh
+   
+   #!/bin/bash
+   #
+   # Configuration Version Control Integration
+   #
+   
+   CONFIG_REPO="/opt/config-mgmt"
+   
+   # Initialize or update repository
+   init_repo() {
+       cd "$CONFIG_REPO"
+       
+       if [ ! -d ".git" ]; then
+           git init
+           git config user.name "Config Manager"
+           git config user.email "config@example.com"
+           log_message "INFO" "Initialized Git repository"
+       fi
+       
+       # Add all configuration files
+       git add templates/ environments/ roles/ configs/
+       
+       if git diff --cached --quiet; then
+           log_message "INFO" "No changes to commit"
+       else
+           git commit -m "Configuration update - $(date)"
+           log_message "INFO" "Committed configuration changes"
+       fi
+   }
+   
+   # Create configuration branch
+   create_config_branch() {
+       local branch_name="$1"
+       
+       cd "$CONFIG_REPO"
+       
+       if git branch | grep -q "$branch_name"; then
+           log_message "INFO" "Branch already exists: $branch_name"
+           git checkout "$branch_name"
+       else
+           git checkout -b "$branch_name"
+           log_message "INFO" "Created new branch: $branch_name"
+       fi
+   }
+   
+   # Tag configuration version
+   tag_config_version() {
+       local version_tag="$1"
+       local description="$2"
+       
+       cd "$CONFIG_REPO"
+       
+       git tag -a "$version_tag" -m "$description"
+       log_message "INFO" "Tagged version: $version_tag"
+   }
+   
+   # Show configuration history
+   show_config_history() {
+       local config_file="$1"
+       local limit="${2:-10}"
+       
+       cd "$CONFIG_REPO"
+       
+       if [ -n "$config_file" ]; then
+           git log --oneline -n "$limit" -- "$config_file"
+       else
+           git log --oneline -n "$limit"
+       fi
+   }
+   
+   # Compare configurations
+   compare_configs() {
+       local version1="$1"
+       local version2="${2:-HEAD}"
+       local config_file="$3"
+       
+       cd "$CONFIG_REPO"
+       
+       if [ -n "$config_file" ]; then
+           git diff "$version1".."$version2" -- "$config_file"
+       else
+           git diff "$version1".."$version2"
+       fi
+   }
+   
+   # Restore configuration from version
+   restore_from_version() {
+       local version_tag="$1"
+       local config_file="$2"
+       
+       cd "$CONFIG_REPO"
+       
+       if [ -n "$config_file" ]; then
+           git checkout "$version_tag" -- "$config_file"
+           log_message "INFO" "Restored $config_file from version $version_tag"
+       else
+           git checkout "$version_tag"
+           log_message "INFO" "Restored all configurations from version $version_tag"
+       fi
+   }
+   
+   main() {
+       local action="$1"
+       shift
+       
+       case "$action" in
+           "init")
+               init_repo
+               ;;
+           "branch")
+               create_config_branch "$1"
+               ;;
+           "tag")
+               tag_config_version "$1" "$2"
+               ;;
+           "history")
+               show_config_history "$1" "$2"
+               ;;
+           "compare")
+               compare_configs "$1" "$2" "$3"
+               ;;
+           "restore")
+               restore_from_version "$1" "$2"
+               ;;
+           *)
+               echo "Usage: $0 {init|branch|tag|history|compare|restore} [options]"
+               exit 1
+               ;;
+       esac
+   }
+   
+   main "$@"
+
+2. Create configuration validation system:
+   # vim /opt/config-mgmt/scripts/config-validator.sh
+   
+   #!/bin/bash
+   #
+   # Configuration Validation System
+   #
+   
+   VALIDATION_RULES_DIR="/opt/config-mgmt/validation-rules"
+   VALIDATION_LOG="/opt/config-mgmt/logs/validation.log"
+   
+   # Create validation rules directory
+   mkdir -p "$VALIDATION_RULES_DIR"
+   
+   log_validation() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" >> "$VALIDATION_LOG"
+   }
+   
+   # Generic validation function
+   validate_config_file() {
+       local config_file="$1"
+       local config_type="$2"
+       local validation_rules="$VALIDATION_RULES_DIR/${config_type}.rules"
+       
+       log_validation "INFO" "Validating $config_file as $config_type"
+       
+       local validation_errors=0
+       
+       # Load validation rules if they exist
+       if [ -f "$validation_rules" ]; then
+           while IFS='|' read -r rule_type pattern message; do
+               case "$rule_type" in
+                   "REQUIRED")
+                       if ! grep -q "$pattern" "$config_file"; then
+                           log_validation "ERROR" "$message"
+                           validation_errors=$((validation_errors + 1))
+                       fi
+                       ;;
+                   "FORBIDDEN")
+                       if grep -q "$pattern" "$config_file"; then
+                           log_validation "ERROR" "$message"
+                           validation_errors=$((validation_errors + 1))
+                       fi
+                       ;;
+                   "WARNING")
+                       if grep -q "$pattern" "$config_file"; then
+                           log_validation "WARN" "$message"
+                       fi
+                       ;;
+               esac
+           done < "$validation_rules"
+       fi
+       
+       # Syntax validation based on config type
+       case "$config_type" in
+           "apache")
+               if ! httpd -t -f "$config_file" >/dev/null 2>&1; then
+                   log_validation "ERROR" "Apache configuration syntax error"
+                   validation_errors=$((validation_errors + 1))
+               fi
+               ;;
+           "ssh")
+               if ! sshd -t -f "$config_file" >/dev/null 2>&1; then
+                   log_validation "ERROR" "SSH configuration syntax error"
+                   validation_errors=$((validation_errors + 1))
+               fi
+               ;;
+       esac
+       
+       if [ $validation_errors -eq 0 ]; then
+           log_validation "INFO" "Configuration validation passed: $config_file"
+           return 0
+       else
+           log_validation "ERROR" "Configuration validation failed: $config_file ($validation_errors errors)"
+           return 1
+       fi
+   }
+   
+   # Create validation rules
+   create_validation_rules() {
+       # Apache validation rules
+       cat > "$VALIDATION_RULES_DIR/apache.rules" << 'EOF'
+   REQUIRED|ServerRoot|ServerRoot directive is required
+   REQUIRED|DocumentRoot|DocumentRoot directive is required
+   REQUIRED|ErrorLog|ErrorLog directive is required
+   FORBIDDEN|ServerTokens Full|ServerTokens Full should not be used in production
+   WARNING|Options Indexes|Directory indexing may be a security risk
+   EOF
+   
+       # SSH validation rules
+       cat > "$VALIDATION_RULES_DIR/ssh.rules" << 'EOF'
+   REQUIRED|Protocol 2|SSH Protocol 2 is required
+   FORBIDDEN|PermitRootLogin yes|Root login should be disabled in production
+   FORBIDDEN|PasswordAuthentication yes|Password authentication should be disabled in production
+   REQUIRED|PubkeyAuthentication yes|Public key authentication should be enabled
+   WARNING|X11Forwarding yes|X11 forwarding may be a security risk
+   EOF
+       
+       log_validation "INFO" "Validation rules created"
+   }
+   
+   # Validate all configurations
+   validate_all_configs() {
+       local validation_errors=0
+       
+       # Validate templates
+       for template in "$TEMPLATES_DIR"/*.template; do
+           if [ -f "$template" ]; then
+               local config_name=$(basename "$template" .template)
+               local temp_config="/tmp/validate-${config_name}.tmp"
+               
+               # Load variables and process template
+               load_environment_vars "$ENVIRONMENT"
+               load_role_vars "$ROLE"
+               
+               if process_advanced_template "$template" "$temp_config"; then
+                   # Determine config type
+                   local config_type=""
+                   case "$config_name" in
+                       "httpd") config_type="apache" ;;
+                       "sshd_config") config_type="ssh" ;;
+                   esac
+                   
+                   if [ -n "$config_type" ]; then
+                       if ! validate_config_file "$temp_config" "$config_type"; then
+                           validation_errors=$((validation_errors + 1))
+                       fi
+                   fi
+               else
+                   validation_errors=$((validation_errors + 1))
+               fi
+               
+               rm -f "$temp_config"
+           fi
+       done
+       
+       return $validation_errors
+   }
+   
+   main() {
+       local action="${1:-validate}"
+       
+       case "$action" in
+           "create-rules")
+               create_validation_rules
+               ;;
+           "validate")
+               if [ -n "$2" ]; then
+                   validate_config_file "$2" "$3"
+               else
+                   validate_all_configs
+               fi
+               ;;
+           *)
+               echo "Usage: $0 {create-rules|validate} [config_file] [config_type]"
+               exit 1
+               ;;
+       esac
+   }
+   
+   main "$@"
+
+PART E: CONFIGURATION MONITORING
+---------------------------------
+
+1. Create configuration drift detection:
+   # vim /opt/config-mgmt/scripts/config-drift-detector.sh
+   
+   #!/bin/bash
+   #
+   # Configuration Drift Detection System
+   #
+   
+   DRIFT_LOG="/opt/config-mgmt/logs/config-drift.log"
+   BASELINE_DIR="/opt/config-mgmt/baselines"
+   
+   log_drift() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" >> "$DRIFT_LOG"
+   }
+   
+   # Create configuration baseline
+   create_baseline() {
+       local config_name="$1"
+       local config_file="$2"
+       
+       mkdir -p "$BASELINE_DIR"
+       
+       if [ -f "$config_file" ]; then
+           local baseline_file="$BASELINE_DIR/${config_name}.baseline"
+           cp "$config_file" "$baseline_file"
+           
+           # Create checksum
+           sha256sum "$config_file" > "${baseline_file}.sha256"
+           
+           log_drift "INFO" "Created baseline for $config_name: $baseline_file"
+       else
+           log_drift "ERROR" "Config file not found for baseline: $config_file"
+           return 1
+       fi
+   }
+   
+   # Detect configuration drift
+   detect_drift() {
+       local config_name="$1"
+       local config_file="$2"
+       local baseline_file="$BASELINE_DIR/${config_name}.baseline"
+       
+       if [ ! -f "$baseline_file" ]; then
+           log_drift "WARN" "No baseline found for $config_name, creating one"
+           create_baseline "$config_name" "$config_file"
+           return 0
+       fi
+       
+       if [ ! -f "$config_file" ]; then
+           log_drift "ERROR" "Config file missing: $config_file"
+           return 1
+       fi
+       
+       # Compare with baseline
+       if diff -q "$baseline_file" "$config_file" >/dev/null 2>&1; then
+           log_drift "INFO" "No drift detected for $config_name"
+           return 0
+       else
+           log_drift "WARN" "Configuration drift detected for $config_name"
+           
+           # Generate diff report
+           local diff_file="/opt/config-mgmt/logs/drift-${config_name}-$(date +%Y%m%d_%H%M%S).diff"
+           diff -u "$baseline_file" "$config_file" > "$diff_file"
+           
+           log_drift "INFO" "Drift details saved to: $diff_file"
+           return 1
+       fi
+   }
+   
+   # Monitor all managed configurations
+   monitor_all_configs() {
+       local drift_detected=0
+       
+       # Define configurations to monitor
+       declare -A MONITORED_CONFIGS
+       MONITORED_CONFIGS["httpd"]="/etc/httpd/conf/httpd.conf"
+       MONITORED_CONFIGS["sshd"]="/etc/ssh/sshd_config"
+       MONITORED_CONFIGS["rsyslog"]="/etc/rsyslog.conf"
+       MONITORED_CONFIGS["hosts"]="/etc/hosts"
+       
+       for config_name in "${!MONITORED_CONFIGS[@]}"; do
+           local config_file="${MONITORED_CONFIGS[$config_name]}"
+           
+           if ! detect_drift "$config_name" "$config_file"; then
+               drift_detected=$((drift_detected + 1))
+           fi
+       done
+       
+       if [ $drift_detected -gt 0 ]; then
+           log_drift "WARN" "Configuration drift detected in $drift_detected configuration(s)"
+           return 1
+       else
+           log_drift "INFO" "No configuration drift detected"
+           return 0
+       fi
+   }
+   
+   # Generate drift report
+   generate_drift_report() {
+       local report_file="/opt/config-mgmt/logs/drift-report-$(date +%Y%m%d).txt"
+       
+       cat > "$report_file" << EOF
+   Configuration Drift Report
+   Generated: $(date)
+   
+   Drift Detection Summary:
+   $(grep "$(date +%Y-%m-%d)" "$DRIFT_LOG" | grep -E "(drift detected|No drift)" | sort | uniq -c)
+   
+   Recent Drift Events:
+   $(grep "$(date +%Y-%m-%d)" "$DRIFT_LOG" | grep "drift detected")
+   
+   Available Baselines:
+   $(ls -la "$BASELINE_DIR"/*.baseline 2>/dev/null)
+   
+   Recent Diff Files:
+   $(ls -la /opt/config-mgmt/logs/drift-*.diff 2>/dev/null | tail -10)
+   EOF
+       
+       log_drift "INFO" "Drift report generated: $report_file"
+   }
+   
+   main() {
+       local action="$1"
+       
+       case "$action" in
+           "baseline")
+               create_baseline "$2" "$3"
+               ;;
+           "detect")
+               if [ -n "$2" ]; then
+                   detect_drift "$2" "$3"
+               else
+                   monitor_all_configs
+               fi
+               ;;
+           "report")
+               generate_drift_report
+               ;;
+           *)
+               echo "Usage: $0 {baseline|detect|report} [config_name] [config_file]"
+               exit 1
+               ;;
+       esac
+   }
+   
+   main "$@"
+
+2. Create configuration compliance checker:
+   # vim /opt/config-mgmt/scripts/config-compliance.sh
+   
+   #!/bin/bash
+   #
+   # Configuration Compliance Checker
+   #
+   
+   COMPLIANCE_RULES_DIR="/opt/config-mgmt/compliance-rules"
+   COMPLIANCE_LOG="/opt/config-mgmt/logs/compliance.log"
+   
+   mkdir -p "$COMPLIANCE_RULES_DIR"
+   
+   log_compliance() {
+       echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" >> "$COMPLIANCE_LOG"
+   }
+   
+   # Create compliance rules
+   create_compliance_rules() {
+       # Security compliance rules
+       cat > "$COMPLIANCE_RULES_DIR/security.rules" << 'EOF'
+   # Security Compliance Rules
+   
+   # SSH Security
+   /etc/ssh/sshd_config|REQUIRED|PermitRootLogin no|Root login must be disabled
+   /etc/ssh/sshd_config|REQUIRED|PasswordAuthentication no|Password authentication must be disabled
+   /etc/ssh/sshd_config|REQUIRED|Protocol 2|SSH Protocol 2 must be used
+   /etc/ssh/sshd_config|FORBIDDEN|PermitEmptyPasswords yes|Empty passwords must not be permitted
+   
+   # Apache Security
+   /etc/httpd/conf/httpd.conf|REQUIRED|ServerTokens Prod|Server tokens must be minimized
+   /etc/httpd/conf/httpd.conf|FORBIDDEN|ServerSignature On|Server signature must be disabled
+   /etc/httpd/conf/httpd.conf|FORBIDDEN|Options Indexes|Directory indexing must be disabled
+   EOF
+       
+       # Performance compliance rules
+       cat > "$COMPLIANCE_RULES_DIR/performance.rules" << 'EOF'
+   # Performance Compliance Rules
+   
+   # System limits
+   /etc/security/limits.conf|REQUIRED|* soft nofile|File descriptor limits must be set
+   /etc/security/limits.conf|REQUIRED|* hard nofile|Hard file descriptor limits must be set
+   
+   # Kernel parameters
+   /etc/sysctl.conf|REQUIRED|net.core.somaxconn|Socket connection limit must be configured
+   /etc/sysctl.conf|REQUIRED|vm.swappiness|Swap usage must be configured
+   EOF
+       
+       log_compliance "INFO" "Compliance rules created"
+   }
+   
+   # Check compliance for a single file
+   check_file_compliance() {
+       local config_file="$1"
+       local rules_file="$2"
+       local compliance_errors=0
+       
+       if [ ! -f "$config_file" ]; then
+           log_compliance "ERROR" "Config file not found: $config_file"
+           return 1
+       fi
+       
+       if [ ! -f "$rules_file" ]; then
+           log_compliance "WARN" "Rules file not found: $rules_file"
+           return 0
+       fi
+       
+       while IFS='|' read -r file_pattern rule_type pattern message; do
+           # Skip comments and empty lines
+           [[ $file_pattern =~ ^#.*$ ]] && continue
+           [[ -z $file_pattern ]] && continue
+           
+           # Check if rule applies to this file
+           if [[ "$config_file" == $file_pattern ]]; then
+               case "$rule_type" in
+                   "REQUIRED")
+                       if ! grep -q "$pattern" "$config_file"; then
+                           log_compliance "ERROR" "COMPLIANCE VIOLATION: $message"
+                           compliance_errors=$((compliance_errors + 1))
+                       fi
+                       ;;
+                   "FORBIDDEN")
+                       if grep -q "$pattern" "$config_file"; then
+                           log_compliance "ERROR" "COMPLIANCE VIOLATION: $message"
+                           compliance_errors=$((compliance_errors + 1))
+                       fi
+                       ;;
+                   "WARNING")
+                       if grep -q "$pattern" "$config_file"; then
+                           log_compliance "WARN" "COMPLIANCE WARNING: $message"
+                       fi
+                       ;;
+               esac
+           fi
+       done < "$rules_file"
+       
+       return $compliance_errors
+   }
+   
+   # Check system-wide compliance
+   check_system_compliance() {
+       local compliance_type="${1:-all}"
+       local total_errors=0
+       
+       log_compliance "INFO" "Starting system compliance check: $compliance_type"
+       
+       case "$compliance_type" in
+           "security"|"all")
+               log_compliance "INFO" "Checking security compliance"
+               check_file_compliance "/etc/ssh/sshd_config" "$COMPLIANCE_RULES_DIR/security.rules"
+               total_errors=$((total_errors + $?))
+               
+               check_file_compliance "/etc/httpd/conf/httpd.conf" "$COMPLIANCE_RULES_DIR/security.rules"
+               total_errors=$((total_errors + $?))
+               ;;
+       esac
+       
+       case "$compliance_type" in
+           "performance"|"all")
+               log_compliance "INFO" "Checking performance compliance"
+               check_file_compliance "/etc/security/limits.conf" "$COMPLIANCE_RULES_DIR/performance.rules"
+               total_errors=$((total_errors + $?))
+               
+               check_file_compliance "/etc/sysctl.conf" "$COMPLIANCE_RULES_DIR/performance.rules"
+               total_errors=$((total_errors + $?))
+               ;;
+       esac
+       
+       if [ $total_errors -eq 0 ]; then
+           log_compliance "INFO" "System compliance check passed"
+           return 0
+       else
+           log_compliance "ERROR" "System compliance check failed with $total_errors violations"
+           return 1
+       fi
+   }
+   
+   # Generate compliance report
+   generate_compliance_report() {
+       local report_file="/opt/config-mgmt/logs/compliance-report-$(date +%Y%m%d).txt"
+       
+       cat > "$report_file" << EOF
+   Configuration Compliance Report
+   Generated: $(date)
+   
+   Compliance Check Summary:
+   $(grep "$(date +%Y-%m-%d)" "$COMPLIANCE_LOG" | grep -E "(passed|failed)" | sort | uniq -c)
+   
+   Compliance Violations:
+   $(grep "$(date +%Y-%m-%d)" "$COMPLIANCE_LOG" | grep "COMPLIANCE VIOLATION")
+   
+   Compliance Warnings:
+   $(grep "$(date +%Y-%m-%d)" "$COMPLIANCE_LOG" | grep "COMPLIANCE WARNING")
+   
+   Available Compliance Rules:
+   $(ls -la "$COMPLIANCE_RULES_DIR"/*.rules 2>/dev/null)
+   EOF
+       
+       log_compliance "INFO" "Compliance report generated: $report_file"
+   }
+   
+   main() {
+       local action="$1"
+       
+       case "$action" in
+           "create-rules")
+               create_compliance_rules
+               ;;
+           "check")
+               check_system_compliance "$2"
+               ;;
+           "report")
+               generate_compliance_report
+               ;;
+           *)
+               echo "Usage: $0 {create-rules|check|report} [compliance_type]"
+               echo "Compliance types: security, performance, all"
+               exit 1
+               ;;
+       esac
+   }
+   
+   main "$@"
+
+PART F: TESTING AND VALIDATION
+-------------------------------
+
+1. Test configuration management framework:
+   # chmod +x /opt/config-mgmt/scripts/*.sh
+   # /opt/config-mgmt/scripts/config-framework.sh
+
+2. Test template processing:
+   # export ENVIRONMENT="dev"
+   # export HTTP_PORT="8080"
+   # /opt/config-mgmt/scripts/template-engine.sh process_advanced_template /opt/config-mgmt/templates/httpd.conf.template /tmp/test-httpd.conf
+
+3. Test configuration deployment:
+   # /opt/config-mgmt/scripts/deploy-configs.sh deploy httpd
+
+4. Test version control integration:
+   # /opt/config-mgmt/scripts/config-version-control.sh init
+   # /opt/config-mgmt/scripts/config-version-control.sh tag v1.0 "Initial configuration version"
+
+5. Test configuration validation:
+   # /opt/config-mgmt/scripts/config-validator.sh create-rules
+   # /opt/config-mgmt/scripts/config-validator.sh validate
+
+6. Test drift detection:
+   # /opt/config-mgmt/scripts/config-drift-detector.sh baseline httpd /etc/httpd/conf/httpd.conf
+   # echo "# Test change" >> /etc/httpd/conf/httpd.conf
+   # /opt/config-mgmt/scripts/config-drift-detector.sh detect httpd /etc/httpd/conf/httpd.conf
+
+7. Test compliance checking:
+   # /opt/config-mgmt/scripts/config-compliance.sh create-rules
+   # /opt/config-mgmt/scripts/config-compliance.sh check security
+
+8. Create automation schedule:
+   # vim /etc/cron.d/config-management
+   
+   # Configuration Management Automation
+   
+   # Drift detection - every 4 hours
+   0 */4 * * * root /opt/config-mgmt/scripts/config-drift-detector.sh detect
+   
+   # Compliance checking - daily at 8 AM
+   0 8 * * * root /opt/config-mgmt/scripts/config-compliance.sh check all
+   
+   # Configuration backup - daily at 1 AM
+   0 1 * * * root /opt/config-mgmt/scripts/config-version-control.sh init
+   
+   # Generate reports - daily at 9 AM
+   0 9 * * * root /opt/config-mgmt/scripts/config-drift-detector.sh report
+   30 9 * * * root /opt/config-mgmt/scripts/config-compliance.sh report
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# tail -f /opt/config-mgmt/logs/*.log
+# git log --oneline -n 10
+# ls -la /opt/config-mgmt/templates/
+# ls -la /opt/config-mgmt/baselines/
+# httpd -t
+# sshd -t
+
+EXPECTED RESULTS:
+-----------------
+- Configuration management framework operational
+- Template system processing configurations correctly
+- Version control tracking configuration changes
+- Deployment system working with validation
+- Drift detection identifying configuration changes
+- Compliance checking enforcing standards
+- Automated configuration management scheduled
+
+VALIDATION CHECKLIST:
+---------------------
+□ Configuration management infrastructure created
+□ Template system operational
+□ Configuration deployment working
+□ Version control integration functional
+□ Validation system checking configurations
+□ Drift detection monitoring changes
+□ Compliance checking enforcing rules
+□ Automation scheduled and running
+□ All scripts executable and tested
+
+CLEANUP:
+--------
+# rm /etc/cron.d/config-management
+# rm -rf /opt/config-mgmt
+# git config --global --unset user.name
+# git config --global --unset user.email

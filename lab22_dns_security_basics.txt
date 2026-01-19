@@ -1,0 +1,553 @@
+RHCE RH254 HANDS-ON LAB: DNS SECURITY BASICS
+============================================
+
+LAB OBJECTIVE:
+Implement basic DNS security measures including access controls, DNSSEC validation, and protection against common DNS attacks
+
+PREREQUISITES:
+- BIND DNS server installed and configured
+- Root access to RHEL system
+- Understanding of DNS security concepts
+
+LAB SCENARIO:
+Configure DNS server security features to protect against DNS attacks, implement access controls, and enable DNSSEC validation.
+
+EQUIPMENT NEEDED:
+- RHEL system with BIND installed
+- Network connectivity for DNSSEC validation
+- Client systems for testing security measures
+
+LAB TASKS:
+
+PART A: CONFIGURE ACCESS CONTROLS
+----------------------------------
+
+1. Define access control lists (ACLs):
+   # vim /etc/named.conf
+   
+   // Define ACLs for different network segments
+   acl "trusted-networks" {
+       127.0.0.1;
+       192.168.1.0/24;
+       10.0.0.0/8;
+       172.16.0.0/12;
+   };
+   
+   acl "internal-networks" {
+       192.168.0.0/16;
+       10.0.0.0/8;
+   };
+   
+   acl "dmz-networks" {
+       192.168.100.0/24;
+   };
+   
+   acl "blacklisted-networks" {
+       203.0.113.0/24;     // Example malicious network
+       198.51.100.0/24;    // Example spam network
+   };
+
+2. Configure query restrictions:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       // Query access controls
+       allow-query { trusted-networks; };
+       allow-query-cache { internal-networks; };
+       allow-recursion { internal-networks; };
+       
+       // Deny blacklisted networks
+       blackhole { blacklisted-networks; };
+       
+       // Transfer restrictions
+       allow-transfer { none; };
+       allow-notify { none; };
+   };
+
+3. Configure zone-specific access controls:
+   # vim /etc/named.conf
+   
+   zone "example.com" {
+       type master;
+       file "example.com.zone";
+       allow-query { trusted-networks; };
+       allow-transfer { 192.168.1.11; 192.168.1.12; };
+       allow-update { none; };
+   };
+   
+   zone "internal.local" {
+       type master;
+       file "internal.local.zone";
+       allow-query { internal-networks; };
+       allow-transfer { none; };
+   };
+
+PART B: CONFIGURE DNSSEC VALIDATION
+------------------------------------
+
+1. Enable DNSSEC validation:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       // DNSSEC configuration
+       dnssec-enable yes;
+       dnssec-validation yes;
+       dnssec-lookaside auto;
+       
+       // Trust anchors
+       bindkeys-file "/etc/named.iscdlv.key";
+       managed-keys-directory "/var/named/dynamic";
+   };
+
+2. Configure DNSSEC logging:
+   # vim /etc/named.conf
+   
+   logging {
+       channel dnssec_log {
+           file "/var/log/named/dnssec.log" versions 3 size 5m;
+           severity info;
+           print-time yes;
+           print-category yes;
+       };
+       
+       category dnssec { dnssec_log; };
+       category security { dnssec_log; };
+   };
+
+3. Update root trust anchors:
+   # rndc managed-keys refresh
+   # rndc managed-keys status
+
+4. Test DNSSEC validation:
+   # dig @localhost dnssec-failed.org +dnssec
+   # dig @localhost good.dnssec-or-not.com +dnssec
+
+PART C: CONFIGURE RESPONSE RATE LIMITING
+-----------------------------------------
+
+1. Enable response rate limiting (RRL):
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       // Response Rate Limiting
+       rate-limit {
+           responses-per-second 10;
+           window 5;
+           slip 2;
+           qps-scale 250;
+           nxdomains-per-second 5;
+           errors-per-second 5;
+           all-per-second 20;
+           
+           // Exemptions
+           exempt-clients { internal-networks; };
+           
+           // Logging
+           log-only no;
+       };
+   };
+
+2. Configure RRL logging:
+   # vim /etc/named.conf
+   
+   logging {
+       // ... existing logging ...
+       
+       channel rrl_log {
+           file "/var/log/named/rrl.log" versions 3 size 5m;
+           severity info;
+           print-time yes;
+       };
+       
+       category rate-limit { rrl_log; };
+   };
+
+3. Create RRL monitoring script:
+   # vim /usr/local/bin/rrl-monitor.sh
+   
+   #!/bin/bash
+   # Response Rate Limiting monitor
+   
+   RRL_LOG="/var/log/named/rrl.log"
+   ALERT_EMAIL="admin@example.com"
+   
+   if [ -f "$RRL_LOG" ]; then
+       # Check for high rate limiting activity
+       RRL_COUNT=$(grep "$(date '+%d-%b-%Y')" "$RRL_LOG" | wc -l)
+       
+       if [ $RRL_COUNT -gt 100 ]; then
+           echo "High RRL activity: $RRL_COUNT events today" | \
+           mail -s "DNS RRL Alert" $ALERT_EMAIL
+       fi
+       
+       # Show top rate-limited clients
+       echo "Top rate-limited clients today:"
+       grep "$(date '+%d-%b-%Y')" "$RRL_LOG" | \
+       awk '{print $6}' | sort | uniq -c | sort -nr | head -10
+   fi
+   
+   # chmod +x /usr/local/bin/rrl-monitor.sh
+
+PART D: CONFIGURE RESPONSE POLICY ZONES (RPZ)
+----------------------------------------------
+
+1. Configure RPZ for malware blocking:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       response-policy {
+           zone "rpz.malware" policy cname;
+           zone "rpz.phishing" policy drop;
+           zone "rpz.botnet" policy nxdomain;
+       };
+   };
+
+2. Create malware blocking RPZ zone:
+   # vim /etc/named.conf
+   
+   zone "rpz.malware" {
+       type master;
+       file "rpz.malware.zone";
+       allow-query { none; };
+       allow-transfer { none; };
+   };
+
+3. Create RPZ zone file:
+   # vim /var/named/rpz.malware.zone
+   
+   $TTL 60
+   @   IN  SOA localhost. admin.localhost. (
+           2024010101
+           3600
+           1800
+           604800
+           60
+   )
+   
+   @           IN  NS  localhost.
+   
+   ; Block malware domains
+   malware.example.com         IN  CNAME   blocked.example.com.
+   trojan.badsite.org          IN  CNAME   blocked.example.com.
+   phishing.scam.net           IN  A       127.0.0.1
+   
+   ; Block entire malicious domains
+   *.malicious.com             IN  CNAME   blocked.example.com.
+   
+   ; NXDOMAIN response for specific threats
+   botnet.evil.org             IN  CNAME   rpz-drop.
+
+4. Create blocked page zone:
+   # vim /var/named/blocked.example.com.zone
+   
+   $TTL 300
+   @   IN  SOA dns.example.com. admin.example.com. (
+           2024010101
+           3600
+           1800
+           604800
+           300
+   )
+   
+   @           IN  NS      dns.example.com.
+   @           IN  A       192.168.1.100   ; Blocked page server
+
+PART E: CONFIGURE QUERY LOGGING AND MONITORING
+-----------------------------------------------
+
+1. Enable query logging:
+   # vim /etc/named.conf
+   
+   logging {
+       // ... existing logging ...
+       
+       channel query_log {
+           file "/var/log/named/queries.log" versions 5 size 10m;
+           severity info;
+           print-time yes;
+           print-severity no;
+           print-category no;
+       };
+       
+       category queries { query_log; };
+   };
+
+2. Enable query logging at runtime:
+   # rndc querylog on
+
+3. Create query analysis script:
+   # vim /usr/local/bin/query-analyzer.sh
+   
+   #!/bin/bash
+   # DNS query analyzer for security monitoring
+   
+   QUERY_LOG="/var/log/named/queries.log"
+   TODAY=$(date '+%d-%b-%Y')
+   
+   echo "=== DNS Security Analysis for $TODAY ==="
+   
+   if [ -f "$QUERY_LOG" ]; then
+       # Top queried domains
+       echo "Top 10 queried domains:"
+       grep "$TODAY" "$QUERY_LOG" | awk '{print $6}' | \
+       sort | uniq -c | sort -nr | head -10
+       echo
+       
+       # Suspicious query patterns
+       echo "Suspicious queries (long domain names):"
+       grep "$TODAY" "$QUERY_LOG" | awk 'length($6) > 50 {print $6}' | head -10
+       echo
+       
+       # High-frequency clients
+       echo "Top 10 query sources:"
+       grep "$TODAY" "$QUERY_LOG" | awk '{print $4}' | \
+       cut -d'#' -f1 | sort | uniq -c | sort -nr | head -10
+       echo
+       
+       # Query types analysis
+       echo "Query types distribution:"
+       grep "$TODAY" "$QUERY_LOG" | awk '{print $7}' | \
+       sort | uniq -c | sort -nr
+   fi
+   
+   # chmod +x /usr/local/bin/query-analyzer.sh
+
+PART F: CONFIGURE DNS OVER TLS (DoT)
+-------------------------------------
+
+1. Generate TLS certificates for DNS:
+   # openssl req -x509 -newkey rsa:2048 -keyout /etc/named/dns.key \
+     -out /etc/named/dns.crt -days 365 -nodes \
+     -subj "/CN=dns.example.com"
+
+2. Configure DNS over TLS:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       // DNS over TLS configuration
+       listen-on port 53 { any; };
+       listen-on port 853 tls ephemeral { any; };
+       
+       tls-port 853;
+       
+       // TLS configuration
+       tls local-tls {
+           key-file "/etc/named/dns.key";
+           cert-file "/etc/named/dns.crt";
+       };
+   };
+
+3. Configure firewall for DoT:
+   # firewall-cmd --permanent --add-port=853/tcp
+   # firewall-cmd --reload
+
+4. Test DNS over TLS:
+   # dig @192.168.1.10 -p 853 +tls google.com
+
+PART G: CONFIGURE SECURITY MONITORING
+--------------------------------------
+
+1. Create security monitoring script:
+   # vim /usr/local/bin/dns-security-monitor.sh
+   
+   #!/bin/bash
+   # DNS security monitoring script
+   
+   LOG_DIR="/var/log/named"
+   ALERT_EMAIL="security@example.com"
+   TODAY=$(date '+%d-%b-%Y')
+   
+   # Check for DNSSEC validation failures
+   DNSSEC_FAILURES=$(grep "$TODAY" "$LOG_DIR/dnssec.log" | grep -c "validation failed")
+   if [ $DNSSEC_FAILURES -gt 10 ]; then
+       echo "High DNSSEC validation failures: $DNSSEC_FAILURES" | \
+       mail -s "DNS Security Alert: DNSSEC Failures" $ALERT_EMAIL
+   fi
+   
+   # Check for suspicious query patterns
+   LONG_QUERIES=$(grep "$TODAY" "$LOG_DIR/queries.log" | \
+                  awk 'length($6) > 100' | wc -l)
+   if [ $LONG_QUERIES -gt 50 ]; then
+       echo "Suspicious long domain queries detected: $LONG_QUERIES" | \
+       mail -s "DNS Security Alert: Suspicious Queries" $ALERT_EMAIL
+   fi
+   
+   # Check for high query rates from single IPs
+   HIGH_RATE_IPS=$(grep "$TODAY" "$LOG_DIR/queries.log" | \
+                   awk '{print $4}' | cut -d'#' -f1 | \
+                   sort | uniq -c | awk '$1 > 1000 {print $2}')
+   
+   if [ -n "$HIGH_RATE_IPS" ]; then
+       echo "High query rate detected from IPs: $HIGH_RATE_IPS" | \
+       mail -s "DNS Security Alert: High Query Rate" $ALERT_EMAIL
+   fi
+   
+   # chmod +x /usr/local/bin/dns-security-monitor.sh
+
+2. Schedule security monitoring:
+   # crontab -e
+   # Add: */15 * * * * /usr/local/bin/dns-security-monitor.sh
+
+3. Configure fail2ban for DNS protection:
+   # yum install fail2ban -y
+   # vim /etc/fail2ban/jail.d/named.conf
+   
+   [named-refused]
+   enabled = true
+   port = domain,953
+   protocol = udp
+   filter = named-refused
+   logpath = /var/log/messages
+   maxretry = 5
+   bantime = 3600
+
+4. Create fail2ban filter:
+   # vim /etc/fail2ban/filter.d/named-refused.conf
+   
+   [Definition]
+   failregex = client <HOST>#\d+.*query.*denied
+               client <HOST>#\d+.*query.*refused
+   ignoreregex =
+
+PART H: CONFIGURE ZONE SIGNING (DNSSEC)
+----------------------------------------
+
+1. Generate zone signing keys:
+   # cd /var/named
+   # dnssec-keygen -a RSASHA256 -b 2048 -n ZONE example.com
+   # dnssec-keygen -a RSASHA256 -b 2048 -n ZONE -f KSK example.com
+
+2. Sign the zone:
+   # dnssec-signzone -A -3 $(head -c 1000 /dev/random | sha1sum | cut -b 1-16) \
+     -N INCREMENT -o example.com -t example.com.zone
+
+3. Update zone configuration:
+   # vim /etc/named.conf
+   
+   zone "example.com" {
+       type master;
+       file "example.com.zone.signed";
+       allow-transfer { key "transfer-key"; };
+       auto-dnssec maintain;
+       inline-signing yes;
+   };
+
+4. Configure automatic key rollover:
+   # vim /etc/named.conf
+   
+   options {
+       // ... existing options ...
+       
+       dnssec-policy "default" {
+           keys {
+               ksk lifetime unlimited algorithm rsasha256;
+               zsk lifetime 30d algorithm rsasha256;
+           };
+       };
+   };
+
+PART I: TESTING DNS SECURITY
+-----------------------------
+
+1. Test access controls:
+   # dig @192.168.1.10 example.com  # Should work from trusted network
+   # dig @203.0.113.10 example.com  # Should be blocked (blacklisted)
+
+2. Test DNSSEC validation:
+   # dig @localhost +dnssec +multiline example.com SOA
+   # dig @localhost +dnssec dnssec-failed.org
+
+3. Test response rate limiting:
+   # for i in {1..20}; do dig @192.168.1.10 test$i.example.com; done
+
+4. Test RPZ blocking:
+   # dig @localhost malware.example.com
+   # dig @localhost phishing.scam.net
+
+5. Monitor security logs:
+   # tail -f /var/log/named/dnssec.log
+   # tail -f /var/log/named/rrl.log
+   # /usr/local/bin/query-analyzer.sh
+
+PART J: SECURITY MAINTENANCE
+-----------------------------
+
+1. Create security maintenance script:
+   # vim /usr/local/bin/dns-security-maintenance.sh
+   
+   #!/bin/bash
+   # DNS security maintenance script
+   
+   echo "DNS Security Maintenance - $(date)"
+   
+   # Update RPZ zones
+   echo "Updating RPZ zones..."
+   # wget -O /tmp/malware-domains.txt http://malware-domains.com/files/domains.txt
+   # Process and update RPZ zones here
+   
+   # Rotate DNSSEC keys if needed
+   echo "Checking DNSSEC key status..."
+   rndc managed-keys status
+   
+   # Clean old log files
+   echo "Cleaning old security logs..."
+   find /var/log/named -name "*.log.*" -mtime +30 -delete
+   
+   # Update root trust anchors
+   echo "Updating root trust anchors..."
+   rndc managed-keys refresh
+   
+   echo "Security maintenance completed"
+   
+   # chmod +x /usr/local/bin/dns-security-maintenance.sh
+
+2. Schedule security maintenance:
+   # crontab -e
+   # Add: 0 2 * * 0 /usr/local/bin/dns-security-maintenance.sh
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# rndc managed-keys status
+# rndc querylog on
+# dig +dnssec +multiline example.com
+# tail -f /var/log/named/security.log
+# fail2ban-client status named-refused
+
+EXPECTED RESULTS:
+-----------------
+- Access controls blocking unauthorized queries
+- DNSSEC validation working for signed domains
+- Response rate limiting preventing abuse
+- RPZ blocking malicious domains
+- Security monitoring detecting threats
+- DNS over TLS providing encrypted queries
+
+VALIDATION CHECKLIST:
+---------------------
+□ Access controls configured and working
+□ DNSSEC validation enabled
+□ Response rate limiting active
+□ RPZ zones blocking threats
+□ Query logging operational
+□ Security monitoring running
+□ DNS over TLS configured
+□ Fail2ban protecting DNS service
+
+CLEANUP:
+--------
+# rndc querylog off
+# systemctl stop fail2ban
+# rm /usr/local/bin/dns-security-*.sh
+# rm /usr/local/bin/query-analyzer.sh
+# rm /usr/local/bin/rrl-monitor.sh
+# crontab -e  # Remove security monitoring entries

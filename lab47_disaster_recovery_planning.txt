@@ -1,0 +1,1542 @@
+RHCE RH254 HANDS-ON LAB: DISASTER RECOVERY PLANNING
+==================================================
+
+LAB OBJECTIVE:
+Develop and implement comprehensive disaster recovery plans including system recovery procedures, data restoration strategies, business continuity planning, and automated recovery systems
+
+PREREQUISITES:
+- RHEL 8/9 system with root access
+- Understanding of backup and recovery concepts
+- Knowledge of system administration and troubleshooting
+- Familiarity with business continuity principles
+
+LAB SCENARIO:
+Create enterprise disaster recovery infrastructure with documented procedures, automated recovery systems, testing protocols, and business continuity measures for critical system failures.
+
+EQUIPMENT NEEDED:
+- Primary RHEL system (192.168.1.20)
+- Disaster recovery site (192.168.2.20)
+- Backup storage systems
+- Network connectivity between sites
+
+LAB TASKS:
+
+PART A: DISASTER RECOVERY PLANNING FRAMEWORK
+---------------------------------------------
+
+1. Create disaster recovery directory structure:
+   # mkdir -p /opt/disaster-recovery/{plans,scripts,tests,logs,documentation}
+   # mkdir -p /opt/disaster-recovery/recovery-images
+   # chmod 700 /opt/disaster-recovery
+
+2. Create disaster recovery configuration:
+   # vim /etc/disaster-recovery.conf
+   
+   # Disaster Recovery Configuration
+   DR_SITE_PRIMARY="192.168.1.20"
+   DR_SITE_SECONDARY="192.168.2.20"
+   DR_BACKUP_LOCATION="/backup/disaster-recovery"
+   DR_RECOVERY_LOCATION="/opt/disaster-recovery"
+   
+   # Recovery Time Objectives (RTO) in minutes
+   RTO_CRITICAL=30
+   RTO_IMPORTANT=120
+   RTO_NORMAL=480
+   
+   # Recovery Point Objectives (RPO) in minutes
+   RPO_CRITICAL=15
+   RPO_IMPORTANT=60
+   RPO_NORMAL=240
+   
+   # Critical Services
+   CRITICAL_SERVICES="sshd httpd mysqld postfix"
+   IMPORTANT_SERVICES="chronyd rsyslog firewalld"
+   NORMAL_SERVICES="cups bluetooth"
+   
+   # Critical Data Paths
+   CRITICAL_DATA="/etc /home /var/lib/mysql /opt/applications"
+   IMPORTANT_DATA="/var/www /var/log /usr/local"
+   NORMAL_DATA="/tmp /var/cache"
+   
+   # Notification Settings
+   DR_NOTIFICATION_EMAIL="disaster-recovery@example.com"
+   DR_ESCALATION_EMAIL="management@example.com"
+
+3. Create disaster recovery documentation template:
+   # vim /opt/disaster-recovery/documentation/DR-Plan-Template.md
+   
+   # DISASTER RECOVERY PLAN
+   
+   ## 1. EXECUTIVE SUMMARY
+   - Plan Version: 1.0
+   - Last Updated: $(date)
+   - Plan Owner: System Administrator
+   - Review Frequency: Quarterly
+   
+   ## 2. DISASTER SCENARIOS
+   ### 2.1 Hardware Failure
+   - Server hardware failure
+   - Storage system failure
+   - Network infrastructure failure
+   
+   ### 2.2 Software Failure
+   - Operating system corruption
+   - Application failure
+   - Database corruption
+   
+   ### 2.3 Environmental Disasters
+   - Power outage
+   - Natural disasters
+   - Security breaches
+   
+   ## 3. RECOVERY OBJECTIVES
+   - RTO Critical: 30 minutes
+   - RTO Important: 2 hours
+   - RTO Normal: 8 hours
+   - RPO Critical: 15 minutes
+   - RPO Important: 1 hour
+   - RPO Normal: 4 hours
+   
+   ## 4. RECOVERY PROCEDURES
+   [Detailed procedures to be filled by scripts]
+   
+   ## 5. CONTACT INFORMATION
+   - Primary Contact: System Administrator
+   - Secondary Contact: IT Manager
+   - Escalation Contact: Management
+   
+   ## 6. TESTING SCHEDULE
+   - Monthly: Recovery script testing
+   - Quarterly: Full DR site testing
+   - Annually: Complete disaster simulation
+
+4. Create disaster classification system:
+   # vim /usr/local/bin/disaster-classifier.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   DISASTER_TYPE=$1
+   SEVERITY=$2
+   
+   if [ $# -lt 2 ]; then
+       echo "Usage: $0 <disaster_type> <severity>"
+       echo "Disaster types: hardware, software, environmental, security"
+       echo "Severity levels: critical, major, minor"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/disaster-recovery/logs/disaster-$TIMESTAMP.log"
+   
+   echo "=== DISASTER CLASSIFICATION - $(date) ===" | tee $LOG_FILE
+   echo "Disaster Type: $DISASTER_TYPE" | tee -a $LOG_FILE
+   echo "Severity Level: $SEVERITY" | tee -a $LOG_FILE
+   
+   # Determine recovery objectives based on severity
+   case $SEVERITY in
+       "critical")
+           RTO=$RTO_CRITICAL
+           RPO=$RPO_CRITICAL
+           SERVICES=$CRITICAL_SERVICES
+           DATA=$CRITICAL_DATA
+           NOTIFICATION=$DR_ESCALATION_EMAIL
+           ;;
+       "major")
+           RTO=$RTO_IMPORTANT
+           RPO=$RPO_IMPORTANT
+           SERVICES="$CRITICAL_SERVICES $IMPORTANT_SERVICES"
+           DATA="$CRITICAL_DATA $IMPORTANT_DATA"
+           NOTIFICATION=$DR_NOTIFICATION_EMAIL
+           ;;
+       "minor")
+           RTO=$RTO_NORMAL
+           RPO=$RPO_NORMAL
+           SERVICES="$CRITICAL_SERVICES $IMPORTANT_SERVICES $NORMAL_SERVICES"
+           DATA="$CRITICAL_DATA $IMPORTANT_DATA $NORMAL_DATA"
+           NOTIFICATION=$DR_NOTIFICATION_EMAIL
+           ;;
+       *)
+           echo "Invalid severity level: $SEVERITY" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   echo "Recovery Time Objective: $RTO minutes" | tee -a $LOG_FILE
+   echo "Recovery Point Objective: $RPO minutes" | tee -a $LOG_FILE
+   echo "Services to recover: $SERVICES" | tee -a $LOG_FILE
+   echo "Data to recover: $DATA" | tee -a $LOG_FILE
+   echo "Notification contact: $NOTIFICATION" | tee -a $LOG_FILE
+   
+   # Create recovery plan file
+   RECOVERY_PLAN="/opt/disaster-recovery/plans/recovery-plan-$TIMESTAMP.txt"
+   cat > $RECOVERY_PLAN << EOF
+   DISASTER RECOVERY PLAN
+   Generated: $(date)
+   Disaster ID: DR-$TIMESTAMP
+   Type: $DISASTER_TYPE
+   Severity: $SEVERITY
+   RTO: $RTO minutes
+   RPO: $RPO minutes
+   
+   RECOVERY SEQUENCE:
+   1. Assess damage and confirm disaster type
+   2. Activate disaster recovery team
+   3. Restore critical services: $SERVICES
+   4. Restore critical data: $DATA
+   5. Verify system functionality
+   6. Resume normal operations
+   7. Conduct post-incident review
+   
+   CONTACT INFORMATION:
+   Primary: $DR_NOTIFICATION_EMAIL
+   Escalation: $DR_ESCALATION_EMAIL
+   EOF
+   
+   echo "Recovery plan created: $RECOVERY_PLAN" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/disaster-classifier.sh
+
+PART B: SYSTEM RECOVERY PROCEDURES
+-----------------------------------
+
+1. Create system backup for recovery:
+   # vim /usr/local/bin/create-recovery-image.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   IMAGE_TYPE=${1:-"full"}
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/disaster-recovery/logs/recovery-image-$TIMESTAMP.log"
+   
+   echo "=== CREATING RECOVERY IMAGE - $(date) ===" | tee $LOG_FILE
+   echo "Image Type: $IMAGE_TYPE" | tee -a $LOG_FILE
+   
+   case $IMAGE_TYPE in
+       "full")
+           IMAGE_FILE="/opt/disaster-recovery/recovery-images/full-system-$TIMESTAMP.tar.gz"
+           echo "Creating full system recovery image..." | tee -a $LOG_FILE
+           
+           tar --exclude=/proc \
+               --exclude=/sys \
+               --exclude=/dev \
+               --exclude=/run \
+               --exclude=/mnt \
+               --exclude=/media \
+               --exclude=/tmp \
+               --exclude=/opt/disaster-recovery/recovery-images \
+               -czf "$IMAGE_FILE" / 2>&1 | tee -a $LOG_FILE
+           ;;
+       "critical")
+           IMAGE_FILE="/opt/disaster-recovery/recovery-images/critical-data-$TIMESTAMP.tar.gz"
+           echo "Creating critical data recovery image..." | tee -a $LOG_FILE
+           
+           tar -czf "$IMAGE_FILE" $CRITICAL_DATA 2>&1 | tee -a $LOG_FILE
+           ;;
+       "config")
+           IMAGE_FILE="/opt/disaster-recovery/recovery-images/config-$TIMESTAMP.tar.gz"
+           echo "Creating configuration recovery image..." | tee -a $LOG_FILE
+           
+           tar -czf "$IMAGE_FILE" \
+               /etc \
+               /root/.ssh \
+               /home/*/.ssh \
+               /var/lib/rpm \
+               /boot/grub2 2>&1 | tee -a $LOG_FILE
+           ;;
+       *)
+           echo "Invalid image type: $IMAGE_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   if [ $? -eq 0 ]; then
+       echo "Recovery image created successfully: $IMAGE_FILE" | tee -a $LOG_FILE
+       echo "Image size: $(du -h "$IMAGE_FILE" | cut -f1)" | tee -a $LOG_FILE
+       
+       # Create checksum
+       sha256sum "$IMAGE_FILE" > "${IMAGE_FILE}.sha256"
+       echo "Checksum created: ${IMAGE_FILE}.sha256" | tee -a $LOG_FILE
+       
+       # Create image manifest
+       cat > "${IMAGE_FILE}.manifest" << EOF
+   Recovery Image Manifest
+   Created: $(date)
+   Type: $IMAGE_TYPE
+   File: $(basename "$IMAGE_FILE")
+   Size: $(du -h "$IMAGE_FILE" | cut -f1)
+   Checksum: $(cat "${IMAGE_FILE}.sha256" | cut -d' ' -f1)
+   
+   Contents:
+   $(tar -tzf "$IMAGE_FILE" | head -20)
+   ... (showing first 20 entries)
+   EOF
+       
+   else
+       echo "Recovery image creation failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/create-recovery-image.sh
+
+2. Create system restore script:
+   # vim /usr/local/bin/system-restore.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   RECOVERY_IMAGE=$1
+   RESTORE_TYPE=${2:-"full"}
+   RESTORE_TARGET=${3:-"/"}
+   
+   if [ -z "$RECOVERY_IMAGE" ]; then
+       echo "Usage: $0 <recovery_image> [restore_type] [restore_target]"
+       echo "Restore types: full, selective, verify"
+       exit 1
+   fi
+   
+   if [ ! -f "$RECOVERY_IMAGE" ]; then
+       echo "Recovery image not found: $RECOVERY_IMAGE"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/disaster-recovery/logs/system-restore-$TIMESTAMP.log"
+   
+   echo "=== SYSTEM RESTORE OPERATION - $(date) ===" | tee $LOG_FILE
+   echo "Recovery Image: $RECOVERY_IMAGE" | tee -a $LOG_FILE
+   echo "Restore Type: $RESTORE_TYPE" | tee -a $LOG_FILE
+   echo "Restore Target: $RESTORE_TARGET" | tee -a $LOG_FILE
+   
+   # Verify image integrity
+   echo "Verifying image integrity..." | tee -a $LOG_FILE
+   if [ -f "${RECOVERY_IMAGE}.sha256" ]; then
+       if sha256sum -c "${RECOVERY_IMAGE}.sha256" >/dev/null 2>&1; then
+           echo "Image integrity verification: PASSED" | tee -a $LOG_FILE
+       else
+           echo "Image integrity verification: FAILED" | tee -a $LOG_FILE
+           exit 1
+       fi
+   else
+       echo "No checksum file found, skipping integrity check" | tee -a $LOG_FILE
+   fi
+   
+   case $RESTORE_TYPE in
+       "full")
+           echo "Performing full system restore..." | tee -a $LOG_FILE
+           echo "WARNING: This will overwrite existing system files!" | tee -a $LOG_FILE
+           
+           # Create backup of current system before restore
+           BACKUP_DIR="/tmp/pre-restore-backup-$TIMESTAMP"
+           mkdir -p "$BACKUP_DIR"
+           tar -czf "$BACKUP_DIR/current-system.tar.gz" /etc /root 2>/dev/null
+           
+           # Perform restore
+           tar -xzf "$RECOVERY_IMAGE" -C "$RESTORE_TARGET" 2>&1 | tee -a $LOG_FILE
+           ;;
+       "selective")
+           echo "Performing selective restore..." | tee -a $LOG_FILE
+           echo "Available files in recovery image:" | tee -a $LOG_FILE
+           tar -tzf "$RECOVERY_IMAGE" | head -20 | tee -a $LOG_FILE
+           
+           echo "Enter files/directories to restore (one per line, empty line to finish):"
+           while read -r file_to_restore; do
+               [ -z "$file_to_restore" ] && break
+               echo "Restoring: $file_to_restore" | tee -a $LOG_FILE
+               tar -xzf "$RECOVERY_IMAGE" -C "$RESTORE_TARGET" "$file_to_restore" 2>&1 | tee -a $LOG_FILE
+           done
+           ;;
+       "verify")
+           echo "Verifying recovery image contents..." | tee -a $LOG_FILE
+           tar -tzf "$RECOVERY_IMAGE" | head -50 | tee -a $LOG_FILE
+           echo "Image verification completed" | tee -a $LOG_FILE
+           exit 0
+           ;;
+       *)
+           echo "Invalid restore type: $RESTORE_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   if [ $? -eq 0 ]; then
+       echo "System restore completed successfully" | tee -a $LOG_FILE
+       echo "Please reboot the system to complete the recovery process" | tee -a $LOG_FILE
+   else
+       echo "System restore failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/system-restore.sh
+
+3. Create service recovery script:
+   # vim /usr/local/bin/service-recovery.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   RECOVERY_LEVEL=${1:-"critical"}
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/disaster-recovery/logs/service-recovery-$TIMESTAMP.log"
+   
+   echo "=== SERVICE RECOVERY - $(date) ===" | tee $LOG_FILE
+   echo "Recovery Level: $RECOVERY_LEVEL" | tee -a $LOG_FILE
+   
+   # Determine services to recover based on level
+   case $RECOVERY_LEVEL in
+       "critical")
+           SERVICES_TO_RECOVER=$CRITICAL_SERVICES
+           ;;
+       "important")
+           SERVICES_TO_RECOVER="$CRITICAL_SERVICES $IMPORTANT_SERVICES"
+           ;;
+       "all")
+           SERVICES_TO_RECOVER="$CRITICAL_SERVICES $IMPORTANT_SERVICES $NORMAL_SERVICES"
+           ;;
+       *)
+           echo "Invalid recovery level: $RECOVERY_LEVEL" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   echo "Services to recover: $SERVICES_TO_RECOVER" | tee -a $LOG_FILE
+   
+   RECOVERY_SUCCESS=0
+   RECOVERY_FAILURES=0
+   
+   # Stop all services first
+   echo "Stopping services for clean recovery..." | tee -a $LOG_FILE
+   for service in $SERVICES_TO_RECOVER; do
+       systemctl stop $service 2>/dev/null
+   done
+   
+   # Start services in order
+   for service in $SERVICES_TO_RECOVER; do
+       echo "Recovering service: $service" | tee -a $LOG_FILE
+       
+       # Check if service exists
+       if systemctl list-unit-files | grep -q "^$service.service"; then
+           # Enable and start service
+           systemctl enable $service 2>&1 | tee -a $LOG_FILE
+           systemctl start $service 2>&1 | tee -a $LOG_FILE
+           
+           # Verify service is running
+           sleep 2
+           if systemctl is-active $service >/dev/null 2>&1; then
+               echo "Service $service: RECOVERED" | tee -a $LOG_FILE
+               RECOVERY_SUCCESS=$((RECOVERY_SUCCESS + 1))
+           else
+               echo "Service $service: FAILED" | tee -a $LOG_FILE
+               RECOVERY_FAILURES=$((RECOVERY_FAILURES + 1))
+               
+               # Get service status for troubleshooting
+               systemctl status $service >> $LOG_FILE 2>&1
+           fi
+       else
+           echo "Service $service: NOT FOUND" | tee -a $LOG_FILE
+           RECOVERY_FAILURES=$((RECOVERY_FAILURES + 1))
+       fi
+   done
+   
+   # Summary
+   echo >> $LOG_FILE
+   echo "=== SERVICE RECOVERY SUMMARY ===" | tee -a $LOG_FILE
+   echo "Successful recoveries: $RECOVERY_SUCCESS" | tee -a $LOG_FILE
+   echo "Failed recoveries: $RECOVERY_FAILURES" | tee -a $LOG_FILE
+   echo "Total services: $((RECOVERY_SUCCESS + RECOVERY_FAILURES))" | tee -a $LOG_FILE
+   
+   if [ $RECOVERY_FAILURES -eq 0 ]; then
+       echo "All services recovered successfully" | tee -a $LOG_FILE
+       exit 0
+   else
+       echo "Some services failed to recover" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/service-recovery.sh
+PART C: DATA RECOVERY PROCEDURES
+---------------------------------
+
+1. Create data recovery script:
+   # vim /usr/local/bin/data-recovery.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   DATA_TYPE=${1:-"critical"}
+   RECOVERY_SOURCE=$2
+   RECOVERY_TARGET=${3:-"/"}
+   
+   if [ -z "$RECOVERY_SOURCE" ]; then
+       echo "Usage: $0 <data_type> <recovery_source> [recovery_target]"
+       echo "Data types: critical, important, all"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/disaster-recovery/logs/data-recovery-$TIMESTAMP.log"
+   
+   echo "=== DATA RECOVERY OPERATION - $(date) ===" | tee $LOG_FILE
+   echo "Data Type: $DATA_TYPE" | tee -a $LOG_FILE
+   echo "Recovery Source: $RECOVERY_SOURCE" | tee -a $LOG_FILE
+   echo "Recovery Target: $RECOVERY_TARGET" | tee -a $LOG_FILE
+   
+   # Determine data paths based on type
+   case $DATA_TYPE in
+       "critical")
+           DATA_PATHS=$CRITICAL_DATA
+           ;;
+       "important")
+           DATA_PATHS="$CRITICAL_DATA $IMPORTANT_DATA"
+           ;;
+       "all")
+           DATA_PATHS="$CRITICAL_DATA $IMPORTANT_DATA $NORMAL_DATA"
+           ;;
+       *)
+           echo "Invalid data type: $DATA_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   echo "Data paths to recover: $DATA_PATHS" | tee -a $LOG_FILE
+   
+   RECOVERY_SUCCESS=0
+   RECOVERY_FAILURES=0
+   
+   # Check if recovery source is a file or directory
+   if [ -f "$RECOVERY_SOURCE" ]; then
+       echo "Recovering from archive: $RECOVERY_SOURCE" | tee -a $LOG_FILE
+       
+       # Verify archive integrity
+       if tar -tzf "$RECOVERY_SOURCE" >/dev/null 2>&1; then
+           echo "Archive integrity verified" | tee -a $LOG_FILE
+           
+           # Extract specific data paths
+           for data_path in $DATA_PATHS; do
+               echo "Recovering data path: $data_path" | tee -a $LOG_FILE
+               
+               if tar -tzf "$RECOVERY_SOURCE" | grep -q "^${data_path#/}"; then
+                   tar -xzf "$RECOVERY_SOURCE" -C "$RECOVERY_TARGET" "${data_path#/}" 2>&1 | tee -a $LOG_FILE
+                   
+                   if [ $? -eq 0 ]; then
+                       echo "Data path $data_path: RECOVERED" | tee -a $LOG_FILE
+                       RECOVERY_SUCCESS=$((RECOVERY_SUCCESS + 1))
+                   else
+                       echo "Data path $data_path: FAILED" | tee -a $LOG_FILE
+                       RECOVERY_FAILURES=$((RECOVERY_FAILURES + 1))
+                   fi
+               else
+                   echo "Data path $data_path: NOT FOUND in archive" | tee -a $LOG_FILE
+                   RECOVERY_FAILURES=$((RECOVERY_FAILURES + 1))
+               fi
+           done
+       else
+           echo "Archive integrity check failed" | tee -a $LOG_FILE
+           exit 1
+       fi
+       
+   elif [ -d "$RECOVERY_SOURCE" ]; then
+       echo "Recovering from directory: $RECOVERY_SOURCE" | tee -a $LOG_FILE
+       
+       # Copy data paths from source directory
+       for data_path in $DATA_PATHS; do
+           SOURCE_PATH="$RECOVERY_SOURCE$data_path"
+           TARGET_PATH="$RECOVERY_TARGET$data_path"
+           
+           echo "Recovering data path: $data_path" | tee -a $LOG_FILE
+           
+           if [ -e "$SOURCE_PATH" ]; then
+               # Create target directory if needed
+               mkdir -p "$(dirname "$TARGET_PATH")"
+               
+               # Copy with preservation of attributes
+               cp -a "$SOURCE_PATH" "$TARGET_PATH" 2>&1 | tee -a $LOG_FILE
+               
+               if [ $? -eq 0 ]; then
+                   echo "Data path $data_path: RECOVERED" | tee -a $LOG_FILE
+                   RECOVERY_SUCCESS=$((RECOVERY_SUCCESS + 1))
+               else
+                   echo "Data path $data_path: FAILED" | tee -a $LOG_FILE
+                   RECOVERY_FAILURES=$((RECOVERY_FAILURES + 1))
+               fi
+           else
+               echo "Data path $data_path: NOT FOUND in source" | tee -a $LOG_FILE
+               RECOVERY_FAILURES=$((RECOVERY_FAILURES + 1))
+           fi
+       done
+   else
+       echo "Recovery source not found or invalid: $RECOVERY_SOURCE" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # Summary
+   echo >> $LOG_FILE
+   echo "=== DATA RECOVERY SUMMARY ===" | tee -a $LOG_FILE
+   echo "Successful recoveries: $RECOVERY_SUCCESS" | tee -a $LOG_FILE
+   echo "Failed recoveries: $RECOVERY_FAILURES" | tee -a $LOG_FILE
+   echo "Total data paths: $((RECOVERY_SUCCESS + RECOVERY_FAILURES))" | tee -a $LOG_FILE
+   
+   if [ $RECOVERY_FAILURES -eq 0 ]; then
+       echo "All data recovered successfully" | tee -a $LOG_FILE
+       exit 0
+   else
+       echo "Some data recovery operations failed" | tee -a $LOG_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/data-recovery.sh
+
+2. Create database recovery script:
+   # vim /usr/local/bin/database-recovery.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   DB_TYPE=${1:-"mysql"}
+   BACKUP_FILE=$2
+   
+   if [ -z "$BACKUP_FILE" ]; then
+       echo "Usage: $0 <db_type> <backup_file>"
+       echo "Database types: mysql, postgresql"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/disaster-recovery/logs/database-recovery-$TIMESTAMP.log"
+   
+   echo "=== DATABASE RECOVERY - $(date) ===" | tee $LOG_FILE
+   echo "Database Type: $DB_TYPE" | tee -a $LOG_FILE
+   echo "Backup File: $BACKUP_FILE" | tee -a $LOG_FILE
+   
+   case $DB_TYPE in
+       "mysql")
+           echo "Recovering MySQL database..." | tee -a $LOG_FILE
+           
+           # Stop MySQL service
+           systemctl stop mysqld 2>&1 | tee -a $LOG_FILE
+           
+           # Backup current data directory
+           if [ -d /var/lib/mysql ]; then
+               mv /var/lib/mysql /var/lib/mysql.backup.$TIMESTAMP
+               echo "Current MySQL data backed up to /var/lib/mysql.backup.$TIMESTAMP" | tee -a $LOG_FILE
+           fi
+           
+           # Create new data directory
+           mkdir -p /var/lib/mysql
+           chown mysql:mysql /var/lib/mysql
+           
+           # Initialize MySQL if needed
+           if [ ! -f /var/lib/mysql/mysql/user.frm ]; then
+               mysqld --initialize-insecure --user=mysql 2>&1 | tee -a $LOG_FILE
+           fi
+           
+           # Start MySQL service
+           systemctl start mysqld 2>&1 | tee -a $LOG_FILE
+           
+           # Wait for MySQL to start
+           sleep 10
+           
+           # Restore from backup
+           if [ -f "$BACKUP_FILE" ]; then
+               echo "Restoring MySQL from backup..." | tee -a $LOG_FILE
+               mysql < "$BACKUP_FILE" 2>&1 | tee -a $LOG_FILE
+               
+               if [ $? -eq 0 ]; then
+                   echo "MySQL database recovery completed successfully" | tee -a $LOG_FILE
+               else
+                   echo "MySQL database recovery failed" | tee -a $LOG_FILE
+                   exit 1
+               fi
+           else
+               echo "Backup file not found: $BACKUP_FILE" | tee -a $LOG_FILE
+               exit 1
+           fi
+           ;;
+       "postgresql")
+           echo "Recovering PostgreSQL database..." | tee -a $LOG_FILE
+           
+           # Stop PostgreSQL service
+           systemctl stop postgresql 2>&1 | tee -a $LOG_FILE
+           
+           # Backup current data directory
+           if [ -d /var/lib/pgsql/data ]; then
+               mv /var/lib/pgsql/data /var/lib/pgsql/data.backup.$TIMESTAMP
+               echo "Current PostgreSQL data backed up" | tee -a $LOG_FILE
+           fi
+           
+           # Initialize PostgreSQL
+           postgresql-setup --initdb 2>&1 | tee -a $LOG_FILE
+           
+           # Start PostgreSQL service
+           systemctl start postgresql 2>&1 | tee -a $LOG_FILE
+           
+           # Restore from backup
+           if [ -f "$BACKUP_FILE" ]; then
+               echo "Restoring PostgreSQL from backup..." | tee -a $LOG_FILE
+               su - postgres -c "psql < $BACKUP_FILE" 2>&1 | tee -a $LOG_FILE
+               
+               if [ $? -eq 0 ]; then
+                   echo "PostgreSQL database recovery completed successfully" | tee -a $LOG_FILE
+               else
+                   echo "PostgreSQL database recovery failed" | tee -a $LOG_FILE
+                   exit 1
+               fi
+           else
+               echo "Backup file not found: $BACKUP_FILE" | tee -a $LOG_FILE
+               exit 1
+           fi
+           ;;
+       *)
+           echo "Unsupported database type: $DB_TYPE" | tee -a $LOG_FILE
+           exit 1
+           ;;
+   esac
+   
+   # chmod +x /usr/local/bin/database-recovery.sh
+
+PART D: AUTOMATED DISASTER RECOVERY
+------------------------------------
+
+1. Create master disaster recovery script:
+   # vim /usr/local/bin/disaster-recovery-master.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   DISASTER_TYPE=$1
+   SEVERITY=$2
+   RECOVERY_MODE=${3:-"automatic"}
+   
+   if [ $# -lt 2 ]; then
+       echo "Usage: $0 <disaster_type> <severity> [recovery_mode]"
+       echo "Recovery modes: automatic, manual, test"
+       exit 1
+   fi
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   LOG_FILE="/opt/disaster-recovery/logs/master-recovery-$TIMESTAMP.log"
+   
+   echo "=== MASTER DISASTER RECOVERY - $(date) ===" | tee $LOG_FILE
+   echo "Disaster Type: $DISASTER_TYPE" | tee -a $LOG_FILE
+   echo "Severity: $SEVERITY" | tee -a $LOG_FILE
+   echo "Recovery Mode: $RECOVERY_MODE" | tee -a $LOG_FILE
+   
+   # Classify disaster and get recovery parameters
+   echo "Classifying disaster..." | tee -a $LOG_FILE
+   /usr/local/bin/disaster-classifier.sh "$DISASTER_TYPE" "$SEVERITY" 2>&1 | tee -a $LOG_FILE
+   
+   # Send initial notification
+   echo "Sending disaster notification..." | tee -a $LOG_FILE
+   /usr/local/bin/disaster-notification.sh "disaster_declared" "$DISASTER_TYPE $SEVERITY disaster declared at $(date)" 2>&1 | tee -a $LOG_FILE
+   
+   RECOVERY_START_TIME=$(date +%s)
+   
+   # Recovery Phase 1: System Assessment
+   echo "=== PHASE 1: SYSTEM ASSESSMENT ===" | tee -a $LOG_FILE
+   /usr/local/bin/system-assessment.sh 2>&1 | tee -a $LOG_FILE
+   
+   # Recovery Phase 2: Service Recovery
+   echo "=== PHASE 2: SERVICE RECOVERY ===" | tee -a $LOG_FILE
+   case $SEVERITY in
+       "critical")
+           /usr/local/bin/service-recovery.sh "critical" 2>&1 | tee -a $LOG_FILE
+           ;;
+       "major")
+           /usr/local/bin/service-recovery.sh "important" 2>&1 | tee -a $LOG_FILE
+           ;;
+       "minor")
+           /usr/local/bin/service-recovery.sh "all" 2>&1 | tee -a $LOG_FILE
+           ;;
+   esac
+   
+   # Recovery Phase 3: Data Recovery
+   echo "=== PHASE 3: DATA RECOVERY ===" | tee -a $LOG_FILE
+   LATEST_BACKUP=$(find /backup -name "*.tar.gz" -type f -mtime -1 | head -1)
+   if [ -n "$LATEST_BACKUP" ]; then
+       case $SEVERITY in
+           "critical")
+               /usr/local/bin/data-recovery.sh "critical" "$LATEST_BACKUP" 2>&1 | tee -a $LOG_FILE
+               ;;
+           "major")
+               /usr/local/bin/data-recovery.sh "important" "$LATEST_BACKUP" 2>&1 | tee -a $LOG_FILE
+               ;;
+           "minor")
+               /usr/local/bin/data-recovery.sh "all" "$LATEST_BACKUP" 2>&1 | tee -a $LOG_FILE
+               ;;
+       esac
+   else
+       echo "No recent backup found for data recovery" | tee -a $LOG_FILE
+   fi
+   
+   # Recovery Phase 4: System Verification
+   echo "=== PHASE 4: SYSTEM VERIFICATION ===" | tee -a $LOG_FILE
+   /usr/local/bin/recovery-verification.sh 2>&1 | tee -a $LOG_FILE
+   
+   RECOVERY_END_TIME=$(date +%s)
+   RECOVERY_DURATION=$(( (RECOVERY_END_TIME - RECOVERY_START_TIME) / 60 ))
+   
+   echo "=== RECOVERY SUMMARY ===" | tee -a $LOG_FILE
+   echo "Recovery Duration: $RECOVERY_DURATION minutes" | tee -a $LOG_FILE
+   
+   # Check if RTO was met
+   case $SEVERITY in
+       "critical")
+           TARGET_RTO=$RTO_CRITICAL
+           ;;
+       "major")
+           TARGET_RTO=$RTO_IMPORTANT
+           ;;
+       "minor")
+           TARGET_RTO=$RTO_NORMAL
+           ;;
+   esac
+   
+   echo "Target RTO: $TARGET_RTO minutes" | tee -a $LOG_FILE
+   
+   if [ $RECOVERY_DURATION -le $TARGET_RTO ]; then
+       echo "RTO ACHIEVED: Recovery completed within target time" | tee -a $LOG_FILE
+       RECOVERY_STATUS="SUCCESS"
+   else
+       echo "RTO MISSED: Recovery took longer than target time" | tee -a $LOG_FILE
+       RECOVERY_STATUS="PARTIAL"
+   fi
+   
+   # Send completion notification
+   /usr/local/bin/disaster-notification.sh "recovery_complete" "Disaster recovery completed with status: $RECOVERY_STATUS. Duration: $RECOVERY_DURATION minutes" 2>&1 | tee -a $LOG_FILE
+   
+   echo "Master disaster recovery process completed" | tee -a $LOG_FILE
+   
+   # chmod +x /usr/local/bin/disaster-recovery-master.sh
+
+2. Create system assessment script:
+   # vim /usr/local/bin/system-assessment.sh
+   
+   #!/bin/bash
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   ASSESSMENT_FILE="/opt/disaster-recovery/logs/system-assessment-$TIMESTAMP.log"
+   
+   echo "=== SYSTEM ASSESSMENT - $(date) ===" | tee $ASSESSMENT_FILE
+   
+   # Check system boot status
+   echo "BOOT STATUS:" | tee -a $ASSESSMENT_FILE
+   uptime | tee -a $ASSESSMENT_FILE
+   echo >> $ASSESSMENT_FILE
+   
+   # Check filesystem status
+   echo "FILESYSTEM STATUS:" | tee -a $ASSESSMENT_FILE
+   df -h | tee -a $ASSESSMENT_FILE
+   echo >> $ASSESSMENT_FILE
+   
+   # Check critical services
+   echo "CRITICAL SERVICES STATUS:" | tee -a $ASSESSMENT_FILE
+   source /etc/disaster-recovery.conf
+   for service in $CRITICAL_SERVICES; do
+       STATUS=$(systemctl is-active $service 2>/dev/null || echo "inactive")
+       echo "$service: $STATUS" | tee -a $ASSESSMENT_FILE
+   done
+   echo >> $ASSESSMENT_FILE
+   
+   # Check network connectivity
+   echo "NETWORK CONNECTIVITY:" | tee -a $ASSESSMENT_FILE
+   if ping -c 3 8.8.8.8 >/dev/null 2>&1; then
+       echo "External connectivity: OK" | tee -a $ASSESSMENT_FILE
+   else
+       echo "External connectivity: FAILED" | tee -a $ASSESSMENT_FILE
+   fi
+   
+   if ping -c 3 $DR_SITE_SECONDARY >/dev/null 2>&1; then
+       echo "DR site connectivity: OK" | tee -a $ASSESSMENT_FILE
+   else
+       echo "DR site connectivity: FAILED" | tee -a $ASSESSMENT_FILE
+   fi
+   echo >> $ASSESSMENT_FILE
+   
+   # Check system resources
+   echo "SYSTEM RESOURCES:" | tee -a $ASSESSMENT_FILE
+   echo "CPU Load: $(uptime | awk -F'load average:' '{print $2}')" | tee -a $ASSESSMENT_FILE
+   echo "Memory Usage: $(free -h | grep Mem | awk '{print $3"/"$2}')" | tee -a $ASSESSMENT_FILE
+   echo "Disk Usage: $(df -h / | tail -1 | awk '{print $5}')" | tee -a $ASSESSMENT_FILE
+   
+   echo "System assessment completed: $ASSESSMENT_FILE"
+   
+   # chmod +x /usr/local/bin/system-assessment.sh
+
+3. Create recovery verification script:
+   # vim /usr/local/bin/recovery-verification.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   VERIFICATION_FILE="/opt/disaster-recovery/logs/recovery-verification-$TIMESTAMP.log"
+   
+   echo "=== RECOVERY VERIFICATION - $(date) ===" | tee $VERIFICATION_FILE
+   
+   VERIFICATION_PASSED=0
+   VERIFICATION_FAILED=0
+   
+   # Verify critical services
+   echo "VERIFYING CRITICAL SERVICES:" | tee -a $VERIFICATION_FILE
+   for service in $CRITICAL_SERVICES; do
+       if systemctl is-active $service >/dev/null 2>&1; then
+           echo "$service: RUNNING" | tee -a $VERIFICATION_FILE
+           VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+       else
+           echo "$service: FAILED" | tee -a $VERIFICATION_FILE
+           VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+       fi
+   done
+   echo >> $VERIFICATION_FILE
+   
+   # Verify critical data paths
+   echo "VERIFYING CRITICAL DATA:" | tee -a $VERIFICATION_FILE
+   for data_path in $CRITICAL_DATA; do
+       if [ -e "$data_path" ]; then
+           echo "$data_path: EXISTS" | tee -a $VERIFICATION_FILE
+           VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+       else
+           echo "$data_path: MISSING" | tee -a $VERIFICATION_FILE
+           VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+       fi
+   done
+   echo >> $VERIFICATION_FILE
+   
+   # Verify network connectivity
+   echo "VERIFYING NETWORK CONNECTIVITY:" | tee -a $VERIFICATION_FILE
+   if ping -c 3 8.8.8.8 >/dev/null 2>&1; then
+       echo "External connectivity: OK" | tee -a $VERIFICATION_FILE
+       VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+   else
+       echo "External connectivity: FAILED" | tee -a $VERIFICATION_FILE
+       VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+   fi
+   
+   # Verify system functionality
+   echo "VERIFYING SYSTEM FUNCTIONALITY:" | tee -a $VERIFICATION_FILE
+   
+   # Test file system write
+   TEST_FILE="/tmp/recovery-test-$$"
+   if echo "Recovery test" > $TEST_FILE 2>/dev/null; then
+       echo "File system write: OK" | tee -a $VERIFICATION_FILE
+       rm -f $TEST_FILE
+       VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+   else
+       echo "File system write: FAILED" | tee -a $VERIFICATION_FILE
+       VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+   fi
+   
+   # Test DNS resolution
+   if nslookup google.com >/dev/null 2>&1; then
+       echo "DNS resolution: OK" | tee -a $VERIFICATION_FILE
+       VERIFICATION_PASSED=$((VERIFICATION_PASSED + 1))
+   else
+       echo "DNS resolution: FAILED" | tee -a $VERIFICATION_FILE
+       VERIFICATION_FAILED=$((VERIFICATION_FAILED + 1))
+   fi
+   
+   # Summary
+   echo >> $VERIFICATION_FILE
+   echo "=== VERIFICATION SUMMARY ===" | tee -a $VERIFICATION_FILE
+   echo "Passed verifications: $VERIFICATION_PASSED" | tee -a $VERIFICATION_FILE
+   echo "Failed verifications: $VERIFICATION_FAILED" | tee -a $VERIFICATION_FILE
+   echo "Total verifications: $((VERIFICATION_PASSED + VERIFICATION_FAILED))" | tee -a $VERIFICATION_FILE
+   
+   if [ $VERIFICATION_FAILED -eq 0 ]; then
+       echo "ALL VERIFICATIONS PASSED - System recovery successful" | tee -a $VERIFICATION_FILE
+       exit 0
+   else
+       echo "SOME VERIFICATIONS FAILED - System recovery incomplete" | tee -a $VERIFICATION_FILE
+       exit 1
+   fi
+   
+   # chmod +x /usr/local/bin/recovery-verification.sh
+
+PART E: DISASTER RECOVERY TESTING
+----------------------------------
+
+1. Create DR testing framework:
+   # vim /usr/local/bin/dr-test-framework.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   TEST_TYPE=${1:-"basic"}
+   TEST_MODE=${2:-"simulation"}
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   TEST_LOG="/opt/disaster-recovery/logs/dr-test-$TIMESTAMP.log"
+   
+   echo "=== DISASTER RECOVERY TEST - $(date) ===" | tee $TEST_LOG
+   echo "Test Type: $TEST_TYPE" | tee -a $TEST_LOG
+   echo "Test Mode: $TEST_MODE" | tee -a $TEST_LOG
+   
+   case $TEST_TYPE in
+       "basic")
+           echo "Running basic DR test..." | tee -a $TEST_LOG
+           
+           # Test 1: Service recovery
+           echo "Test 1: Service Recovery" | tee -a $TEST_LOG
+           /usr/local/bin/service-recovery.sh "critical" 2>&1 | tee -a $TEST_LOG
+           
+           # Test 2: Data recovery verification
+           echo "Test 2: Data Recovery Verification" | tee -a $TEST_LOG
+           for data_path in $CRITICAL_DATA; do
+               if [ -e "$data_path" ]; then
+                   echo "$data_path: ACCESSIBLE" | tee -a $TEST_LOG
+               else
+                   echo "$data_path: INACCESSIBLE" | tee -a $TEST_LOG
+               fi
+           done
+           
+           # Test 3: System verification
+           echo "Test 3: System Verification" | tee -a $TEST_LOG
+           /usr/local/bin/recovery-verification.sh 2>&1 | tee -a $TEST_LOG
+           ;;
+           
+       "full")
+           echo "Running full DR test..." | tee -a $TEST_LOG
+           
+           if [ "$TEST_MODE" = "simulation" ]; then
+               echo "SIMULATION MODE - No actual changes will be made" | tee -a $TEST_LOG
+           else
+               echo "LIVE MODE - Actual recovery procedures will be executed" | tee -a $TEST_LOG
+               echo "WARNING: This may affect system availability" | tee -a $TEST_LOG
+           fi
+           
+           # Full disaster recovery simulation
+           /usr/local/bin/disaster-recovery-master.sh "hardware" "critical" "test" 2>&1 | tee -a $TEST_LOG
+           ;;
+           
+       "network")
+           echo "Running network DR test..." | tee -a $TEST_LOG
+           
+           # Test network connectivity to DR site
+           if ping -c 5 $DR_SITE_SECONDARY >/dev/null 2>&1; then
+               echo "DR site connectivity: PASSED" | tee -a $TEST_LOG
+           else
+               echo "DR site connectivity: FAILED" | tee -a $TEST_LOG
+           fi
+           
+           # Test backup accessibility
+           if [ -d "$DR_BACKUP_LOCATION" ]; then
+               echo "Backup location accessibility: PASSED" | tee -a $TEST_LOG
+           else
+               echo "Backup location accessibility: FAILED" | tee -a $TEST_LOG
+           fi
+           ;;
+           
+       *)
+           echo "Invalid test type: $TEST_TYPE" | tee -a $TEST_LOG
+           exit 1
+           ;;
+   esac
+   
+   echo "DR test completed: $TEST_LOG"
+   
+   # chmod +x /usr/local/bin/dr-test-framework.sh
+
+2. Create disaster notification system:
+   # vim /usr/local/bin/disaster-notification.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   NOTIFICATION_TYPE=$1
+   MESSAGE=$2
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   NOTIFICATION_LOG="/opt/disaster-recovery/logs/notifications-$TIMESTAMP.log"
+   
+   echo "=== DISASTER NOTIFICATION - $(date) ===" | tee $NOTIFICATION_LOG
+   echo "Type: $NOTIFICATION_TYPE" | tee -a $NOTIFICATION_LOG
+   echo "Message: $MESSAGE" | tee -a $NOTIFICATION_LOG
+   
+   case $NOTIFICATION_TYPE in
+       "disaster_declared")
+           SUBJECT="DISASTER DECLARED - $(hostname)"
+           PRIORITY="HIGH"
+           RECIPIENTS="$DR_ESCALATION_EMAIL"
+           ;;
+       "recovery_started")
+           SUBJECT="Disaster Recovery Started - $(hostname)"
+           PRIORITY="HIGH"
+           RECIPIENTS="$DR_NOTIFICATION_EMAIL"
+           ;;
+       "recovery_complete")
+           SUBJECT="Disaster Recovery Complete - $(hostname)"
+           PRIORITY="NORMAL"
+           RECIPIENTS="$DR_NOTIFICATION_EMAIL"
+           ;;
+       "test_started")
+           SUBJECT="DR Test Started - $(hostname)"
+           PRIORITY="LOW"
+           RECIPIENTS="$DR_NOTIFICATION_EMAIL"
+           ;;
+       "test_complete")
+           SUBJECT="DR Test Complete - $(hostname)"
+           PRIORITY="LOW"
+           RECIPIENTS="$DR_NOTIFICATION_EMAIL"
+           ;;
+       *)
+           echo "Unknown notification type: $NOTIFICATION_TYPE" | tee -a $NOTIFICATION_LOG
+           exit 1
+           ;;
+   esac
+   
+   # Send email notification
+   if command -v mail >/dev/null 2>&1; then
+       echo -e "Disaster Recovery Notification\n\nTimestamp: $(date)\nHost: $(hostname)\nPriority: $PRIORITY\n\nMessage:\n$MESSAGE" | \
+       mail -s "$SUBJECT" "$RECIPIENTS"
+       echo "Email notification sent to: $RECIPIENTS" | tee -a $NOTIFICATION_LOG
+   fi
+   
+   # Log to system log
+   logger -p local0.info "DR-NOTIFICATION: $NOTIFICATION_TYPE - $MESSAGE"
+   
+   # Create notification file
+   echo "$(date): $NOTIFICATION_TYPE - $MESSAGE" >> /opt/disaster-recovery/logs/all-notifications.log
+   
+   echo "Notification processed successfully" | tee -a $NOTIFICATION_LOG
+   
+   # chmod +x /usr/local/bin/disaster-notification.sh
+PART F: BUSINESS CONTINUITY PLANNING
+-------------------------------------
+
+1. Create business continuity assessment:
+   # vim /usr/local/bin/business-continuity-assessment.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   ASSESSMENT_FILE="/opt/disaster-recovery/logs/business-continuity-$TIMESTAMP.log"
+   
+   echo "=== BUSINESS CONTINUITY ASSESSMENT - $(date) ===" | tee $ASSESSMENT_FILE
+   
+   # Business Impact Analysis
+   echo "BUSINESS IMPACT ANALYSIS:" | tee -a $ASSESSMENT_FILE
+   echo "Critical Business Functions:" | tee -a $ASSESSMENT_FILE
+   echo "- Email Services (RTO: $RTO_CRITICAL min, RPO: $RPO_CRITICAL min)" | tee -a $ASSESSMENT_FILE
+   echo "- Web Services (RTO: $RTO_CRITICAL min, RPO: $RPO_CRITICAL min)" | tee -a $ASSESSMENT_FILE
+   echo "- Database Services (RTO: $RTO_IMPORTANT min, RPO: $RPO_IMPORTANT min)" | tee -a $ASSESSMENT_FILE
+   echo "- File Services (RTO: $RTO_NORMAL min, RPO: $RPO_NORMAL min)" | tee -a $ASSESSMENT_FILE
+   echo >> $ASSESSMENT_FILE
+   
+   # Current System Status
+   echo "CURRENT SYSTEM STATUS:" | tee -a $ASSESSMENT_FILE
+   
+   # Check critical services availability
+   CRITICAL_AVAILABLE=0
+   CRITICAL_TOTAL=0
+   for service in $CRITICAL_SERVICES; do
+       CRITICAL_TOTAL=$((CRITICAL_TOTAL + 1))
+       if systemctl is-active $service >/dev/null 2>&1; then
+           CRITICAL_AVAILABLE=$((CRITICAL_AVAILABLE + 1))
+           echo "$service: AVAILABLE" | tee -a $ASSESSMENT_FILE
+       else
+           echo "$service: UNAVAILABLE" | tee -a $ASSESSMENT_FILE
+       fi
+   done
+   
+   CRITICAL_AVAILABILITY=$(echo "scale=2; $CRITICAL_AVAILABLE * 100 / $CRITICAL_TOTAL" | bc)
+   echo "Critical Services Availability: ${CRITICAL_AVAILABILITY}%" | tee -a $ASSESSMENT_FILE
+   echo >> $ASSESSMENT_FILE
+   
+   # Data Accessibility Check
+   echo "DATA ACCESSIBILITY:" | tee -a $ASSESSMENT_FILE
+   DATA_ACCESSIBLE=0
+   DATA_TOTAL=0
+   for data_path in $CRITICAL_DATA; do
+       DATA_TOTAL=$((DATA_TOTAL + 1))
+       if [ -r "$data_path" ]; then
+           DATA_ACCESSIBLE=$((DATA_ACCESSIBLE + 1))
+           echo "$data_path: ACCESSIBLE" | tee -a $ASSESSMENT_FILE
+       else
+           echo "$data_path: INACCESSIBLE" | tee -a $ASSESSMENT_FILE
+       fi
+   done
+   
+   DATA_AVAILABILITY=$(echo "scale=2; $DATA_ACCESSIBLE * 100 / $DATA_TOTAL" | bc)
+   echo "Critical Data Availability: ${DATA_AVAILABILITY}%" | tee -a $ASSESSMENT_FILE
+   echo >> $ASSESSMENT_FILE
+   
+   # Business Continuity Score
+   OVERALL_SCORE=$(echo "scale=2; ($CRITICAL_AVAILABILITY + $DATA_AVAILABILITY) / 2" | bc)
+   echo "OVERALL BUSINESS CONTINUITY SCORE: ${OVERALL_SCORE}%" | tee -a $ASSESSMENT_FILE
+   
+   if (( $(echo "$OVERALL_SCORE >= 90" | bc -l) )); then
+       echo "Business Continuity Status: EXCELLENT" | tee -a $ASSESSMENT_FILE
+   elif (( $(echo "$OVERALL_SCORE >= 75" | bc -l) )); then
+       echo "Business Continuity Status: GOOD" | tee -a $ASSESSMENT_FILE
+   elif (( $(echo "$OVERALL_SCORE >= 50" | bc -l) )); then
+       echo "Business Continuity Status: FAIR" | tee -a $ASSESSMENT_FILE
+   else
+       echo "Business Continuity Status: POOR" | tee -a $ASSESSMENT_FILE
+   fi
+   
+   echo "Business continuity assessment completed: $ASSESSMENT_FILE"
+   
+   # chmod +x /usr/local/bin/business-continuity-assessment.sh
+
+2. Create DR documentation generator:
+   # vim /usr/local/bin/generate-dr-documentation.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   DOC_FILE="/opt/disaster-recovery/documentation/DR-Plan-$TIMESTAMP.md"
+   
+   echo "Generating disaster recovery documentation..."
+   
+   cat > $DOC_FILE << EOF
+   # DISASTER RECOVERY PLAN
+   
+   **Generated:** $(date)  
+   **Version:** 1.0  
+   **System:** $(hostname)  
+   **Plan Owner:** System Administrator  
+   
+   ## 1. EXECUTIVE SUMMARY
+   
+   This document outlines the disaster recovery procedures for $(hostname) system. The plan ensures business continuity and rapid recovery from various disaster scenarios.
+   
+   ### Recovery Objectives
+   - **Critical Services RTO:** $RTO_CRITICAL minutes
+   - **Important Services RTO:** $RTO_IMPORTANT minutes
+   - **Normal Services RTO:** $RTO_NORMAL minutes
+   - **Critical Data RPO:** $RPO_CRITICAL minutes
+   - **Important Data RPO:** $RPO_IMPORTANT minutes
+   - **Normal Data RPO:** $RPO_NORMAL minutes
+   
+   ## 2. DISASTER SCENARIOS
+   
+   ### 2.1 Hardware Failures
+   - Server hardware failure
+   - Storage system failure
+   - Network equipment failure
+   
+   ### 2.2 Software Failures
+   - Operating system corruption
+   - Application crashes
+   - Database corruption
+   
+   ### 2.3 Environmental Disasters
+   - Power outages
+   - Natural disasters
+   - Security breaches
+   
+   ## 3. RECOVERY PROCEDURES
+   
+   ### 3.1 Immediate Response (0-15 minutes)
+   1. Assess the situation and classify disaster type
+   2. Activate disaster recovery team
+   3. Execute: \`/usr/local/bin/disaster-classifier.sh <type> <severity>\`
+   4. Send initial notifications
+   
+   ### 3.2 Service Recovery (15-60 minutes)
+   1. Execute system assessment: \`/usr/local/bin/system-assessment.sh\`
+   2. Recover critical services: \`/usr/local/bin/service-recovery.sh critical\`
+   3. Verify service functionality
+   
+   ### 3.3 Data Recovery (30-120 minutes)
+   1. Identify latest backup: \`find /backup -name "*.tar.gz" -mtime -1\`
+   2. Execute data recovery: \`/usr/local/bin/data-recovery.sh critical <backup_file>\`
+   3. Verify data integrity
+   
+   ### 3.4 System Verification (60-180 minutes)
+   1. Execute verification: \`/usr/local/bin/recovery-verification.sh\`
+   2. Perform functionality tests
+   3. Resume normal operations
+   
+   ## 4. CRITICAL SERVICES
+   
+   $(for service in $CRITICAL_SERVICES; do echo "- $service"; done)
+   
+   ## 5. CRITICAL DATA PATHS
+   
+   $(for path in $CRITICAL_DATA; do echo "- $path"; done)
+   
+   ## 6. CONTACT INFORMATION
+   
+   - **Primary Contact:** $DR_NOTIFICATION_EMAIL
+   - **Escalation Contact:** $DR_ESCALATION_EMAIL
+   - **DR Site:** $DR_SITE_SECONDARY
+   
+   ## 7. TESTING SCHEDULE
+   
+   - **Monthly:** Basic DR test (\`/usr/local/bin/dr-test-framework.sh basic\`)
+   - **Quarterly:** Full DR test (\`/usr/local/bin/dr-test-framework.sh full simulation\`)
+   - **Annually:** Live DR test (\`/usr/local/bin/dr-test-framework.sh full live\`)
+   
+   ## 8. RECOVERY SCRIPTS
+   
+   | Script | Purpose | Usage |
+   |--------|---------|-------|
+   | disaster-recovery-master.sh | Master recovery orchestrator | \`./disaster-recovery-master.sh <type> <severity>\` |
+   | service-recovery.sh | Service restoration | \`./service-recovery.sh <level>\` |
+   | data-recovery.sh | Data restoration | \`./data-recovery.sh <type> <source>\` |
+   | system-assessment.sh | System status check | \`./system-assessment.sh\` |
+   | recovery-verification.sh | Recovery validation | \`./recovery-verification.sh\` |
+   
+   ## 9. BACKUP LOCATIONS
+   
+   - **Primary Backup:** $DR_BACKUP_LOCATION
+   - **Recovery Images:** /opt/disaster-recovery/recovery-images
+   - **DR Site Backup:** $DR_SITE_SECONDARY:/backup
+   
+   ## 10. POST-RECOVERY PROCEDURES
+   
+   1. Conduct post-incident review
+   2. Update recovery documentation
+   3. Test all systems thoroughly
+   4. Communicate with stakeholders
+   5. Schedule follow-up assessments
+   
+   ---
+   
+   **Document Generated:** $(date)  
+   **Next Review Date:** $(date -d '+3 months')
+   EOF
+   
+   echo "DR documentation generated: $DOC_FILE"
+   
+   # chmod +x /usr/local/bin/generate-dr-documentation.sh
+
+PART G: AUTOMATION AND SCHEDULING
+----------------------------------
+
+1. Create DR automation scheduler:
+   # vim /etc/cron.d/disaster-recovery
+   
+   # Disaster Recovery Automation Schedule
+   
+   # Create recovery images daily at 1 AM
+   0 1 * * * root /usr/local/bin/create-recovery-image.sh full
+   0 2 * * * root /usr/local/bin/create-recovery-image.sh critical
+   0 3 * * * root /usr/local/bin/create-recovery-image.sh config
+   
+   # Business continuity assessment weekly
+   0 6 * * 1 root /usr/local/bin/business-continuity-assessment.sh
+   
+   # DR testing monthly
+   0 4 * * 1 root /usr/local/bin/dr-test-framework.sh basic simulation
+   
+   # Generate DR documentation quarterly
+   0 5 1 */3 * root /usr/local/bin/generate-dr-documentation.sh
+   
+   # Clean old DR logs weekly
+   0 7 * * 0 root find /opt/disaster-recovery/logs -name "*.log" -mtime +30 -delete
+
+2. Create DR monitoring dashboard:
+   # vim /usr/local/bin/dr-dashboard.sh
+   
+   #!/bin/bash
+   source /etc/disaster-recovery.conf
+   
+   DASHBOARD_FILE="/var/www/html/dr-dashboard.html"
+   
+   # Create web directory if it doesn't exist
+   mkdir -p /var/www/html
+   
+   cat > $DASHBOARD_FILE << 'EOF'
+   <!DOCTYPE html>
+   <html>
+   <head>
+       <title>Disaster Recovery Dashboard</title>
+       <meta http-equiv="refresh" content="300">
+       <style>
+           body { font-family: Arial, sans-serif; margin: 20px; }
+           .status-ok { color: green; font-weight: bold; }
+           .status-warning { color: orange; font-weight: bold; }
+           .status-critical { color: red; font-weight: bold; }
+           .section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+           table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+           th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+           th { background-color: #f2f2f2; }
+           .metric { display: inline-block; margin: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+       </style>
+   </head>
+   <body>
+       <h1>Disaster Recovery Dashboard</h1>
+       <p><strong>Last Updated:</strong> $(date)</p>
+       <p><strong>System:</strong> $(hostname)</p>
+   EOF
+   
+   # System Status Section
+   echo '<div class="section"><h2>System Status</h2>' >> $DASHBOARD_FILE
+   
+   # Critical Services Status
+   echo '<h3>Critical Services</h3><table><tr><th>Service</th><th>Status</th><th>Uptime</th></tr>' >> $DASHBOARD_FILE
+   
+   for service in $CRITICAL_SERVICES; do
+       if systemctl is-active $service >/dev/null 2>&1; then
+           STATUS="<span class=\"status-ok\">Running</span>"
+           UPTIME=$(systemctl show $service --property=ActiveEnterTimestamp --value | cut -d' ' -f1-2)
+       else
+           STATUS="<span class=\"status-critical\">Stopped</span>"
+           UPTIME="N/A"
+       fi
+       echo "<tr><td>$service</td><td>$STATUS</td><td>$UPTIME</td></tr>" >> $DASHBOARD_FILE
+   done
+   
+   echo '</table></div>' >> $DASHBOARD_FILE
+   
+   # Recovery Metrics
+   echo '<div class="section"><h2>Recovery Metrics</h2>' >> $DASHBOARD_FILE
+   
+   # RTO/RPO Status
+   echo "<div class=\"metric\"><strong>Critical RTO:</strong> $RTO_CRITICAL minutes</div>" >> $DASHBOARD_FILE
+   echo "<div class=\"metric\"><strong>Critical RPO:</strong> $RPO_CRITICAL minutes</div>" >> $DASHBOARD_FILE
+   echo "<div class=\"metric\"><strong>Important RTO:</strong> $RTO_IMPORTANT minutes</div>" >> $DASHBOARD_FILE
+   echo "<div class=\"metric\"><strong>Important RPO:</strong> $RPO_IMPORTANT minutes</div>" >> $DASHBOARD_FILE
+   
+   echo '</div>' >> $DASHBOARD_FILE
+   
+   # Recent Recovery Images
+   echo '<div class="section"><h2>Recent Recovery Images</h2><table><tr><th>Image</th><th>Type</th><th>Size</th><th>Date</th></tr>' >> $DASHBOARD_FILE
+   
+   find /opt/disaster-recovery/recovery-images -name "*.tar.gz" -type f -printf '%T@ %p %s\n' | sort -nr | head -5 | while read timestamp file size; do
+       IMAGE_NAME=$(basename "$file")
+       IMAGE_TYPE=$(echo "$IMAGE_NAME" | cut -d'-' -f1)
+       IMAGE_SIZE=$(numfmt --to=iec $size)
+       IMAGE_DATE=$(date -d "@$timestamp" '+%Y-%m-%d %H:%M')
+       echo "<tr><td>$IMAGE_NAME</td><td>$IMAGE_TYPE</td><td>$IMAGE_SIZE</td><td>$IMAGE_DATE</td></tr>" >> $DASHBOARD_FILE
+   done
+   
+   echo '</table></div>' >> $DASHBOARD_FILE
+   
+   # Recent DR Activities
+   echo '<div class="section"><h2>Recent DR Activities</h2>' >> $DASHBOARD_FILE
+   
+   if [ -f /opt/disaster-recovery/logs/all-notifications.log ]; then
+       echo '<h3>Recent Notifications</h3><pre>' >> $DASHBOARD_FILE
+       tail -10 /opt/disaster-recovery/logs/all-notifications.log >> $DASHBOARD_FILE
+       echo '</pre>' >> $DASHBOARD_FILE
+   fi
+   
+   echo '</div>' >> $DASHBOARD_FILE
+   
+   # Business Continuity Score
+   if [ -f /opt/disaster-recovery/logs/business-continuity-*.log ]; then
+       LATEST_BC=$(find /opt/disaster-recovery/logs -name "business-continuity-*.log" -type f | sort | tail -1)
+       if [ -n "$LATEST_BC" ]; then
+           BC_SCORE=$(grep "OVERALL BUSINESS CONTINUITY SCORE" "$LATEST_BC" | awk '{print $5}' | tr -d '%')
+           echo '<div class="section"><h2>Business Continuity</h2>' >> $DASHBOARD_FILE
+           
+           if (( $(echo "$BC_SCORE >= 90" | bc -l) )); then
+               BC_CLASS="status-ok"
+           elif (( $(echo "$BC_SCORE >= 75" | bc -l) )); then
+               BC_CLASS="status-warning"
+           else
+               BC_CLASS="status-critical"
+           fi
+           
+           echo "<p><strong>Current Score:</strong> <span class=\"$BC_CLASS\">${BC_SCORE}%</span></p>" >> $DASHBOARD_FILE
+           echo '</div>' >> $DASHBOARD_FILE
+       fi
+   fi
+   
+   echo '</body></html>' >> $DASHBOARD_FILE
+   
+   echo "DR dashboard updated: $DASHBOARD_FILE"
+   
+   # chmod +x /usr/local/bin/dr-dashboard.sh
+
+PART H: TESTING AND VALIDATION
+-------------------------------
+
+1. Test disaster classification:
+   # /usr/local/bin/disaster-classifier.sh hardware critical
+   # /usr/local/bin/disaster-classifier.sh software major
+   # /usr/local/bin/disaster-classifier.sh environmental minor
+
+2. Test recovery image creation:
+   # /usr/local/bin/create-recovery-image.sh full
+   # /usr/local/bin/create-recovery-image.sh critical
+   # /usr/local/bin/create-recovery-image.sh config
+   # ls -la /opt/disaster-recovery/recovery-images/
+
+3. Test system assessment:
+   # /usr/local/bin/system-assessment.sh
+   # cat /opt/disaster-recovery/logs/system-assessment-*.log
+
+4. Test service recovery:
+   # systemctl stop httpd
+   # /usr/local/bin/service-recovery.sh critical
+   # systemctl status httpd
+
+5. Test data recovery:
+   # mkdir -p /test-recovery
+   # echo "Test data" > /test-recovery/test.txt
+   # tar -czf /tmp/test-backup.tar.gz /test-recovery
+   # rm -rf /test-recovery
+   # /usr/local/bin/data-recovery.sh critical /tmp/test-backup.tar.gz
+   # ls -la /test-recovery/
+
+6. Test master disaster recovery:
+   # /usr/local/bin/disaster-recovery-master.sh hardware minor test
+
+7. Test DR framework:
+   # /usr/local/bin/dr-test-framework.sh basic simulation
+   # /usr/local/bin/dr-test-framework.sh network simulation
+
+8. Test business continuity assessment:
+   # /usr/local/bin/business-continuity-assessment.sh
+
+9. Generate DR documentation:
+   # /usr/local/bin/generate-dr-documentation.sh
+   # cat /opt/disaster-recovery/documentation/DR-Plan-*.md
+
+10. Test DR dashboard:
+    # /usr/local/bin/dr-dashboard.sh
+    # cat /var/www/html/dr-dashboard.html
+
+TROUBLESHOOTING COMMANDS:
+-------------------------
+# tail -f /opt/disaster-recovery/logs/*.log
+# systemctl status <service>
+# df -h /opt/disaster-recovery
+# find /opt/disaster-recovery -name "*.log" -mtime -1
+# tar -tzf /opt/disaster-recovery/recovery-images/*.tar.gz | head -10
+
+EXPECTED RESULTS:
+-----------------
+- Comprehensive disaster recovery framework operational
+- Recovery image creation and management working
+- Service and data recovery procedures functional
+- Automated disaster recovery orchestration active
+- Business continuity assessment and monitoring
+- DR testing framework providing validation
+- Documentation generation and maintenance
+- Notification and alerting systems operational
+
+VALIDATION CHECKLIST:
+---------------------
+□ DR planning framework configured
+□ Recovery image creation working
+□ Service recovery procedures tested
+□ Data recovery procedures validated
+□ Master disaster recovery orchestration functional
+□ DR testing framework operational
+□ Business continuity assessment active
+□ Documentation generation working
+□ Notification systems configured
+□ Automation and scheduling active
+
+CLEANUP:
+--------
+# rm /etc/cron.d/disaster-recovery
+# rm -rf /opt/disaster-recovery
+# rm /etc/disaster-recovery.conf
+# rm /usr/local/bin/disaster-*.sh
+# rm /usr/local/bin/create-recovery-*.sh
+# rm /usr/local/bin/system-*.sh
+# rm /usr/local/bin/service-recovery.sh
+# rm /usr/local/bin/data-recovery.sh
+# rm /usr/local/bin/database-recovery.sh
+# rm /usr/local/bin/recovery-verification.sh
+# rm /usr/local/bin/dr-*.sh
+# rm /usr/local/bin/business-continuity-*.sh
+# rm /usr/local/bin/generate-dr-*.sh
+# rm /var/www/html/dr-dashboard.html
