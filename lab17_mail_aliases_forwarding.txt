@@ -33,6 +33,7 @@ done
    # yum install postfix mailx -y
    # systemctl start postfix
    # systemctl enable postfix
+   # systemctl status postfix
 
    # Install Vim 
    # yum install vim -y
@@ -399,7 +400,8 @@ grep "$TODAY" $LOGFILE | grep "User unknown" | wc -l
 
 2. Schedule alias monitoring:
    # crontab -e
-   # Add: 0 23 * * * /usr/local/bin/alias-monitor.sh > /var/log/alias-report.log
+   # Add: 
+   0 23 * * * /usr/local/bin/alias-monitor.sh > /var/log/alias-report.log
 
 3. Monitor forwarding loops:
    # vim /usr/local/bin/loop-detector.sh
