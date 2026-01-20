@@ -23,22 +23,22 @@ PART A: CONFIGURE SYSTEM ALIASES
 ---------------------------------
 
 1. Configure basic system aliases:
-   # create user's
+# create user's
 for user in alice bob charlie david eve frank grace helen ivan judy; do
-   useradd $user
-   echo "$user:user123" | chpasswd
+useradd $user
+echo "$user:user123" | chpasswd
 done
    
-   # Install Postfix 
-   # yum install postfix mailx -y
-   # systemctl start postfix
-   # systemctl enable postfix
-   # systemctl status postfix
+# Install Postfix 
+# yum install postfix mailx -y
+# systemctl start postfix
+# systemctl enable postfix
+# systemctl status postfix
 
-   # Install Vim 
-   # yum install vim -y
+# Install Vim 
+# yum install vim -y
 
-   # vim /etc/aliases
+# vim /etc/aliases
    
    # System maintenance aliases
    postmaster: root
@@ -68,80 +68,80 @@ done
    spam: root
 
 2. Configure departmental aliases:
-   # vim /etc/aliases
+# vim /etc/aliases
    
-# Department aliases
-admin: alice,bob
-support: alice,bob,charlie
-sales: david,eve
-marketing: frank,grace
-hr: helen
-finance: ivan,judy
-   
-# Management aliases
-management: alice,david,helen
-executives: alice,david
-board: alice,david,helen,ivan
+   # Department aliases
+   admin: alice,bob
+   support: alice,bob,charlie
+   sales: david,eve
+   marketing: frank,grace
+   hr: helen
+   finance: ivan,judy
+      
+   # Management aliases
+   management: alice,david,helen
+   executives: alice,david
+   board: alice,david,helen,ivan
 
 3. Update aliases database:
-   # newaliases
-   # ls -la /etc/aliases.db
+# newaliases
+# ls -la /etc/aliases.db
 
 PART B: CONFIGURE VIRTUAL ALIASES
 ----------------------------------
 
 1. Create virtual alias file:
-   # vim /etc/postfix/virtual
+# vim /etc/postfix/virtual
    
-# Virtual aliases for different domains
-info@example.com        alice
-sales@example.com       david,eve
-support@example.com     alice,bob,charlie
-admin@example.com       alice
-webmaster@example.com   bob
-   
-# Catch-all for domain
-@example.com            alice
-   
-# External domain aliases
-info@company.local      alice
-support@company.local   support
+   # Virtual aliases for different domains
+   info@example.com        alice
+   sales@example.com       david,eve
+   support@example.com     alice,bob,charlie
+   admin@example.com       alice
+   webmaster@example.com   bob
+      
+   # Catch-all for domain
+   @example.com            alice
+      
+   # External domain aliases
+   info@company.local      alice
+   support@company.local   support
 
 2. Configure virtual alias maps:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
    # Virtual alias configuration
    virtual_alias_maps = hash:/etc/postfix/virtual, hash:/etc/postfix/list_members
    
 
 3. Update virtual alias database:
-   # postmap /etc/postfix/virtual
+# postmap /etc/postfix/virtual
 
 PART C: CONFIGURE ADVANCED ALIASES
 -----------------------------------
 
 1. Create recipient canonical maps:
-   # vim /etc/postfix/recipient_canonical
+# vim /etc/postfix/recipient_canonical
    
-# Canonical recipient mapping
-alice@mail.example.com    alice@example.com
-bob@mail.example.com      bob@example.com
-charlie@mail.example.com  charlie@example.com
+   # Canonical recipient mapping
+   alice@mail.example.com    alice@example.com
+   bob@mail.example.com      bob@example.com
+   charlie@mail.example.com  charlie@example.com
    
-   # postmap /etc/postfix/recipient_canonical
+# postmap /etc/postfix/recipient_canonical
 
 2. Configure sender canonical maps:
-   # vim /etc/postfix/sender_canonical
+# vim /etc/postfix/sender_canonical
    
-# Canonical sender mapping
-alice@mail.example.com    alice@example.com
-bob@mail.example.com      bob@example.com
-root@mail.example.com     admin@example.com
+   # Canonical sender mapping
+   alice@mail.example.com    alice@example.com
+   bob@mail.example.com      bob@example.com
+   root@mail.example.com     admin@example.com
    
-   # postmap /etc/postfix/sender_canonical
+# postmap /etc/postfix/sender_canonical
 
 3. Update main configuration:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
    recipient_canonical_maps = hash:/etc/postfix/recipient_canonical
    sender_canonical_maps = hash:/etc/postfix/sender_canonical
@@ -150,45 +150,45 @@ PART D: CONFIGURE USER FORWARDING
 ----------------------------------
 
 1. Configure user-level .forward files:
-   # su - alice
-   $ echo "alice.smith@external.com" > ~/.forward
-   $ chmod 644 ~/.forward
-   $ exit
+# su - alice
+$ echo "alice.smith@external.com" > ~/.forward
+$ chmod 644 ~/.forward
+$ exit
    
-   # su - bob
-   $ echo "bob.jones@company.com,bob" > ~/.forward  # Forward and keep local
-   $ exit
+# su - bob
+$ echo "bob.jones@company.com,bob" > ~/.forward  # Forward and keep local
+$ exit
    
-   # su - charlie
-   $ echo "|/usr/local/bin/process-mail.sh" > ~/.forward  # Pipe to script
-   $ exit
+# su - charlie
+$ echo "|/usr/local/bin/process-mail.sh" > ~/.forward  # Pipe to script
+$ exit
 
 2. Create mail processing script:
-   # vim /usr/local/bin/process-mail.sh
+# vim /usr/local/bin/process-mail.sh
    
-#!/bin/bash
-# Mail processing script for Charlie
+   #!/bin/bash
+   # Mail processing script for Charlie
+      
+   # Log incoming mail
+   echo "$(date): Mail received" >> /home/charlie/mail.log
+      
+   # Process mail based on subject
+   while IFS= read -r line; do
+      if [[ "$line" =~ ^Subject:.*URGENT ]]; then
+         # Forward urgent mail immediately
+         /usr/sbin/sendmail charlie.urgent@company.com
+         break
+      fi
+   done
+      
+      # Save to regular mailbox
+      /usr/libexec/postfix/local -t
    
-# Log incoming mail
-echo "$(date): Mail received" >> /home/charlie/mail.log
-   
-# Process mail based on subject
-while IFS= read -r line; do
-   if [[ "$line" =~ ^Subject:.*URGENT ]]; then
-      # Forward urgent mail immediately
-      /usr/sbin/sendmail charlie.urgent@company.com
-      break
-   fi
-done
-   
-   # Save to regular mailbox
-   /usr/libexec/postfix/local -t
-   
-   # chmod +x /usr/local/bin/process-mail.sh
+# chmod +x /usr/local/bin/process-mail.sh
 
 3. Configure conditional forwarding:
-   # su - david
-   $ vim ~/.forward
+# su - david
+$ vim ~/.forward
    
    # Conditional forwarding based on time
    "|/usr/local/bin/time-forward.sh"
@@ -196,115 +196,115 @@ done
    $ exit
 
 4. Create time-based forwarding script:
-   # vim /usr/local/bin/time-forward.sh
+# vim /usr/local/bin/time-forward.sh
    
-#!/bin/bash
-# Time-based forwarding script
-   
-HOUR=$(date +%H)
-   
-# Forward to mobile during business hours
-if [ $HOUR -ge 9 ] && [ $HOUR -le 17 ]; then
-   /usr/sbin/sendmail david.mobile@company.com
-else
-   # Deliver locally after hours
-   /usr/libexec/postfix/local -t
-fi
-   
-   # chmod +x /usr/local/bin/time-forward.sh
+   #!/bin/bash
+   # Time-based forwarding script
+      
+   HOUR=$(date +%H)
+      
+   # Forward to mobile during business hours
+   if [ $HOUR -ge 9 ] && [ $HOUR -le 17 ]; then
+      /usr/sbin/sendmail david.mobile@company.com
+   else
+      # Deliver locally after hours
+      /usr/libexec/postfix/local -t
+   fi
+      
+# chmod +x /usr/local/bin/time-forward.sh
 
 PART E: CONFIGURE MAILING LISTS
 --------------------------------
 
 1. Create simple mailing lists:
-   # vim /etc/aliases
+# vim /etc/aliases
    
-# Mailing lists
-all-staff: alice,bob,charlie,david,eve,frank,grace,helen,ivan,judy
-developers: alice,bob,charlie
-managers: david,helen,ivan
-   
-# Project-specific lists
-project-alpha: alice,bob,david
-project-beta: charlie,eve,frank
-   
-# Announcement lists
-announcements: all-staff
-security-alerts: admin,managers
+   # Mailing lists
+   all-staff: alice,bob,charlie,david,eve,frank,grace,helen,ivan,judy
+   developers: alice,bob,charlie
+   managers: david,helen,ivan
+      
+   # Project-specific lists
+   project-alpha: alice,bob,david
+   project-beta: charlie,eve,frank
+      
+   # Announcement lists
+   announcements: all-staff
+   security-alerts: admin,managers
 
 2. Configure list management:
-   # vim /etc/postfix/list_members
+# vim /etc/postfix/list_members
    
 # Mailing list membership
 developers@example.com alice@example.com,bob@example.com,charlie@example.com
 managers@example.com   david@example.com,helen@example.com,ivan@example.com
 
    
-   # postmap /etc/postfix/list_members
+# postmap /etc/postfix/list_members
 
 3. Create list processing script:
-   # vim /usr/local/bin/list-processor.sh
+# vim /usr/local/bin/list-processor.sh
    
-#!/bin/bash
-# Mailing list processor
+   #!/bin/bash
+   # Mailing list processor
+      
+   LIST_NAME="$1"
+      
+   case "$LIST_NAME" in
+      "developers")
+         # Add list headers
+         echo "List-Id: developers.example.com"
+         echo "List-Post: <mailto:developers@example.com>"
+         ;;
+      "managers")
+         echo "List-Id: managers.example.com"
+         echo "List-Post: <mailto:managers@example.com>"
+         ;;
+   esac
+      
+      # Process the message
+      cat
    
-LIST_NAME="$1"
-   
-case "$LIST_NAME" in
-   "developers")
-      # Add list headers
-      echo "List-Id: developers.example.com"
-      echo "List-Post: <mailto:developers@example.com>"
-      ;;
-   "managers")
-      echo "List-Id: managers.example.com"
-      echo "List-Post: <mailto:managers@example.com>"
-      ;;
-esac
-   
-   # Process the message
-   cat
-   
-   # chmod +x /usr/local/bin/list-processor.sh
+# chmod +x /usr/local/bin/list-processor.sh
 
 PART F: CONFIGURE ALIAS RESTRICTIONS
 -------------------------------------
 
 1. Configure alias access controls:
-   # vim /etc/postfix/alias_restrictions
+# vim /etc/postfix/alias_restrictions
    
-# Restricted aliases - only internal users can send
-executives@example.com: INTERNAL_ONLY
-board@example.com: INTERNAL_ONLY
-finance@example.com: INTERNAL_ONLY
-   
-   # postmap /etc/postfix/alias_restrictions
+   # Restricted aliases - only internal users can send
+   executives@example.com: INTERNAL_ONLY
+   board@example.com: INTERNAL_ONLY
+   finance@example.com: INTERNAL_ONLY
+      
+# postmap /etc/postfix/alias_restrictions
 
 2. Create access control script:
-   # vim /usr/local/bin/alias-access-control.sh
+# vim /usr/local/bin/alias-access-control.sh
    
-#!/bin/bash
-# Alias access control
-   
-SENDER="$1"
-ALIAS="$2"
-   
-# Check if sender is internal
-if [[ "$SENDER" =~ @example\.com$ ]]; then
-   exit 0  # Allow
-else
-   # Check if alias is restricted
-   if grep -q "$ALIAS.*INTERNAL_ONLY" /etc/postfix/alias_restrictions; then
-      exit 1  # Deny
+   #!/bin/bash
+   # Alias access control
+      
+   SENDER="$1"
+   ALIAS="$2"
+      
+   # Check if sender is internal
+   if [[ "$SENDER" =~ @example\.com$ ]]; then
+      exit 0  # Allow
+   else
+      # Check if alias is restricted
+      if grep -q "$ALIAS.*INTERNAL_ONLY" /etc/postfix/alias_restrictions; then
+         exit 1  # Deny
+      fi
    fi
-fi
+      
+   exit 0  # Allow by default
    
-exit 0  # Allow by default
-   
-   # chmod +x /usr/local/bin/alias-access-control.sh
+# chmod +x /usr/local/bin/alias-access-control.sh
 
 3. Configure restriction checking:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
    # Alias restriction checking
    smtpd_recipient_restrictions = 
@@ -316,7 +316,7 @@ PART G: CONFIGURE DYNAMIC ALIASES
 ----------------------------------
 
 1. Create LDAP alias lookup (if LDAP available):
-   # vim /etc/postfix/ldap_aliases.cf
+# vim /etc/postfix/ldap_aliases.cf
    
    server_host = ldap.example.com
    search_base = ou=aliases,dc=example,dc=com
@@ -325,150 +325,150 @@ PART G: CONFIGURE DYNAMIC ALIASES
    bind = no
 
 2. Configure database aliases:
-   # vim /etc/postfix/mysql_aliases.cf
+# vim /etc/postfix/mysql_aliases.cf
    
-hosts = localhost
-user = postfix
-password = password
-dbname = mail
-query = SELECT destination FROM aliases WHERE alias='%s'
+   hosts = localhost
+   user = postfix
+   password = password
+   dbname = mail
+   query = SELECT destination FROM aliases WHERE alias='%s'
 
 3. Update main configuration for dynamic aliases:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
    # Dynamic alias sources
    alias_maps = hash:/etc/aliases
    virtual_alias_maps = hash:/etc/postfix/virtual, hash:/etc/postfix/list_members
 
-   # newaliases
-   # postfix reload
+# newaliases
+# postfix reload
 
 
 PART H: TESTING ALIASES AND FORWARDING
 ---------------------------------------
 
 1. Test system aliases:
-   # echo "Test message to postmaster" | mail -s "Postmaster Test" postmaster
-   # echo "Test message to support" | mail -s "Support Test" support
+# echo "Test message to postmaster" | mail -s "Postmaster Test" postmaster
+# echo "Test message to support" | mail -s "Support Test" support
 
 2. Test virtual aliases:
-   # echo "Test virtual alias" | mail -s "Virtual Test" info@example.com
-   # echo "Test catch-all" | mail -s "Catch-all Test" unknown@example.com
+# echo "Test virtual alias" | mail -s "Virtual Test" info@example.com
+# echo "Test catch-all" | mail -s "Catch-all Test" unknown@example.com
 
 3. Test user forwarding:
-   # echo "Test forwarding" | mail -s "Forward Test" alice
-   # tail -n 50 /var/log/maillog
-   # mailq
+# echo "Test forwarding" | mail -s "Forward Test" alice
+# tail -n 50 /var/log/maillog
+# mailq
 
 
 4. Test mailing lists:
-   # echo "Test mailing list" | mail -s "List Test" all-staff
-   # echo "Developer announcement" | mail -s "Dev News" developers
+# echo "Test mailing list" | mail -s "List Test" all-staff
+# echo "Developer announcement" | mail -s "Dev News" developers
 
 5. Verify alias resolution:
-   # postmap -q support /etc/aliases
-   # postmap -q info@example.com /etc/postfix/virtual
+# postmap -q support /etc/aliases
+# postmap -q info@example.com /etc/postfix/virtual
 
 PART I: MONITORING ALIASES
 ---------------------------
 
 1. Create alias monitoring script:
-   # vim /usr/local/bin/alias-monitor.sh
+# vim /usr/local/bin/alias-monitor.sh
    
-#!/bin/bash
-# Alias monitoring script
+   #!/bin/bash
+   # Alias monitoring script
+      
+   LOGFILE="/var/log/maillog"
+   TODAY=$(date '+%b %d')
+      
+   echo "=== Alias Usage Report for $TODAY ==="
+      
+   # Most used aliases
+   echo "Top 10 aliases used:"
+   grep "$TODAY" $LOGFILE | grep "to=<.*@" | \
+   sed 's/.*to=<\([^>]*\)>.*/\1/' | sort | uniq -c | sort -nr | head -10
+      
+   # Forwarding statistics
+   echo "Forwarding statistics:"
+   grep "$TODAY" $LOGFILE | grep -c "forwarded"
+      
+   # Failed alias resolutions
+   echo "Failed alias resolutions:"
+   grep "$TODAY" $LOGFILE | grep "User unknown" | wc -l
    
-LOGFILE="/var/log/maillog"
-TODAY=$(date '+%b %d')
-   
-echo "=== Alias Usage Report for $TODAY ==="
-   
-# Most used aliases
-echo "Top 10 aliases used:"
-grep "$TODAY" $LOGFILE | grep "to=<.*@" | \
-sed 's/.*to=<\([^>]*\)>.*/\1/' | sort | uniq -c | sort -nr | head -10
-   
-# Forwarding statistics
-echo "Forwarding statistics:"
-grep "$TODAY" $LOGFILE | grep -c "forwarded"
-   
-# Failed alias resolutions
-echo "Failed alias resolutions:"
-grep "$TODAY" $LOGFILE | grep "User unknown" | wc -l
-   
-   # chmod +x /usr/local/bin/alias-monitor.sh
+# chmod +x /usr/local/bin/alias-monitor.sh
 
 2. Schedule alias monitoring:
-   # crontab -e
-   # Add: 
+# crontab -e
+# Add: 
    0 23 * * * /usr/local/bin/alias-monitor.sh > /var/log/alias-report.log
 
 3. Monitor forwarding loops:
-   # vim /usr/local/bin/loop-detector.sh
+# vim /usr/local/bin/loop-detector.sh
    
-#!/bin/bash
-# Forwarding loop detector
+   #!/bin/bash
+   # Forwarding loop detector
+      
+   LOGFILE="/var/log/maillog"
+      
+   # Check for forwarding loops
+   LOOPS=$(grep "mail forwarding loop" $LOGFILE | wc -l)
+      
+   if [ $LOOPS -gt 0 ]; then
+      echo "Warning: $LOOPS forwarding loops detected" | \
+      mail -s "Mail Loop Alert" admin@example.com
+   fi
    
-LOGFILE="/var/log/maillog"
-   
-# Check for forwarding loops
-LOOPS=$(grep "mail forwarding loop" $LOGFILE | wc -l)
-   
-if [ $LOOPS -gt 0 ]; then
-   echo "Warning: $LOOPS forwarding loops detected" | \
-   mail -s "Mail Loop Alert" admin@example.com
-fi
-   
-   # chmod +x /usr/local/bin/loop-detector.sh
+# chmod +x /usr/local/bin/loop-detector.sh
 
 PART J: ALIAS MAINTENANCE
 -------------------------
 
 1. Create alias validation script:
-   # vim /usr/local/bin/validate-aliases.sh
+# vim /usr/local/bin/validate-aliases.sh
    
-#!/bin/bash
-# Alias validation script
+   #!/bin/bash
+   # Alias validation script
+      
+   echo "Validating aliases..."
+      
+   # Check for invalid users in aliases
+   while IFS=: read -r alias targets; do
+      for target in $(echo $targets | tr ',' ' '); do
+         if [[ "$target" =~ ^[a-zA-Z] ]] && ! id "$target" &>/dev/null; then
+            echo "Warning: User '$target' in alias '$alias' does not exist"
+         fi
+      done
+   done < /etc/aliases
+      
+      # Check for circular references
+      echo "Checking for circular references..."
+      postmap -q admin /etc/aliases | grep -q admin && \
+      echo "Warning: Possible circular reference in admin alias"
    
-echo "Validating aliases..."
-   
-# Check for invalid users in aliases
-while IFS=: read -r alias targets; do
-   for target in $(echo $targets | tr ',' ' '); do
-      if [[ "$target" =~ ^[a-zA-Z] ]] && ! id "$target" &>/dev/null; then
-         echo "Warning: User '$target' in alias '$alias' does not exist"
-      fi
-   done
-done < /etc/aliases
-   
-   # Check for circular references
-   echo "Checking for circular references..."
-   postmap -q admin /etc/aliases | grep -q admin && \
-   echo "Warning: Possible circular reference in admin alias"
-   
-   # chmod +x /usr/local/bin/validate-aliases.sh
+# chmod +x /usr/local/bin/validate-aliases.sh
 
 2. Create alias backup script:
-   # vim /usr/local/bin/backup-aliases.sh
+# vim /usr/local/bin/backup-aliases.sh
    
-#!/bin/bash
-# Alias backup script
+   #!/bin/bash
+   # Alias backup script
+      
+   BACKUP_DIR="/var/backups/mail"
+   DATE=$(date +%Y%m%d)
+      
+   mkdir -p $BACKUP_DIR
+      
+      # Backup alias files
+      cp /etc/aliases $BACKUP_DIR/aliases.$DATE
+      cp /etc/postfix/virtual $BACKUP_DIR/virtual.$DATE
+      
+      # Compress old backups
+      find $BACKUP_DIR -name "*.20*" -mtime +30 -exec gzip {} \;
+      
+      echo "Aliases backed up to $BACKUP_DIR"
    
-BACKUP_DIR="/var/backups/mail"
-DATE=$(date +%Y%m%d)
-   
-mkdir -p $BACKUP_DIR
-   
-   # Backup alias files
-   cp /etc/aliases $BACKUP_DIR/aliases.$DATE
-   cp /etc/postfix/virtual $BACKUP_DIR/virtual.$DATE
-   
-   # Compress old backups
-   find $BACKUP_DIR -name "*.20*" -mtime +30 -exec gzip {} \;
-   
-   echo "Aliases backed up to $BACKUP_DIR"
-   
-   # chmod +x /usr/local/bin/backup-aliases.sh
+# chmod +x /usr/local/bin/backup-aliases.sh
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
