@@ -22,8 +22,18 @@ LAB TASKS:
 PART A: CONFIGURE BASIC SMTP RESTRICTIONS
 ------------------------------------------
 
-1. Configure client restrictions:
-   # vim /etc/postfix/main.cf
+1. Install Postfix 
+# yum install postfix mailx -y
+# systemctl start postfix
+# systemctl enable postfix
+# systemctl status postfix
+
+# Install Vim 
+# yum install vim -y
+
+
+2. Configure client restrictions:
+# vim /etc/postfix/main.cf
    
    # Client connection restrictions
    smtpd_client_restrictions = 
@@ -34,7 +44,7 @@ PART A: CONFIGURE BASIC SMTP RESTRICTIONS
        reject_rbl_client dnsbl.sorbs.net,
        permit
 
-2. Configure HELO restrictions:
+3. Configure HELO restrictions:
    # vim /etc/postfix/main.cf
    
    # HELO/EHLO restrictions
@@ -46,7 +56,7 @@ PART A: CONFIGURE BASIC SMTP RESTRICTIONS
        reject_unknown_helo_hostname,
        permit
 
-3. Configure sender restrictions:
+4. Configure sender restrictions:
    # vim /etc/postfix/main.cf
    
    # Sender restrictions
@@ -58,7 +68,7 @@ PART A: CONFIGURE BASIC SMTP RESTRICTIONS
        reject_unlisted_sender,
        permit
 
-4. Configure recipient restrictions:
+5. Configure recipient restrictions:
    # vim /etc/postfix/main.cf
    
    # Recipient restrictions
