@@ -23,8 +23,8 @@ PART A: INSTALL MONITORING TOOLS
 ---------------------------------
 
 1. Install performance monitoring packages:
-   # dnf install sysstat iotop htop atop nmon -y
-   # dnf install perf-tools-unstable -y
+   # dnf install sysstat iotop -y
+   # dnf install strace perf -y
 
 2. Enable system statistics collection:
    # systemctl enable sysstat
@@ -186,26 +186,26 @@ PART E: NETWORK PERFORMANCE MONITORING
    
    #!/bin/bash
    LOGFILE="/var/log/network-performance.log"
-   INTERFACE="eth0"
+INTERFACE="eth0"
    
-   echo "=== Network Performance - $(date) ===" >> $LOGFILE
+echo "=== Network Performance - $(date) ===" >> $LOGFILE
    
-   # Network device statistics
-   sar -n DEV 1 1 >> $LOGFILE
+# Network device statistics
+sar -n DEV 1 1 >> $LOGFILE
    
-   # Network error statistics
-   sar -n EDEV 1 1 >> $LOGFILE
+# Network error statistics
+sar -n EDEV 1 1 >> $LOGFILE
    
-   # Socket statistics
-   ss -s >> $LOGFILE
+# Socket statistics
+ss -s >> $LOGFILE
    
-   # Interface statistics
-   cat /proc/net/dev >> $LOGFILE
+# Interface statistics
+cat /proc/net/dev >> $LOGFILE
    
-   # Bandwidth usage for specific interface
-   sar -n DEV 1 1 | grep $INTERFACE >> $LOGFILE
+# Bandwidth usage for specific interface
+sar -n DEV 1 1 | grep $INTERFACE >> $LOGFILE
    
-   echo "---" >> $LOGFILE
+echo "---" >> $LOGFILE
    
    # chmod +x /usr/local/bin/network-monitor.sh
 
@@ -228,36 +228,36 @@ PART F: PROCESS AND SYSTEM MONITORING
 3. Create process monitoring script:
    # vim /usr/local/bin/process-monitor.sh
    
-   #!/bin/bash
-   LOGFILE="/var/log/process-performance.log"
+#!/bin/bash
+LOGFILE="/var/log/process-performance.log"
    
-   echo "=== Process Performance - $(date) ===" >> $LOGFILE
+echo "=== Process Performance - $(date) ===" >> $LOGFILE
    
-   # System load
-   uptime >> $LOGFILE
+# System load
+uptime >> $LOGFILE
    
-   # Process count
-   echo "Total processes: $(ps aux | wc -l)" >> $LOGFILE
+# Process count
+echo "Total processes: $(ps aux | wc -l)" >> $LOGFILE
    
-   # Top CPU processes
-   echo "Top CPU processes:" >> $LOGFILE
-   ps aux --sort=-%cpu | head -10 >> $LOGFILE
+# Top CPU processes
+echo "Top CPU processes:" >> $LOGFILE
+ps aux --sort=-%cpu | head -10 >> $LOGFILE
    
-   # Top memory processes
-   echo "Top memory processes:" >> $LOGFILE
-   ps aux --sort=-%mem | head -10 >> $LOGFILE
+# Top memory processes
+echo "Top memory processes:" >> $LOGFILE
+ps aux --sort=-%mem | head -10 >> $LOGFILE
    
-   # Zombie processes
-   ZOMBIES=$(ps aux | grep -c '[Zz]ombie\|<defunct>')
-   echo "Zombie processes: $ZOMBIES" >> $LOGFILE
+# Zombie processes
+ZOMBIES=$(ps aux | grep -c '[Zz]ombie\|<defunct>')
+echo "Zombie processes: $ZOMBIES" >> $LOGFILE
    
-   echo "---" >> $LOGFILE
+echo "---" >> $LOGFILE
    
    # chmod +x /usr/local/bin/process-monitor.sh
-
+   
 4. Monitor system resources:
-   # nmon
-   # atop -a
+   # sar -n DEV 1 5
+   # ps aux --sort=-%mem | head
 
 PART G: PERFORMANCE DATA COLLECTION
 ------------------------------------
@@ -265,88 +265,92 @@ PART G: PERFORMANCE DATA COLLECTION
 1. Configure automatic data collection:
    # vim /etc/cron.d/performance-monitoring
    
-   # Collect performance data every 5 minutes
-   */5 * * * * root /usr/local/bin/cpu-monitor.sh
-   */5 * * * * root /usr/local/bin/memory-monitor.sh
-   */5 * * * * root /usr/local/bin/disk-monitor.sh
-   */5 * * * * root /usr/local/bin/network-monitor.sh
-   */5 * * * * root /usr/local/bin/process-monitor.sh
+# Collect performance data every 5 minutes
+*/5 * * * * root /usr/local/bin/cpu-monitor.sh
+*/5 * * * * root /usr/local/bin/memory-monitor.sh
+*/5 * * * * root /usr/local/bin/disk-monitor.sh
+*/5 * * * * root /usr/local/bin/network-monitor.sh
+*/5 * * * * root /usr/local/bin/process-monitor.sh
 
 2. Create comprehensive monitoring script:
    # vim /usr/local/bin/system-performance.sh
    
-   #!/bin/bash
-   REPORT_DIR="/var/log/performance-reports"
-   DATE=$(date +%Y%m%d_%H%M%S)
-   REPORT_FILE="$REPORT_DIR/system-performance-$DATE.log"
+#!/bin/bash
+REPORT_DIR="/var/log/performance-reports"
+DATE=$(date +%Y%m%d_%H%M%S)
+REPORT_FILE="$REPORT_DIR/system-performance-$DATE.log"
    
-   mkdir -p $REPORT_DIR
+mkdir -p $REPORT_DIR
    
-   echo "=== System Performance Report - $(date) ===" > $REPORT_FILE
-   echo >> $REPORT_FILE
+echo "=== System Performance Report - $(date) ===" > $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # System information
-   echo "SYSTEM INFORMATION:" >> $REPORT_FILE
-   uname -a >> $REPORT_FILE
-   uptime >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# System information
+echo "SYSTEM INFORMATION:" >> $REPORT_FILE
+uname -a >> $REPORT_FILE
+uptime >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # CPU performance
-   echo "CPU PERFORMANCE:" >> $REPORT_FILE
-   sar -u 1 3 >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# CPU performance
+echo "CPU PERFORMANCE:" >> $REPORT_FILE
+sar -u 1 3 >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Memory performance
-   echo "MEMORY PERFORMANCE:" >> $REPORT_FILE
-   free -h >> $REPORT_FILE
-   sar -r 1 3 >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Memory performance
+echo "MEMORY PERFORMANCE:" >> $REPORT_FILE
+free -h >> $REPORT_FILE
+sar -r 1 3 >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Disk I/O performance
-   echo "DISK I/O PERFORMANCE:" >> $REPORT_FILE
-   iostat -x 1 3 >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Disk I/O performance
+echo "DISK I/O PERFORMANCE:" >> $REPORT_FILE
+iostat -x 1 3 >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Network performance
-   echo "NETWORK PERFORMANCE:" >> $REPORT_FILE
-   sar -n DEV 1 3 >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Network performance
+echo "NETWORK PERFORMANCE:" >> $REPORT_FILE
+sar -n DEV 1 3 >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Top processes
-   echo "TOP PROCESSES:" >> $REPORT_FILE
-   ps aux --sort=-%cpu | head -10 >> $REPORT_FILE
+# Top processes
+echo "TOP PROCESSES:" >> $REPORT_FILE
+ps aux --sort=-%cpu | head -10 >> $REPORT_FILE
    
-   echo "Report saved to: $REPORT_FILE"
+echo "Report saved to: $REPORT_FILE"
    
    # chmod +x /usr/local/bin/system-performance.sh
+
+
 
 3. Create performance baseline:
    # vim /usr/local/bin/create-baseline.sh
    
-   #!/bin/bash
-   BASELINE_DIR="/var/log/performance-baseline"
-   DATE=$(date +%Y%m%d)
+#!/bin/bash
+BASELINE_DIR="/var/log/performance-baseline"
+DATE=$(date +%Y%m%d)
    
-   mkdir -p $BASELINE_DIR
+mkdir -p $BASELINE_DIR
    
-   echo "Creating performance baseline for $DATE"
+echo "Creating performance baseline for $DATE"
    
-   # CPU baseline
-   sar -u 1 60 > $BASELINE_DIR/cpu-baseline-$DATE.log &
+# CPU baseline
+sar -u 1 60 > $BASELINE_DIR/cpu-baseline-$DATE.log &
    
-   # Memory baseline
-   sar -r 1 60 > $BASELINE_DIR/memory-baseline-$DATE.log &
+# Memory baseline
+sar -r 1 60 > $BASELINE_DIR/memory-baseline-$DATE.log &
    
-   # Disk I/O baseline
-   iostat -x 1 60 > $BASELINE_DIR/disk-baseline-$DATE.log &
+# Disk I/O baseline
+iostat -x 1 60 > $BASELINE_DIR/disk-baseline-$DATE.log &
    
-   # Network baseline
-   sar -n DEV 1 60 > $BASELINE_DIR/network-baseline-$DATE.log &
+# Network baseline
+sar -n DEV 1 60 > $BASELINE_DIR/network-baseline-$DATE.log &
    
-   wait
-   echo "Baseline creation completed"
+wait
+echo "Baseline creation completed"
    
    # chmod +x /usr/local/bin/create-baseline.sh
+
+
 
 PART H: PERFORMANCE ANALYSIS TOOLS
 -----------------------------------
@@ -354,74 +358,78 @@ PART H: PERFORMANCE ANALYSIS TOOLS
 1. Create performance analysis script:
    # vim /usr/local/bin/analyze-performance.sh
    
-   #!/bin/bash
-   LOGDIR="/var/log/sa"
-   REPORT_FILE="/tmp/performance-analysis.txt"
+#!/bin/bash
+LOGDIR="/var/log/sa"
+REPORT_FILE="/tmp/performance-analysis.txt"
    
-   echo "=== Performance Analysis Report ===" > $REPORT_FILE
-   echo "Generated: $(date)" >> $REPORT_FILE
-   echo >> $REPORT_FILE
+echo "=== Performance Analysis Report ===" > $REPORT_FILE
+echo "Generated: $(date)" >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Analyze CPU usage trends
-   echo "CPU USAGE ANALYSIS:" >> $REPORT_FILE
-   echo "Average CPU usage over last 24 hours:" >> $REPORT_FILE
-   sar -u -f $LOGDIR/sa$(date +%d) | grep Average >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Analyze CPU usage trends
+echo "CPU USAGE ANALYSIS:" >> $REPORT_FILE
+echo "Average CPU usage over last 24 hours:" >> $REPORT_FILE
+sar -u -f $LOGDIR/sa$(date +%d) | grep Average >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Analyze memory usage trends
-   echo "MEMORY USAGE ANALYSIS:" >> $REPORT_FILE
-   echo "Average memory usage over last 24 hours:" >> $REPORT_FILE
-   sar -r -f $LOGDIR/sa$(date +%d) | grep Average >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Analyze memory usage trends
+echo "MEMORY USAGE ANALYSIS:" >> $REPORT_FILE
+echo "Average memory usage over last 24 hours:" >> $REPORT_FILE
+sar -r -f $LOGDIR/sa$(date +%d) | grep Average >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Analyze disk I/O trends
-   echo "DISK I/O ANALYSIS:" >> $REPORT_FILE
-   echo "Average disk I/O over last 24 hours:" >> $REPORT_FILE
-   sar -d -f $LOGDIR/sa$(date +%d) | grep Average >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Analyze disk I/O trends
+echo "DISK I/O ANALYSIS:" >> $REPORT_FILE
+echo "Average disk I/O over last 24 hours:" >> $REPORT_FILE
+sar -d -f $LOGDIR/sa$(date +%d) | grep Average >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Analyze network usage trends
-   echo "NETWORK USAGE ANALYSIS:" >> $REPORT_FILE
-   echo "Average network usage over last 24 hours:" >> $REPORT_FILE
-   sar -n DEV -f $LOGDIR/sa$(date +%d) | grep Average >> $REPORT_FILE
+# Analyze network usage trends
+echo "NETWORK USAGE ANALYSIS:" >> $REPORT_FILE
+echo "Average network usage over last 24 hours:" >> $REPORT_FILE
+sar -n DEV -f $LOGDIR/sa$(date +%d) | grep Average >> $REPORT_FILE
    
-   cat $REPORT_FILE
+cat $REPORT_FILE
    
    # chmod +x /usr/local/bin/analyze-performance.sh
+
 
 2. Create performance comparison tool:
    # vim /usr/local/bin/compare-performance.sh
    
-   #!/bin/bash
-   BASELINE_FILE=$1
-   CURRENT_FILE=$2
+#!/bin/bash
+BASELINE_FILE=$1
+CURRENT_FILE=$2
    
-   if [ $# -ne 2 ]; then
-       echo "Usage: $0 <baseline_file> <current_file>"
-       exit 1
-   fi
+if [ $# -ne 2 ]; then
+   echo "Usage: $0 <baseline_file> <current_file>"
+   exit 1
+fi
    
-   echo "=== Performance Comparison ==="
-   echo "Baseline: $BASELINE_FILE"
-   echo "Current:  $CURRENT_FILE"
-   echo
+echo "=== Performance Comparison ==="
+echo "Baseline: $BASELINE_FILE"
+echo "Current:  $CURRENT_FILE"
+echo
    
-   # Compare CPU usage
-   echo "CPU Usage Comparison:"
-   echo "Baseline CPU:"
-   grep "Average:" $BASELINE_FILE | head -1
-   echo "Current CPU:"
-   grep "Average:" $CURRENT_FILE | head -1
-   echo
+# Compare CPU usage
+echo "CPU Usage Comparison:"
+echo "Baseline CPU:"
+sar -u -f "$BASELINE_FILE" | grep Average
+echo "Current CPU:"
+sar -u -f "$CURRENT_FILE" | grep Average
+echo
    
-   # Compare memory usage
-   echo "Memory Usage Comparison:"
-   echo "Baseline Memory:"
-   sar -r -f $BASELINE_FILE | grep Average
-   echo "Current Memory:"
-   sar -r -f $CURRENT_FILE | grep Average
+# Compare memory usage
+echo "Memory Usage Comparison:"
+echo "Baseline Memory:"
+sar -r -f $BASELINE_FILE | grep Average
+echo "Current Memory:"
+sar -r -f $CURRENT_FILE | grep Average
    
    # chmod +x /usr/local/bin/compare-performance.sh
+   # /usr/local/bin/compare-performance.sh /var/log/sa/sa21 /var/log/sa/sa21
+
+
 
 PART I: PERFORMANCE ALERTING
 -----------------------------
@@ -429,58 +437,70 @@ PART I: PERFORMANCE ALERTING
 1. Create performance threshold monitoring:
    # vim /usr/local/bin/performance-alerts.sh
    
-   #!/bin/bash
-   CPU_THRESHOLD=80
-   MEMORY_THRESHOLD=85
-   DISK_THRESHOLD=90
-   LOAD_THRESHOLD=2.0
+#!/bin/bash
+CPU_THRESHOLD=80
+MEMORY_THRESHOLD=85
+DISK_THRESHOLD=90
+LOAD_THRESHOLD=2.0
    
-   ALERT_LOG="/var/log/performance-alerts.log"
+ALERT_LOG="/var/log/performance-alerts.log"
    
-   # Check CPU usage
-   CPU_USAGE=$(sar -u 1 1 | grep Average | awk '{print 100-$NF}' | cut -d. -f1)
-   if [ $CPU_USAGE -gt $CPU_THRESHOLD ]; then
-       echo "$(date): ALERT - High CPU usage: ${CPU_USAGE}%" >> $ALERT_LOG
-   fi
+# Check CPU usage
+CPU_USAGE=$(sar -u 1 1 | grep Average | awk '{print 100-$NF}' | cut -d. -f1)
+if [ $CPU_USAGE -gt $CPU_THRESHOLD ]; then
+   echo "$(date): ALERT - High CPU usage: ${CPU_USAGE}%" >> $ALERT_LOG
+fi
    
-   # Check memory usage
-   MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
-   if [ $MEMORY_USAGE -gt $MEMORY_THRESHOLD ]; then
-       echo "$(date): ALERT - High memory usage: ${MEMORY_USAGE}%" >> $ALERT_LOG
-   fi
+# Check memory usage
+MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
+if [ $MEMORY_USAGE -gt $MEMORY_THRESHOLD ]; then
+   echo "$(date): ALERT - High memory usage: ${MEMORY_USAGE}%" >> $ALERT_LOG
+fi
    
-   # Check disk usage
-   df -h | grep -E '^/dev/' | while read line; do
-       USAGE=$(echo $line | awk '{print $5}' | cut -d'%' -f1)
-       FILESYSTEM=$(echo $line | awk '{print $6}')
-       if [ $USAGE -gt $DISK_THRESHOLD ]; then
-           echo "$(date): ALERT - High disk usage: $FILESYSTEM ${USAGE}%" >> $ALERT_LOG
-       fi
-   done
-   
-   # Check load average
-   LOAD_1MIN=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}' | tr -d ' ')
-   if (( $(echo "$LOAD_1MIN > $LOAD_THRESHOLD" | bc -l) )); then
-       echo "$(date): ALERT - High load average: $LOAD_1MIN" >> $ALERT_LOG
-   fi
+# Check disk usage
+df -h | grep -E '^/dev/' | while read line; do
+   USAGE=$(echo $line | awk '{print $5}' | cut -d'%' -f1)
+   FILESYSTEM=$(echo $line | awk '{print $6}')
+if [ $USAGE -gt $DISK_THRESHOLD ]; then
+   echo "$(date): ALERT - High disk usage: $FILESYSTEM ${USAGE}%" >> $ALERT_LOG
+fi
+done
+
+# Check load average (RHCE safe – no bc)
+LOAD_1MIN=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}')
+
+LOAD_HIGH=$(awk -v cur_load="$LOAD_1MIN" -v threshold="$LOAD_THRESHOLD" \
+'BEGIN { if (cur_load > threshold) print 1; else print 0 }')
+
+if [ "$LOAD_HIGH" -eq 1 ]; then
+   echo "$(date): ALERT - High load average: $LOAD_1MIN" >> $ALERT_LOG
+fi
+
+
    
    # chmod +x /usr/local/bin/performance-alerts.sh
 
 2. Schedule performance alerts:
    # vim /etc/cron.d/performance-alerts
    
-   # Check performance thresholds every 2 minutes
-   */2 * * * * root /usr/local/bin/performance-alerts.sh
+# Check performance thresholds every 2 minutes
+*/2 * * * * root /usr/local/bin/performance-alerts.sh
 
 PART J: TESTING AND VALIDATION
 -------------------------------
 
 1. Test CPU monitoring:
-   # stress --cpu 4 --timeout 60s
+   # yes > /dev/null &
+   # yes > /dev/null &
+   # yes > /dev/null &
+   # yes > /dev/null &
+
    # /usr/local/bin/cpu-monitor.sh
+   # cat /var/log/performance-alerts.log
+   
 
 2. Test memory monitoring:
-   # stress --vm 2 --vm-bytes 1G --timeout 60s
+   # dd if=/dev/zero of=/tmp/memtest bs=1M count=2048
    # /usr/local/bin/memory-monitor.sh
 
 3. Test disk I/O monitoring:
@@ -518,14 +538,14 @@ EXPECTED RESULTS:
 
 VALIDATION CHECKLIST:
 ---------------------
-□ Sysstat service running and collecting data
-□ CPU monitoring scripts functional
-□ Memory monitoring operational
-□ Disk I/O monitoring working
-□ Network monitoring active
-□ Performance reports generated
-□ Alerting system configured
-□ Analysis tools operational
+□ Sysstat service running and collecting data    Pass 
+□ CPU monitoring scripts functional              Pass
+□ Memory monitoring operational                  Pass
+□ Disk I/O monitoring working                    Pass
+□ Network monitoring active                      Pass
+□ Performance reports generated                  Pass
+□ Alerting system configured                     Pass
+□ Analysis tools operational                     Pass
 
 CLEANUP:
 --------
