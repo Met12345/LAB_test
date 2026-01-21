@@ -122,7 +122,11 @@ PART B: CONFIGURE SAMBA SHARES
 
 PART C: CONFIGURE FIREWALL AND START SERVICES
 ----------------------------------------------
-
+   # install firewall 
+   # yum install firewalld
+   # systemctl start firewalld
+   # systemctl enable firewalld
+   
 1. Configure firewall:
    # firewall-cmd --permanent --add-service=samba
    # firewall-cmd --reload
@@ -158,21 +162,21 @@ PART D: CLIENT CONFIGURATION AND TESTING
 
 
 4. Mount shares manually:
-   # mount -t cifs //20.192.233.129/public /mnt/samba-public -o username=guest,password=
-   # mount -t cifs //20.192.233.129/private /mnt/samba-private -o username=sambauser1
-   # mount -t cifs //20.192.233.129/group-share /mnt/samba-group -o username=sambauser1
+   # mount -t cifs //20.192.211.221/public /mnt/samba-public -o username=guest,password=
+   # mount -t cifs //20.192.211.221/private /mnt/samba-private -o username=sambauser1
+   # mount -t cifs //20.192.211.221/group-share /mnt/samba-group -o username=sambauser1
 
 5. Configure persistent mounts with credentials:
    # vim /etc/samba/credentials
-   username=sambauser1
-   password=sambauser1
-   domain=WORKGROUP
+username=sambauser1
+password=sambauser1
+domain=WORKGROUP
    
    # chmod 600 /etc/samba/credentials
 
 6. Add to /etc/fstab:
    # vim /etc/fstab
-   //192.168.1.10/private /mnt/samba-private cifs credentials=/etc/samba/credentials,uid=1000,gid=1000 0 0
+   //20.192.211.221/private /mnt/samba-private cifs credentials=/etc/samba/credentials,uid=1000,gid=1000 0 0
 
 PART E: TESTING AND VERIFICATION
 ---------------------------------
