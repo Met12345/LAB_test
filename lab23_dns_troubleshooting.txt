@@ -86,6 +86,11 @@ PART B: COMMON DNS PROBLEMS SIMULATION
 ---------------------------------------
 
 1. Create broken zone file for testing:
+   #rpm -qa bind
+   (if not bind package not installed)
+   #yum install bind -y
+   #systemctl enable named -y --now
+   #systemct status named 
    # cp /var/named/example.com.zone /var/named/example.com.zone.backup
    # vim /var/named/example.com.zone
    
