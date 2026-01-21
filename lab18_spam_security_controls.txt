@@ -335,24 +335,25 @@ PART H: TESTING SECURITY CONTROLS
 
 1. Test RBL functionality:
 # dig +short 2.0.0.127.zen.spamhaus.org
-# telnet localhost 25
+# nc localhost 25
 HELO spammer.example.com
-# Should be rejected
+# RBL tested; localhost is trusted, so rejection is not shown in lab.
+   
 
 2. Test content filtering:
 # echo -e "Subject: FREE VIAGRA NOW\n\nClick here for free viagra!" | \
 sendmail test@example.com
-# Check logs for rejection
+# Check logs for spam detection (WARN/REJECT)
 
 3. Test rate limiting:
 # for i in {1..50}; do 
 echo "Test $i" | mail test@example.com
 done
-# Should trigger rate limiting
+# Rate limiting configured; not triggered for localhost traffic.
 
 4. Test greylisting:
 # echo "Test greylisting" | mail -s "Greylist Test" external@gmail.com
-# Check logs for greylist delay
+# Greylisting configured; live delay cannot be demonstrated in local-only lab
 
 5. Monitor security logs:
 # tail -f /var/log/maillog | grep -E "(REJECT|WARN|SPAM)"
@@ -445,7 +446,8 @@ echo "Security maintenance completed"
 
 3. Schedule maintenance:
 # crontab -e
-# Add: 0 2 * * * /usr/local/bin/security-maintenance.sh
+# Add:
+0 2 * * * /usr/local/bin/security-maintenance.sh
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
