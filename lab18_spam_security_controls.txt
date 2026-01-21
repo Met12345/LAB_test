@@ -35,425 +35,425 @@ PART A: CONFIGURE BASIC SMTP RESTRICTIONS
 2. Configure client restrictions:
 # vim /etc/postfix/main.cf
    
-   # Client connection restrictions
-   smtpd_client_restrictions = 
-       permit_mynetworks,
-       permit_sasl_authenticated,
-       reject_rbl_client zen.spamhaus.org,
-       reject_rbl_client bl.spamcop.net,
-       reject_rbl_client dnsbl.sorbs.net,
-       permit
+# Client connection restrictions
+smtpd_client_restrictions = 
+permit_mynetworks,
+permit_sasl_authenticated,
+reject_rbl_client zen.spamhaus.org,
+reject_rbl_client bl.spamcop.net,
+reject_rbl_client dnsbl.sorbs.net,
+permit
 
 3. Configure HELO restrictions:
 # vim /etc/postfix/main.cf
    
-   # HELO/EHLO restrictions
-   smtpd_helo_restrictions = 
-       permit_mynetworks,
-       permit_sasl_authenticated,
-       reject_invalid_helo_hostname,
-       reject_non_fqdn_helo_hostname,
-       reject_unknown_helo_hostname,
-       permit
+# HELO/EHLO restrictions
+smtpd_helo_restrictions = 
+permit_mynetworks,
+permit_sasl_authenticated,
+reject_invalid_helo_hostname,
+reject_non_fqdn_helo_hostname,
+reject_unknown_helo_hostname,
+permit
 
 4. Configure sender restrictions:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
-   # Sender restrictions
-   smtpd_sender_restrictions = 
-       permit_mynetworks,
-       permit_sasl_authenticated,
-       reject_non_fqdn_sender,
-       reject_unknown_sender_domain,
-       reject_unlisted_sender,
-       permit
+# Sender restrictions
+smtpd_sender_restrictions = 
+permit_mynetworks,
+permit_sasl_authenticated,
+reject_non_fqdn_sender,
+reject_unknown_sender_domain,
+reject_unlisted_sender,
+permit
 
 5. Configure recipient restrictions:
-   # vim /etc/postfix/main.cf
-   
-   # Recipient restrictions
-   smtpd_recipient_restrictions = 
-       permit_mynetworks,
-       permit_sasl_authenticated,
-       reject_non_fqdn_recipient,
-       reject_unknown_recipient_domain,
-       reject_unauth_destination,
-       reject_unlisted_recipient,
-       permit
+# vim /etc/postfix/main.cf
+# Recipient restrictions
+smtpd_recipient_restrictions = 
+permit_mynetworks,
+permit_sasl_authenticated,
+reject_non_fqdn_recipient,
+reject_unknown_recipient_domain,
+reject_unauth_destination,
+reject_unlisted_recipient,
+permit
 
 PART B: CONFIGURE CONTENT FILTERING
 ------------------------------------
 
 1. Configure header checks:
-   # vim /etc/postfix/header_checks
+# vim /etc/postfix/header_checks
    
-   # Block common spam patterns
-   /^Subject:.*\b(viagra|cialis|casino|lottery|winner)\b/i REJECT Spam detected
-   /^Subject:.*\$\$\$/                                      REJECT Spam detected
-   /^Subject:.*FREE.*MONEY/i                                REJECT Spam detected
-   /^Subject:.*URGENT.*RESPONSE/i                           REJECT Spam detected
-   
-   # Block suspicious headers
-   /^X-Mailer:.*mass.*mail/i                               REJECT Mass mailer detected
-   /^X-Mailer:.*bulk/i                                     REJECT Bulk mailer detected
-   
-   # Remove sensitive information
-   /^Received: from .*\.internal\.local/                   IGNORE
-   /^X-Originating-IP:/                                    IGNORE
+# Block common spam patterns
+/^Subject:.*\b(viagra|cialis|casino|lottery|winner)\b/i REJECT Spam detected
+/^Subject:.*\$\$\$/                                      REJECT Spam detected
+/^Subject:.*FREE.*MONEY/i                                REJECT Spam detected
+/^Subject:.*URGENT.*RESPONSE/i                           REJECT Spam detected
+
+# Block suspicious headers
+/^X-Mailer:.*mass.*mail/i                               REJECT Mass mailer detected
+/^X-Mailer:.*bulk/i                                     REJECT Bulk mailer detected
+
+# Remove sensitive information
+/^Received: from .*\.internal\.local/                   IGNORE
+/^X-Originating-IP:/                                    IGNORE
 
 2. Configure body checks:
-   # vim /etc/postfix/body_checks
+# vim /etc/postfix/body_checks
    
-   # Block common spam content
-   /\b(viagra|cialis|phentermine)\b/i                      REJECT Pharmaceutical spam
-   /\bmillion.*dollars?\b/i                                REJECT Money scam
-   /\bclick.*here.*now\b/i                                 REJECT Suspicious link
-   /\bact.*now.*limited.*time\b/i                          REJECT Urgency scam
-   
-   # Block suspicious patterns
-   /\b[A-Z]{10,}\b/                                        WARN Excessive caps
-   /\$\$\$+/                                               REJECT Money symbols
+# Block common spam content
+/\b(viagra|cialis|phentermine)\b/i                      REJECT Pharmaceutical spam
+/\bmillion.*dollars?\b/i                                REJECT Money scam
+/\bclick.*here.*now\b/i                                 REJECT Suspicious link
+/\bact.*now.*limited.*time\b/i                          REJECT Urgency scam
+
+# Block suspicious patterns
+/\b[A-Z]{10,}\b/                                        WARN Excessive caps
+/\$\$\$+/                                               REJECT Money symbols
 
 3. Configure MIME header checks:
-   # vim /etc/postfix/mime_header_checks
+# vim /etc/postfix/mime_header_checks
    
-   # Block dangerous attachments
-   /^Content-Type:.*application\/x-msdownload/             REJECT Executable attachment
-   /^Content-Type:.*application\/octet-stream/             REJECT Binary attachment
-   /^Content-Disposition:.*\.exe$/                         REJECT Executable file
-   /^Content-Disposition:.*\.scr$/                         REJECT Screen saver file
-   /^Content-Disposition:.*\.bat$/                         REJECT Batch file
+# Block dangerous attachments
+/^Content-Type:.*application\/x-msdownload/             REJECT Executable attachment
+/^Content-Type:.*application\/octet-stream/             REJECT Binary attachment
+/^Content-Disposition:.*\.exe$/                         REJECT Executable file
+/^Content-Disposition:.*\.scr$/                         REJECT Screen saver file
+/^Content-Disposition:.*\.bat$/                         REJECT Batch file
 
 4. Update main configuration:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
-   # Content filtering
-   header_checks = regexp:/etc/postfix/header_checks
-   body_checks = regexp:/etc/postfix/body_checks
-   mime_header_checks = regexp:/etc/postfix/mime_header_checks
+# Content filtering
+header_checks = regexp:/etc/postfix/header_checks
+body_checks = regexp:/etc/postfix/body_checks
+mime_header_checks = regexp:/etc/postfix/mime_header_checks
 
 PART C: CONFIGURE RATE LIMITING
 --------------------------------
 
 1. Configure connection limits:
-   # vim /etc/postfix/main.cf
-   
-   # Connection rate limiting
-   anvil_rate_time_unit = 60s
-   smtpd_client_connection_count_limit = 50
-   smtpd_client_connection_rate_limit = 30
-   smtpd_client_message_rate_limit = 100
-   smtpd_client_recipient_rate_limit = 200
-   smtpd_client_event_limit_exceptions = $mynetworks
+# vim /etc/postfix/main.cf
+# Connection rate limiting
+anvil_rate_time_unit = 60s
+smtpd_client_connection_count_limit = 50
+smtpd_client_connection_rate_limit = 30
+smtpd_client_message_rate_limit = 100
+smtpd_client_recipient_rate_limit = 200
+smtpd_client_event_limit_exceptions = $mynetworks
 
 2. Configure per-client limits:
-   # vim /etc/postfix/client_access
+# vim /etc/postfix/client_access
    
-   # Client-specific limits
-   192.168.1.0/24          OK
-   trusted.example.com     OK
-   suspicious.domain.com   REJECT Rate limited
-   spammer.net            REJECT Blocked domain
+# Client-specific limits
+192.168.1.0/24          OK
+trusted.example.com     OK
+suspicious.domain.com   REJECT Rate limited
+spammer.net            REJECT Blocked domain
    
-   # postmap /etc/postfix/client_access
+# postmap /etc/postfix/client_access
 
 3. Update configuration for client access:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
-   smtpd_client_restrictions = 
-       check_client_access hash:/etc/postfix/client_access,
-       permit_mynetworks,
-       reject_rbl_client zen.spamhaus.org,
-       permit
+smtpd_client_restrictions = 
+check_client_access hash:/etc/postfix/client_access,
+permit_mynetworks,
+reject_rbl_client zen.spamhaus.org,
+permit
 
 PART D: CONFIGURE GREYLISTING
 ------------------------------
 
 1. Install postgrey:
-   # yum install postgrey -y
-   # systemctl enable postgrey
+# yum install postgrey -y
+# systemctl enable postgrey
 
 2. Configure postgrey:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
-   # Greylisting with postgrey
-   smtpd_recipient_restrictions = 
-       permit_mynetworks,
-       permit_sasl_authenticated,
-       reject_unauth_destination,
-       check_policy_service inet:127.0.0.1:10023
+# Greylisting with postgrey
+smtpd_recipient_restrictions = 
+permit_mynetworks,
+permit_sasl_authenticated,
+reject_unauth_destination,
+check_policy_service inet:127.0.0.1:10023
 
 3. Configure postgrey whitelist:
-   # vim /etc/postfix/postgrey_whitelist_clients
+# vim /etc/postfix/postgrey_whitelist_clients
    
-   # Whitelisted clients (bypass greylisting)
-   gmail.com
-   outlook.com
-   yahoo.com
-   example.com
-   192.168.1.0/24
+# Whitelisted clients (bypass greylisting)
+gmail.com
+outlook.com
+yahoo.com
+example.com
+192.168.1.0/24
 
 4. Start postgrey service:
-   # systemctl start postgrey
-   # systemctl status postgrey
+# systemctl start postgrey
+# systemctl status postgrey
 
 PART E: CONFIGURE SPAMASSASSIN INTEGRATION
 -------------------------------------------
 
 1. Install SpamAssassin:
-   # yum install spamassassin -y
-   # systemctl enable spamassassin
+# yum install spamassassin -y
+# systemctl enable spamassassin
 
 2. Configure SpamAssassin:
-   # vim /etc/mail/spamassassin/local.cf
+# vim /etc/mail/spamassassin/local.cf
    
-   # SpamAssassin configuration
-   required_score 5.0
-   report_safe 0
-   rewrite_header Subject [SPAM]
+# SpamAssassin configuration
+required_score 5.0
+report_safe 0
+rewrite_header Subject [SPAM]
    
-   # Network tests
-   skip_rbl_checks 0
-   use_razor2 1
-   use_pyzor 1
-   use_dcc 1
+# Network tests
+skip_rbl_checks 0
+use_razor2 1
+use_pyzor 1
+use_dcc 1
    
-   # Bayes filtering
-   use_bayes 1
-   bayes_auto_learn 1
+# Bayes filtering
+use_bayes 1
+bayes_auto_learn 1
 
 3. Integrate with Postfix using content_filter:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
-   # SpamAssassin integration
-   content_filter = spamassassin
+# SpamAssassin integration
+content_filter = spamassassin
 
 4. Configure master.cf for SpamAssassin:
-   # vim /etc/postfix/master.cf
+# vim /etc/postfix/master.cf
    
-   # SpamAssassin filter
-   spamassassin unix -     n       n       -       -       pipe
-     user=spamd argv=/usr/bin/spamc -f -e
-     /usr/sbin/sendmail -oi -f ${sender} ${recipient}
+# SpamAssassin filter
+spamassassin unix -     n       n       -       -       pipe
+user=spamd argv=/usr/bin/spamc -f -e
+
+/usr/sbin/sendmail -oi -f ${sender} ${recipient}
 
 5. Start SpamAssassin:
-   # systemctl start spamassassin
-   # systemctl status spamassassin
+# systemctl start spamassassin
+# systemctl status spamassassin
 
 PART F: CONFIGURE VIRUS SCANNING
 ---------------------------------
 
 1. Install ClamAV:
-   # yum install clamav clamav-update -y
+# yum install clamav clamav-update -y
 
 2. Update virus definitions:
-   # freshclam
+# freshclam
 
 3. Configure ClamAV daemon:
-   # vim /etc/clamd.d/scan.conf
+# vim /etc/clamd.d/scan.conf
    
-   # ClamAV configuration
-   LocalSocket /var/run/clamd.scan/clamd.sock
-   User clamscan
-   LogFile /var/log/clamd.scan
-   LogTime yes
-   DatabaseDirectory /var/lib/clamav
+# ClamAV configuration
+LocalSocket /var/run/clamd.scan/clamd.sock
+User clamscan
+LogFile /var/log/clamd.scan
+LogTime yes
+DatabaseDirectory /var/lib/clamav
    
-   # Scanning options
-   ScanPE yes
-   ScanELF yes
-   ScanOLE2 yes
-   ScanPDF yes
-   ScanHTML yes
-   ScanArchive yes
+# Scanning options
+ScanPE yes
+ScanELF yes
+ScanOLE2 yes
+ScanPDF yes
+ScanHTML yes
+ScanArchive yes
 
 4. Integrate ClamAV with Postfix:
-   # vim /etc/postfix/master.cf
+# vim /etc/postfix/master.cf
    
-   # ClamAV scanner
-   scan unix -     -       n       -       16      smtp
-     -o smtp_data_done_timeout=1200
-     -o smtp_send_xforward_command=yes
-     -o disable_dns_lookups=yes
+# ClamAV scanner
+scan unix -     -       n       -       16      smtp
+-o smtp_data_done_timeout=1200
+-o smtp_send_xforward_command=yes
+-o disable_dns_lookups=yes
 
 5. Start ClamAV services:
-   # systemctl enable clamd@scan
-   # systemctl start clamd@scan
+# systemctl enable clamd@scan
+# systemctl start clamd@scan
 
 PART G: CONFIGURE SECURITY MONITORING
 --------------------------------------
 
 1. Create security monitoring script:
-   # vim /usr/local/bin/mail-security-monitor.sh
+
+# vim /usr/local/bin/mail-security-monitor.sh
    
-   #!/bin/bash
-   # Mail security monitoring script
+#!/bin/bash
+# Mail security monitoring script
+
+LOGFILE="/var/log/maillog"
+ALERT_EMAIL="admin@example.com"
+TODAY=$(date '+%b %d')
    
-   LOGFILE="/var/log/maillog"
-   ALERT_EMAIL="admin@example.com"
-   TODAY=$(date '+%b %d')
+# Check for high rejection rate
+REJECTIONS=$(grep "$TODAY" $LOGFILE | grep -c "REJECT")
+if [ $REJECTIONS -gt 100 ]; then
+echo "High rejection rate: $REJECTIONS rejections today" | \
+mail -s "Mail Security Alert: High Rejections" $ALERT_EMAIL
+fi
    
-   # Check for high rejection rate
-   REJECTIONS=$(grep "$TODAY" $LOGFILE | grep -c "REJECT")
-   if [ $REJECTIONS -gt 100 ]; then
-       echo "High rejection rate: $REJECTIONS rejections today" | \
-       mail -s "Mail Security Alert: High Rejections" $ALERT_EMAIL
-   fi
+# Check for RBL hits
+RBL_HITS=$(grep "$TODAY" $LOGFILE | grep -c "RBL")
+if [ $RBL_HITS -gt 50 ]; then
+echo "High RBL hit rate: $RBL_HITS hits today" | \
+mail -s "Mail Security Alert: RBL Activity" $ALERT_EMAIL
+fi
    
-   # Check for RBL hits
-   RBL_HITS=$(grep "$TODAY" $LOGFILE | grep -c "RBL")
-   if [ $RBL_HITS -gt 50 ]; then
-       echo "High RBL hit rate: $RBL_HITS hits today" | \
-       mail -s "Mail Security Alert: RBL Activity" $ALERT_EMAIL
-   fi
+# Check for spam detection
+SPAM_COUNT=$(grep "$TODAY" $LOGFILE | grep -c "SPAM")
+echo "Spam messages detected today: $SPAM_COUNT" | \
+logger -t mail-security
    
-   # Check for spam detection
-   SPAM_COUNT=$(grep "$TODAY" $LOGFILE | grep -c "SPAM")
-   echo "Spam messages detected today: $SPAM_COUNT" | \
-   logger -t mail-security
-   
-   # chmod +x /usr/local/bin/mail-security-monitor.sh
+# chmod +x /usr/local/bin/mail-security-monitor.sh
 
 2. Schedule security monitoring:
-   # crontab -e
-   # Add: */30 * * * * /usr/local/bin/mail-security-monitor.sh
+# crontab -e
+# Add: */30 * * * * /usr/local/bin/mail-security-monitor.sh
 
 3. Configure fail2ban for mail protection:
-   # yum install fail2ban -y
-   # vim /etc/fail2ban/jail.d/postfix.conf
+# yum install fail2ban -y
+# vim /etc/fail2ban/jail.d/postfix.conf
    
-   [postfix]
-   enabled = true
-   port = smtp,465,submission
-   filter = postfix
-   logpath = /var/log/maillog
-   maxretry = 5
-   bantime = 3600
+[postfix]
+enabled = true
+port = smtp,465,submission
+filter = postfix
+logpath = /var/log/maillog
+maxretry = 5
+bantime = 3600
 
 4. Start fail2ban:
-   # systemctl enable fail2ban
-   # systemctl start fail2ban
+# systemctl enable fail2ban
+# systemctl start fail2ban
 
 PART H: TESTING SECURITY CONTROLS
 ----------------------------------
 
 1. Test RBL functionality:
-   # dig +short 2.0.0.127.zen.spamhaus.org
-   # telnet localhost 25
-   HELO spammer.example.com
-   # Should be rejected
+# dig +short 2.0.0.127.zen.spamhaus.org
+# telnet localhost 25
+HELO spammer.example.com
+# Should be rejected
 
 2. Test content filtering:
-   # echo -e "Subject: FREE VIAGRA NOW\n\nClick here for free viagra!" | \
-     sendmail test@example.com
-   # Check logs for rejection
+# echo -e "Subject: FREE VIAGRA NOW\n\nClick here for free viagra!" | \
+sendmail test@example.com
+# Check logs for rejection
 
 3. Test rate limiting:
-   # for i in {1..50}; do 
-       echo "Test $i" | mail test@example.com
-     done
-   # Should trigger rate limiting
+# for i in {1..50}; do 
+echo "Test $i" | mail test@example.com
+done
+# Should trigger rate limiting
 
 4. Test greylisting:
-   # echo "Test greylisting" | mail -s "Greylist Test" external@gmail.com
-   # Check logs for greylist delay
+# echo "Test greylisting" | mail -s "Greylist Test" external@gmail.com
+# Check logs for greylist delay
 
 5. Monitor security logs:
-   # tail -f /var/log/maillog | grep -E "(REJECT|WARN|SPAM)"
+# tail -f /var/log/maillog | grep -E "(REJECT|WARN|SPAM)"
 
 PART I: CONFIGURE WHITELISTING
 -------------------------------
 
 1. Create whitelist for trusted senders:
-   # vim /etc/postfix/sender_whitelist
+# vim /etc/postfix/sender_whitelist
    
-   # Trusted senders (bypass all restrictions)
-   admin@example.com       OK
-   noreply@bank.com        OK
-   alerts@monitoring.com   OK
-   @trusted-partner.com    OK
+# Trusted senders (bypass all restrictions)
+admin@example.com       OK
+noreply@bank.com        OK
+alerts@monitoring.com   OK
+@trusted-partner.com    OK
    
-   # postmap /etc/postfix/sender_whitelist
+# postmap /etc/postfix/sender_whitelist
 
 2. Create recipient whitelist:
-   # vim /etc/postfix/recipient_whitelist
-   
-   # Protected recipients
-   admin@example.com       OK
-   security@example.com    OK
-   postmaster@example.com  OK
-   
-   # postmap /etc/postfix/recipient_whitelist
+
+# vim /etc/postfix/recipient_whitelist
+# Protected recipients
+admin@example.com       OK
+security@example.com    OK
+postmaster@example.com  OK
+
+# postmap /etc/postfix/recipient_whitelist
 
 3. Update restrictions with whitelists:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
-   smtpd_sender_restrictions = 
-       check_sender_access hash:/etc/postfix/sender_whitelist,
-       permit_mynetworks,
-       reject_non_fqdn_sender,
-       permit
+smtpd_sender_restrictions = 
+check_sender_access hash:/etc/postfix/sender_whitelist,
+permit_mynetworks,
+reject_non_fqdn_sender, 
+permit
    
-   smtpd_recipient_restrictions = 
-       check_recipient_access hash:/etc/postfix/recipient_whitelist,
-       permit_mynetworks,
-       reject_unauth_destination,
-       permit
+smtpd_recipient_restrictions = 
+check_recipient_access hash:/etc/postfix/recipient_whitelist,
+permit_mynetworks,
+reject_unauth_destination,
+permit
 
 PART J: PERFORMANCE AND MAINTENANCE
 ------------------------------------
 
 1. Monitor security performance:
-   # vim /usr/local/bin/security-stats.sh
+# vim /usr/local/bin/security-stats.sh
    
-   #!/bin/bash
-   # Security statistics script
+#!/bin/bash
+# Security statistics script
    
-   LOGFILE="/var/log/maillog"
-   TODAY=$(date '+%b %d')
+LOGFILE="/var/log/maillog"
+TODAY=$(date '+%b %d')
    
-   echo "=== Mail Security Statistics for $TODAY ==="
+echo "=== Mail Security Statistics for $TODAY ==="
    
-   # Rejection statistics
-   echo "Rejections by type:"
-   grep "$TODAY" $LOGFILE | grep "REJECT" | \
-   awk '{print $NF}' | sort | uniq -c | sort -nr
+# Rejection statistics
+echo "Rejections by type:"
+grep "$TODAY" $LOGFILE | grep "REJECT" | \
+awk '{print $NF}' | sort | uniq -c | sort -nr
    
-   # RBL statistics
-   echo "RBL hits:"
-   grep "$TODAY" $LOGFILE | grep "RBL" | wc -l
+# RBL statistics
+echo "RBL hits:"
+grep "$TODAY" $LOGFILE | grep "RBL" | wc -l
    
-   # Spam statistics
-   echo "Spam detected:"
-   grep "$TODAY" $LOGFILE | grep "SPAM" | wc -l
+# Spam statistics
+echo "Spam detected:"
+grep "$TODAY" $LOGFILE | grep "SPAM" | wc -l
    
-   # chmod +x /usr/local/bin/security-stats.sh
+# chmod +x /usr/local/bin/security-stats.sh
 
 2. Create maintenance script:
-   # vim /usr/local/bin/security-maintenance.sh
+# vim /usr/local/bin/security-maintenance.sh
    
-   #!/bin/bash
-   # Security maintenance script
+#!/bin/bash
+# Security maintenance script
    
-   # Update SpamAssassin rules
-   sa-update --no-gpg
+# Update SpamAssassin rules
+sa-update --no-gpg
    
-   # Update ClamAV signatures
-   freshclam
+# Update ClamAV signatures
+freshclam
    
-   # Clean old logs
-   find /var/log -name "*mail*" -mtime +30 -delete
+# Clean old logs
+find /var/log -name "*mail*" -mtime +30 -delete
    
-   # Restart services if needed
-   systemctl reload postfix
+# Restart services if needed
+systemctl reload postfix
    
-   echo "Security maintenance completed"
+echo "Security maintenance completed"
    
-   # chmod +x /usr/local/bin/security-maintenance.sh
+# chmod +x /usr/local/bin/security-maintenance.sh
 
 3. Schedule maintenance:
-   # crontab -e
-   # Add: 0 2 * * * /usr/local/bin/security-maintenance.sh
+# crontab -e
+# Add: 0 2 * * * /usr/local/bin/security-maintenance.sh
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
