@@ -1,140 +1,173 @@
-RHCE RH254 HANDS-ON LAB: NETWORK TIME PROTOCOL (NTP) CONFIGURATION
-================================================================
+RHCE RH254 HANDS-ON LAB: NETWORK FILE SYSTEM (NFS) SERVER AND CLIENT
+====================================================================
 
 LAB OBJECTIVE:
-Configure NTP server and client to synchronize system time across network
+Configure NFS server to share directories and NFS client to mount shared filesystems
 
 PREREQUISITES:
-- RHEL 7/8 system with root access
-- Network connectivity
-- Basic understanding of systemd services
+- RHEL 7/8 systems with root access
+- Network connectivity between systems
+- Basic understanding of file permissions
 
 LAB SCENARIO:
-You are tasked to configure server1 as NTP server and server2 as NTP client.
-Both systems should maintain accurate time synchronization.
+Configure server1 as NFS server sharing /shared and /home directories.
+Configure server2 as NFS client mounting these shares.
 
 EQUIPMENT NEEDED:
 - 2 RHEL systems (server1: 192.168.1.10, server2: 192.168.1.20)
-- Internet connectivity for external time sources
+- Additional storage for shared directories
 
 LAB TASKS:
 
-PART A: CONFIGURE NTP SERVER (server1)
+PART A: CONFIGURE NFS SERVER (server1)
 ---------------------------------------
 
-1. Install NTP service:
-   # yum install chrony -y
-   # systemctl enable chronyd
+1. Install NFS packages:
+   # yum install nfs-utils -y
+   # systemctl enable --now nfs-server
+   # systemctl enable --now rpcbind.socket
 
-2. Configure NTP sxerver (/etc/ntp.conf):
-   #install yum 
-   # yum install vim -y
-   # cp /etc/chrony.conf /etc/chrony.conf.backup
-   # vim /etc/chrony.conf
+
+2. Create shared directories:
+   # mkdir -p /shared/public
+   # mkdir -p /shared/private
+   # chmod 755 /shared/public
+   # chmod 750 /shared/private
+   # chown nobody:nobody /shared/public
+
+3. Configure NFS exports (/etc/exports):
+   # vim /etc/exports
    
-   Add/modify these lines:
-   server 0.rhel.pool.ntp.org iburst
-   server 1.rhel.pool.ntp.org iburst
-   server 2.rhel.pool.ntp.org iburst
-   
-   # Allow local network to sync
-   allow 20.192.226.212  (Use server 2 ip)
-   local stratum 10
-
-3. Configure firewall:
- 
-   # install firewall 
-   # yum install firewalld -y
-   # systemctl enable --now firewalld
-   
-   # firewall-cmd --permanent --add-service=ntp
-   # firewall-cmd --reload
-
-4. Start and verify NTP service:
-   # systemctl start chronyd
-   # systemctl status chronyd
-   # chronyc sources -v
-
-
-PART B: CONFIGURE NTP CLIENT (server2)
----------------------------------------
-
-1. Install NTP client:
-   # yum install chrony -y
-   # systemctl enable chronyd
-
-2. Configure NTP client (/etc/ntp.conf):
-   #install yum 
-   # yum install vim -y
-   
-   # vim /etc/chrony.conf
-   
-   Replace server lines with:
-   server 20.192.222.115 iburst prefer  (User Server 1 Ip )
-   server 0.rhel.pool.ntp.org iburst
+   Add these lines:
+/shared/public 20.192.248.146(rw,sync,no_root_squash) use your server 2  ip
+/shared/private 20.192.248.146(rw,sync,root_squash)   use your server 2 ip
+/home 20.192.248.146(rw,sync,no_root_squash)        use your server 2 ip
 
 4. Configure firewall:
- 
-   # install firewall 
-   # yum install firewalld
-   # systemctl enable --now firewalld
    
-   # firewall-cmd --permanent --add-service=ntp
+   #install firewall 
+   
+   yum install firewalld
+   systemctl enable --now firewalld
+
+
+   # firewall-cmd --permanent --add-service=nfs
+   # firewall-cmd --permanent --add-service=rpc-bind
+   # firewall-cmd --permanent --add-service=mountd
    # firewall-cmd --reload
 
+5. Start NFS services:
+   
+   # systemctl status nfs-server
 
-5. Start NTP service:
-   # systemctl start chronyd
-   # systemctl status chronyd
+6. Export the filesystems:
+   # exportfs -av
+   # exportfs -v
 
-6. Force time synchronization:
-   # chronyc makestep
+PART B: CONFIGURE NFS CLIENT (server2)
+---------------------------------------
+
+1. Install NFS client packages:
+   # yum install nfs-utils -y
+   # systemctl enable --now rpcbind.socket
 
 
-PART C: VERIFICATION AND TESTING
+2. Create mount points:
+   # mkdir -p /mnt/shared-public
+   # mkdir -p /mnt/shared-private
+   # mkdir -p /mnt/nfs-home
+
+3. Test NFS connectivity:
+   # showmount -e 20.192.225.40 use your severver 1 ip 
+   # rpcinfo -p 20.192.225.40  use your severver 1 ip 
+
+4. Mount NFS shares manually:
+   # mount -t nfs 20.192.225.40:/shared/public /mnt/shared-public  (use your severver 1 ip)
+   # mount -t nfs 20.192.225.40:/shared/private /mnt/shared-private  (use your severver 1 ip)
+   # mount -t nfs 20.192.225.40:/home /mnt/nfs-home  (use your severver 1 ip)
+
+5. Configure persistent mounts (/etc/fstab):
+   # vim /etc/fstab
+   
+   Add these lines:
+   20.192.225.40:/shared/public /mnt/shared-public nfs defaults 0 0    (use your severver 1 ip)
+   20.192.225.40:/shared/private /mnt/shared-private nfs defaults 0 0  (use your severver 1 ip)
+   20.192.225.40:/home /mnt/nfs-home nfs defaults 0 0                  (use your severver 1 ip)
+
+6. Test fstab configuration:
+   # umount /mnt/shared-public /mnt/shared-private /mnt/nfs-home
+   # mount -a
+   # df -h
+
+PART C: TESTING AND VERIFICATION
 ---------------------------------
 
-1. Check NTP synchronization status :  (Run this in both server )
-   # chronyc sources -v
-   # chronyc tracking
-   # timedatectl status
+1. Test write permissions on server2:
+   # echo "Test file from client" > /mnt/shared-public/test.txt
+   # ls -la /mnt/shared-public/
 
-2. Monitor NTP peers:
-   # watch -n 5 chronyc sources -v
+2. Verify on server1:
+   # ls -la /shared/public/
+   # cat /shared/public/test.txt
 
-3. Test time drift correction:   (Run this in server 2)
-   # date -s "2 hours ago"
-   # systemctl restart chronyd
-   # watch -n 10 'date'
+3. Test root squash behavior:
+   # touch /mnt/shared-private/root-test.txt
+   # ls -la /mnt/shared-private/root-test.txt
 
-4. Check NTP logs:
-   # journalctl -u chronyd -f
+4. Monitor NFS statistics:
+   # nfsstat -s (on server 1)
+   # nfsstat -c (on server 2)
+
+5. Test NFS performance: 
+   # time dd if=/dev/zero of=/mnt/shared-public/testfile bs=1M count=100 (on server 2)
+
+PART D: ADVANCED CONFIGURATION
+-------------------------------
+
+1. Configure NFS with Kerberos security in server 1:
+   # vim /etc/exports
+   /shared/secure 20.192.248.146(rw,sync,sec=krb5p)  (Use server2 ip )
+
+2. Set up AutoFS for automatic mounting server 2:
+   # yum install autofs -y
+   # vim /etc/auto.master
+   /mnt/auto /etc/auto.nfs --timeout=60
+
+   # vim /etc/auto.nfs
+   shared-public -rw,soft,intr 20.192.225.40:/shared/public  (Use server1 ip )
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
-# chronyc sources -v
-# chronyc tracking
-# chronyc activity
-# chronyc ntpdata
+# exportfs -v
+# showmount -e localhost
+# rpcinfo -p
+# systemctl status nfs-server
+# tail -f /var/log/messages
+# netstat -tulpn | grep :2049
 
 EXPECTED RESULTS:
 -----------------
-- server1 shows external NTP servers as sources
-- server2 shows server1 as preferred source
-- Both systems maintain synchronized time
-- NTP service starts automatically on boot
+- NFS server exports directories successfully
+- Client can mount and access shared directories
+- File operations work correctly across network
+- Mounts persist after reboot
 
 VALIDATION CHECKLIST:
 ---------------------
-□ NTP service running on both systems  working 
-□ Firewall allows NTP traffic          working
-□ Client successfully syncs with server   not working 
-□ Time remains synchronized over time     not working 
-□ Services start automatically on boot    working 
+□ NFS server service running   done
+□ Exports configured correctly  done
+□ Firewall allows NFS traffic   Done
+□ Client can mount shares       Done 
+□ File permissions work as expected  Done
+□ Persistent mounts in /etc/fstab    Done
 
 CLEANUP:
 --------
-# systemctl stop chronyd
-# systemctl disable chronyd
-# firewall-cmd --permanent --remove-service=ntp
-# firewall-cmd --reload
+# umount /mnt/shared-public /mnt/shared-private /mnt/nfs-home
+# systemctl stop nfs-server
+# systemctl disable nfs-server
+# rm /etc/exports
+
+
+
+done
