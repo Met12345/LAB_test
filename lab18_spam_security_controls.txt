@@ -136,6 +136,7 @@ PART C: CONFIGURE RATE LIMITING
 
 1. Configure connection limits:
 # vim /etc/postfix/main.cf
+
 # Connection rate limiting
 anvil_rate_time_unit = 60s
 smtpd_client_connection_count_limit = 50
@@ -228,12 +229,10 @@ content_filter = spamassassin
 
 4. Configure master.cf for SpamAssassin:
 # vim /etc/postfix/master.cf
-   
-# SpamAssassin filter
-spamassassin unix -     n       n       -       -       pipe
-user=spamd argv=/usr/bin/spamc -f -e
 
-/usr/sbin/sendmail -oi -f ${sender} ${recipient}
+spamassassin unix -     n       n       -       -       pipe
+  user=spamd argv=/usr/bin/spamc -f -e
+  /usr/sbin/sendmail -oi -f ${sender} ${recipient}
 
 5. Start SpamAssassin:
 # systemctl start spamassassin
@@ -271,11 +270,13 @@ ScanArchive yes
    
 # ClamAV scanner
 scan unix -     -       n       -       16      smtp
--o smtp_data_done_timeout=1200
--o smtp_send_xforward_command=yes
--o disable_dns_lookups=yes
+  -o smtp_data_done_timeout=1200
+  -o smtp_send_xforward_command=yes
+  -o disable_dns_lookups=yes
 
-5. Start ClamAV services:
+
+5.Install ClamAV services:
+# yum install -y clamav-server clamav-server-systemd
 # systemctl enable clamd@scan
 # systemctl start clamd@scan
 
@@ -316,7 +317,8 @@ logger -t mail-security
 
 2. Schedule security monitoring:
 # crontab -e
-# Add: */30 * * * * /usr/local/bin/mail-security-monitor.sh
+# Add: 
+*/30 * * * * /usr/local/bin/mail-security-monitor.sh
 
 3. Configure fail2ban for mail protection:
 # yum install fail2ban -y
@@ -390,15 +392,11 @@ postmaster@example.com  OK
    
 smtpd_sender_restrictions = 
 check_sender_access hash:/etc/postfix/sender_whitelist,
-permit_mynetworks,
-reject_non_fqdn_sender, 
-permit
+
    
 smtpd_recipient_restrictions = 
 check_recipient_access hash:/etc/postfix/recipient_whitelist,
-permit_mynetworks,
-reject_unauth_destination,
-permit
+
 
 PART J: PERFORMANCE AND MAINTENANCE
 ------------------------------------
