@@ -14,7 +14,7 @@ You are tasked to configure server1 as NTP server and server2 as NTP client.
 Both systems should maintain accurate time synchronization.
 
 EQUIPMENT NEEDED:
-- 2 RHEL systems (server1: 192.168.1.10, server2: 192.168.1.20)
+- 2 RHEL systems (server1: 20.192.192.160, server2: 20.192.234.41)
 - Internet connectivity for external time sources
 
 LAB TASKS:
@@ -26,9 +26,9 @@ PART A: CONFIGURE NTP SERVER (server1)
    # yum install chrony -y
    # systemctl enable chronyd
 
-2. Configure NTP sxerver (/etc/ntp.conf):
+2. Configure NTP sxerver (/etc/chrony.conf):
    #install yum 
-   # yum install vim
+   # yum install vim -y
    # cp /etc/chrony.conf /etc/chrony.conf.backup
    # vim /etc/chrony.conf
    
@@ -38,21 +38,26 @@ PART A: CONFIGURE NTP SERVER (server1)
    server 2.rhel.pool.ntp.org iburst
    
    # Allow local network to sync
-   allow 20.192.217.11  (Use server 2 ip)
+   allow 20.192.234.41  (Use server 2 ip)
+   local stratum 10
+   bindaddress 0.0.0.0
+
 
 3. Configure firewall:
  
    # install firewall 
-   # yum install firewalld
+   # yum install firewalld -y
    # systemctl enable --now firewalld
    
-   # firewall-cmd --permanent --add-service=ntp
+   # firewall-cmd --permanent --add-port=123/udp
    # firewall-cmd --reload
+   # firewall-cmd --list-ports
 
 4. Start and verify NTP service:
    # systemctl start chronyd
    # systemctl status chronyd
    # chronyc sources -v
+   # ss -lunp | grep :123
 
 
 PART B: CONFIGURE NTP CLIENT (server2)
@@ -64,20 +69,34 @@ PART B: CONFIGURE NTP CLIENT (server2)
 
 2. Configure NTP client (/etc/ntp.conf):
    #install yum 
-   # yum install vim
+   # yum install vim -y
    
    # vim /etc/chrony.conf
    
    Replace server lines with:
-   server 20.192.245.6 iburst prefer  (User Server 1 Ip )
+   server 20.192.192.160 iburst prefer  (User Server 1 Ip )
    server 0.rhel.pool.ntp.org iburst
 
-3. Start NTP service:
+4. Configure firewall:
+ 
+   # install firewall 
+   # yum install firewalld
+   # systemctl enable --now firewalld
+   
+   # firewall-cmd --permanent --add-port=123/udp
+   # firewall-cmd --reload
+   # firewall-cmd --list-ports
+
+
+5. Start NTP service:
    # systemctl start chronyd
    # systemctl status chronyd
 
-4. Force time synchronization:
+6. Force time synchronization:
    # chronyc makestep
+   # chronyc -a makestep
+   # chronyc -a burst 4/4
+
 
 
 PART C: VERIFICATION AND TESTING
@@ -127,3 +146,4 @@ CLEANUP:
 # systemctl disable chronyd
 # firewall-cmd --permanent --remove-service=ntp
 # firewall-cmd --reload
+   
