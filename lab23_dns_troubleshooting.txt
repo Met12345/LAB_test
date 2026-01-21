@@ -31,6 +31,8 @@ PART A: DNS TROUBLESHOOTING TOOLS
    # nslookup -version
 
 3. Create DNS troubleshooting toolkit script:
+   # Install Vim
+   # yum install vim -y
    # vim /usr/local/bin/dns-toolkit.sh
    
    #!/bin/bash
