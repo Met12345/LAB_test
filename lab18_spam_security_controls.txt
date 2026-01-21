@@ -45,7 +45,7 @@ PART A: CONFIGURE BASIC SMTP RESTRICTIONS
        permit
 
 3. Configure HELO restrictions:
-   # vim /etc/postfix/main.cf
+# vim /etc/postfix/main.cf
    
    # HELO/EHLO restrictions
    smtpd_helo_restrictions = 
