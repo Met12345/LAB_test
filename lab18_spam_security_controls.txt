@@ -159,11 +159,8 @@ spammer.net            REJECT Blocked domain
 3. Update configuration for client access:
 # vim /etc/postfix/main.cf
    
-smtpd_client_restrictions = 
+# Add in smtpd_client_restrictions  
 check_client_access hash:/etc/postfix/client_access,
-permit_mynetworks,
-reject_rbl_client zen.spamhaus.org,
-permit
 
 PART D: CONFIGURE GREYLISTING
 ------------------------------
@@ -176,11 +173,8 @@ PART D: CONFIGURE GREYLISTING
 # vim /etc/postfix/main.cf
    
 # Greylisting with postgrey
-smtpd_recipient_restrictions = 
-permit_mynetworks,
-permit_sasl_authenticated,
-reject_unauth_destination,
-check_policy_service inet:127.0.0.1:10023
+# Add in smtpd_recipient_restrictions  
+check_policy_service inet:127.0.0.1:10023,
 
 3. Configure postgrey whitelist:
 # vim /etc/postfix/postgrey_whitelist_clients
