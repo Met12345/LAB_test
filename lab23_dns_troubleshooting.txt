@@ -23,7 +23,7 @@ PART A: DNS TROUBLESHOOTING TOOLS
 ----------------------------------
 
 1. Install DNS troubleshooting tools:
-   # yum install bind-utils dnsutils tcpdump wireshark-cli -y
+   # yum install bind-utils tcpdump wireshark-cli -y
 
 2. Verify available DNS tools:
    # which dig nslookup host
