@@ -80,6 +80,9 @@ PART C: CONFIGURE SERVICE-BASED RULES
      <port protocol="tcp" port="8443"/>
    </service>
 
+// Add directive line in above xml : <!DOCTYPE service SYSTEM "firewalld.dtd"> 
+// Firewalld ignored the custom service because the XML file was missing the required firewalld.dtd DOCTYPE declaration.
+
 4. Add custom service:
    # firewall-cmd --permanent --add-service=webapp
    # firewall-cmd --reload
@@ -109,6 +112,11 @@ PART E: CONFIGURE SOURCE-BASED RULES
 1. Allow traffic from specific IP:
    # firewall-cmd --permanent --add-source=192.168.1.100
    # firewall-cmd --permanent --zone=trusted --add-source=192.168.1.100
+
+// Show errors when directly done. So first remove and then add . 
+// firewall-cmd --permanent --zone=public --remove-source=192.168.1.100
+// firewall-cmd --permanent --zone=trusted --add-source=192.168.1.100
+// firewall-cmd --reload
 
 2. Allow traffic from network range:
    # firewall-cmd --permanent --add-source=192.168.1.0/24
@@ -152,6 +160,11 @@ PART G: CONFIGURE IPTABLES RULES (ALTERNATIVE)
 2. Basic iptables configuration:
    # iptables -F  # Flush existing rules
    # iptables -P INPUT DROP
+
+// Dropped the internet connection of the server which I was using. Be very careful
+// Internet stopped because you set the INPUT policy to DROP without first allowing ESTABLISHED/RELATED traffic, so reply packets from the internet were blocked.
+// Safe method - echo "iptables -F; iptables -P INPUT ACCEPT; iptables -P FORWARD ACCEPT; iptables -P OUTPUT ACCEPT" | at now + 1 minute
+
    # iptables -P FORWARD DROP
    # iptables -P OUTPUT ACCEPT
 
@@ -505,3 +518,7 @@ CLEANUP:
 # rm /usr/local/bin/test-firewall.sh
 # rm /usr/local/bin/monitor-firewall-logs.sh
 # crontab -e  # Remove monitoring entries
+
+UPDATED LINE 
+-----------
+- Lines added at 83,84,116,117,118,119,164,165,166
