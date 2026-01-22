@@ -23,397 +23,415 @@ PART A: INSTALL BIND DNS SERVER
 --------------------------------
 
 1. Install BIND packages:
-   # yum install bind bind-utils -y
-   # systemctl enable named
+# yum install bind bind-utils -y
+# systemctl enable named
 
 2. Verify BIND installation:
-   # rpm -qa | grep bind
-   # named -v
-   # ls -la /etc/named*
+# rpm -qa | grep bind
+# named -v
+# ls -la /etc/named*
 
 3. Check default configuration:
-   # ls -la /var/named/
-   # ls -la /etc/named/
+# ls -la /var/named/
+# ls -la /etc/named/
 
 4. Verify BIND user and group:
-   # id named
-   # groups named
+# id named
+# groups named
 
 PART B: CONFIGURE BASIC BIND SETTINGS
 --------------------------------------
 
 1. Backup original configuration:
-   # cp /etc/named.conf /etc/named.conf.backup
+# cp /etc/named.conf /etc/named.conf.backup
 
 2. Configure main BIND settings:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   options {
-       listen-on port 53 { 127.0.0.1; 192.168.1.10; };
-       listen-on-v6 port 53 { ::1; };
-       directory "/var/named";
-       dump-file "/var/named/data/cache_dump.db";
-       statistics-file "/var/named/data/named_stats.txt";
-       memstatistics-file "/var/named/data/named_mem_stats.txt";
+options {
+    listen-on port 53 { 127.0.0.1; 20.192.195.205; };
+    listen-on-v6 port 53 { ::1; };
+    directory "/var/named";
+    dump-file "/var/named/data/cache_dump.db";
+    statistics-file "/var/named/data/named_stats.txt";
+    memstatistics-file "/var/named/data/named_mem_stats.txt";
        
-       allow-query { localhost; 192.168.1.0/24; };
-       allow-query-cache { localhost; 192.168.1.0/24; };
+    allow-query { localhost; 20.192.195.205; };
+    allow-query-cache { localhost; 20.192.195.205; };
        
-       recursion yes;
-       dnssec-enable yes;
-       dnssec-validation yes;
+    recursion yes;
+    #dnssec-enable yes;# bcz in RHEL 8+/BIND 9.11+ dnssec-enable is deprecated,DNSSEC automatically handle
+    dnssec-validation yes;
        
-       bindkeys-file "/etc/named.iscdlv.key";
-       managed-keys-directory "/var/named/dynamic";
+    bindkeys-file "/etc/named.iscdlv.key";
+    managed-keys-directory "/var/named/dynamic";
        
-       pid-file "/run/named/named.pid";
-       session-keyfile "/run/named/session.key";
-   };
+    pid-file "/run/named/named.pid";
+    session-keyfile "/run/named/session.key";
+};
 
 3. Configure logging:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   logging {
-       channel default_debug {
-           file "data/named.run";
-           severity dynamic;
-       };
+logging {
+    channel default_debug {
+        file "data/named.run";
+        severity dynamic;
+    };
        
-       channel query_log {
-           file "/var/log/named/query.log" versions 3 size 5m;
-           severity info;
-           print-time yes;
-           print-severity yes;
-           print-category yes;
-       };
+    channel query_log {
+        file "/var/log/named/query.log" versions 3 size 5m;
+        severity info;
+        print-time yes;
+        print-severity yes;
+        print-category yes;
+    };
        
-       category queries { query_log; };
-       category default { default_debug; };
-   };
+    category queries { query_log; };
+    category default { default_debug; };
+};
 
 4. Create log directory:
-   # mkdir -p /var/log/named
-   # chown named:named /var/log/named
-   # chmod 755 /var/log/named
+# mkdir -p /var/log/named
+# chown named:named /var/log/named
+# chmod 755 /var/log/named
+
+5.ownership & permission
+# chown root:named /etc/named.conf
+# chmod 640 /etc/named.conf
+# restorecon -v /etc/named.conf
+# ls -Z /etc/named.conf
+# restorecon -Rv /etc/named*
+
 
 PART C: CONFIGURE ROOT HINTS AND ZONES
 ---------------------------------------
 
 1. Configure root hints:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   zone "." IN {
-       type hint;
-       file "named.ca";
-   };
+zone "." IN {
+    type hint;
+    file "named.ca";
+};
+
+Do NOT Config Step 2&3 Bcz Default localhost and loopback zones are managed via named.rfc1912.zones, so duplicate zone definitions were removed from named.conf.
 
 2. Configure localhost zones:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   zone "localhost" IN {
-       type master;
-       file "named.localhost";
-       allow-update { none; };
-   };
+zone "localhost" IN {
+    type master;
+    file "named.localhost";
+    allow-update { none; };
+};
    
-   zone "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa" IN {
-       type master;
-       file "named.loopback";
-       allow-update { none; };
-   };
+zone "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa" IN {
+    type master;
+    file "named.loopback";
+    allow-update { none; };
+};
    
-   zone "1.0.0.127.in-addr.arpa" IN {
-       type master;
-       file "named.loopback";
-       allow-update { none; };
-   };
+zone "1.0.0.127.in-addr.arpa" IN {
+    type master;
+    file "named.loopback";
+    allow-update { none; };
+};
 
 3. Configure empty zones:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   zone "0.in-addr.arpa" IN {
-       type master;
-       file "named.empty";
-       allow-update { none; };
-   };
+zone "0.in-addr.arpa" IN {
+    type master;
+    file "named.empty";
+    allow-update { none; };
+};
 
 4. Include additional configuration files:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   include "/etc/named.rfc1912.zones";
-   include "/etc/named.root.key";
+include "/etc/named.rfc1912.zones";
+include "/etc/named.root.key";
 
 PART D: CONFIGURE FIREWALL AND SELINUX
 ---------------------------------------
 
 1. Configure firewall for DNS:
-   # firewall-cmd --permanent --add-service=dns
-   # firewall-cmd --reload
-   # firewall-cmd --list-services
+# yum install firewalld -y
+# systemctl start firewalld
+# systemctl enable firewalld
+# firewall-cmd --permanent --add-service=dns
+# firewall-cmd --reload
+# firewall-cmd --list-services
 
 2. Configure SELinux for BIND:
-   # setsebool -P named_write_master_zones on
-   # semanage fcontext -a -t named_zone_t "/var/named(/.*)?"
-   # restorecon -R /var/named
+# setsebool -P named_write_master_zones on
+# semanage fcontext -a -t named_zone_t "/var/named(/.*)?"
+# restorecon -R /var/named
 
 3. Check SELinux contexts:
-   # ls -Z /var/named/
-   # ls -Z /etc/named.conf
+# ls -Z /var/named/
+# ls -Z /etc/named.conf
 
 4. Configure SELinux for log directory:
-   # semanage fcontext -a -t named_log_t "/var/log/named(/.*)?"
-   # restorecon -R /var/log/named
+# semanage fcontext -a -t named_log_t "/var/log/named(/.*)?"
+# restorecon -R /var/log/named
 
 PART E: START AND TEST BIND SERVICE
 ------------------------------------
 
 1. Test BIND configuration:
-   # named-checkconf /etc/named.conf
-   # named-checkconf -z /etc/named.conf
+# named-checkconf /etc/named.conf
+# named-checkconf -z /etc/named.conf
 
 2. Start BIND service:
-   # systemctl start named
-   # systemctl status named
+# systemctl start named
+# systemctl status named
 
 3. Verify BIND is listening:
-   # netstat -tulpn | grep :53
-   # ss -tulpn | grep :53
+# netstat -tulpn | grep :53
+# ss -tulpn | grep :53
 
 4. Test basic DNS functionality:
-   # dig @localhost google.com
-   # nslookup google.com localhost
-   # host google.com 127.0.0.1
+# dig @localhost google.com
+# nslookup google.com localhost
+# host google.com 127.0.0.1
 
 5. Test recursive queries:
-   # dig @192.168.1.10 www.example.org
-   # dig @192.168.1.10 +trace www.google.com
+# dig @20.192.195.205 www.example.org
+# dig @20.192.195.205 +trace www.google.com
 
 PART F: CONFIGURE DNS FORWARDERS
 ---------------------------------
 
 1. Configure DNS forwarders:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   options {
-       // ... existing options ...
+options {
+    // ... existing options ...
        
-       forwarders {
-           8.8.8.8;
-           8.8.4.4;
-           1.1.1.1;
-       };
+    forwarders {
+        8.8.8.8;
+        8.8.4.4;
+        1.1.1.1;
+    };
        
-       forward first;
-   };
+    forward first;
+};
+
+Do not this config step 2 Bcz Global forwarders were configured for external resolution. Conditional forwarding was not enabled as no internal authoritative DNS server was available.
 
 2. Configure conditional forwarders:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   zone "internal.local" {
-       type forward;
-       forward only;
-       forwarders { 192.168.2.10; 192.168.2.11; };
-   };
+zone "internal.local" {
+    type forward;
+    forward only;
+    forwarders { 192.168.2.10; 192.168.2.11; };
+};
 
 3. Restart BIND to apply changes:
-   # systemctl restart named
-   # systemctl status named
+# systemctl restart named
+# systemctl status named
 
 PART G: CONFIGURE ACCESS CONTROLS
 ----------------------------------
 
 1. Configure query access controls:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   acl "trusted-clients" {
-       127.0.0.1;
-       192.168.1.0/24;
-       10.0.0.0/8;
-   };
+acl "trusted-clients" {
+    127.0.0.1;
+    192.168.1.0/24;
+    10.0.0.0/8;
+};
    
-   acl "internal-networks" {
-       192.168.0.0/16;
-       10.0.0.0/8;
-   };
+acl "internal-networks" {
+    192.168.0.0/16;
+    10.0.0.0/8;
+};
    
-   options {
-       // ... existing options ...
+options {
+    // ... existing options ...
        
-       allow-query { trusted-clients; };
-       allow-query-cache { trusted-clients; };
-       allow-recursion { internal-networks; };
-   };
+    allow-query { trusted-clients; };
+    allow-query-cache { trusted-clients; };
+    allow-recursion { internal-networks; };
+};
 
 2. Configure transfer restrictions:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   options {
-       // ... existing options ...
+options {
+    // ... existing options ...
        
-       allow-transfer { none; };
-       allow-notify { none; };
-   };
+    allow-transfer { none; };
+    allow-notify { none; };
+};
 
 3. Configure rate limiting:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   options {
-       // ... existing options ...
+options {
+    // ... existing options ...
        
-       rate-limit {
-           responses-per-second 10;
-           window 5;
-       };
-   };
+    rate-limit {
+        responses-per-second 10;
+        window 5;
+    };
+};
 
 PART H: CONFIGURE BIND SECURITY
 --------------------------------
 
 1. Configure BIND security options:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   options {
-       // ... existing options ...
+options {
+    // ... existing options ...
        
-       version "DNS Server";
-       hostname "dns-server";
-       server-id "DNS";
+    version "DNS Server";
+    hostname "dns-server";
+    server-id "DNS";
        
-       // Disable unnecessary features
-       empty-zones-enable no;
-       disable-empty-zone "1.0.0.127.in-addr.arpa";
-   };
+    // Disable unnecessary features
+    empty-zones-enable no;
+    disable-empty-zone "1.0.0.127.in-addr.arpa";
+};
 
 2. Configure query logging for security:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   logging {
-       // ... existing logging ...
+logging {
+    // ... existing logging ...
        
-       channel security_log {
-           file "/var/log/named/security.log" versions 3 size 5m;
-           severity info;
-           print-time yes;
+    channel security_log {
+        file "/var/log/named/security.log" versions 3 size 5m;
+        severity info;
+        print-time yes;
        };
        
-       category security { security_log; };
-       category lame-servers { null; };
-   };
+    category security { security_log; };
+    category lame-servers { null; };
+};
+
+Do not config step 3 Bcz Response Policy Zones were not enabled as no RPZ zone was configured in this environment.
 
 3. Configure response policy zones (RPZ):
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   options {
-       // ... existing options ...
+options {
+    // ... existing options ...
        
-       response-policy {
-           zone "rpz.local";
-       };
-   };
+    response-policy {
+        zone "rpz.local";
+    };
+};
 
 PART I: MONITORING AND MAINTENANCE
 -----------------------------------
 
 1. Create DNS monitoring script:
-   # vim /usr/local/bin/dns-monitor.sh
+# vim /usr/local/bin/dns-monitor.sh
    
-   #!/bin/bash
-   # DNS monitoring script
+#!/bin/bash
+# DNS monitoring script
    
-   DNS_SERVER="192.168.1.10"
-   LOG_FILE="/var/log/dns-monitor.log"
+DNS_SERVER="20.192.234.100"
+LOG_FILE="/var/log/dns-monitor.log"
    
-   # Test DNS resolution
-   if dig @$DNS_SERVER google.com +short > /dev/null 2>&1; then
-       echo "$(date): DNS resolution working" >> $LOG_FILE
-   else
-       echo "$(date): DNS resolution failed" >> $LOG_FILE
-       systemctl restart named
-   fi
+# Test DNS resolution
+if dig @$DNS_SERVER google.com +short > /dev/null 2>&1; then
+    echo "$(date): DNS resolution working" >> $LOG_FILE
+else
+    echo "$(date): DNS resolution failed" >> $LOG_FILE
+    systemctl restart named
+fi
    
-   # Check BIND process
-   if ! pgrep named > /dev/null; then
-       echo "$(date): BIND process not running" >> $LOG_FILE
-       systemctl start named
-   fi
+# Check BIND process
+if ! pgrep named > /dev/null; then
+    echo "$(date): BIND process not running" >> $LOG_FILE
+    systemctl start named
+fi
    
-   # chmod +x /usr/local/bin/dns-monitor.sh
+# chmod +x /usr/local/bin/dns-monitor.sh
 
 2. Schedule DNS monitoring:
-   # crontab -e
-   # Add: */5 * * * * /usr/local/bin/dns-monitor.sh
+# crontab -e
+# Add: 
+*/5 * * * * /usr/local/bin/dns-monitor.sh
 
 3. Configure log rotation:
-   # vim /etc/logrotate.d/named
+# vim /etc/logrotate.d/named
    
-   /var/log/named/*.log {
-       daily
-       missingok
-       rotate 7
-       compress
-       delaycompress
-       notifempty
-       create 644 named named
-       postrotate
-           /usr/bin/systemctl reload named > /dev/null 2>&1 || true
-       endscript
-   }
+/var/log/named/*.log {
+    daily
+    missingok
+    rotate 7
+    compress
+    delaycompress
+    notifempty
+    create 644 named named
+    postrotate
+        /usr/bin/systemctl reload named > /dev/null 2>&1 || true
+    endscript
+}
 
 PART J: PERFORMANCE TUNING
 ---------------------------
 
 1. Configure BIND performance settings:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   options {
-       // ... existing options ...
+options {
+    // ... existing options ...
        
-       // Performance tuning
-       max-cache-size 256M;
-       max-cache-ttl 86400;
-       max-ncache-ttl 3600;
+    // Performance tuning
+    max-cache-size 256M;
+    max-cache-ttl 86400;
+    max-ncache-ttl 3600;
        
-       // Query optimization
-       minimal-responses yes;
+    // Query optimization
+    minimal-responses yes;
        
-       // Network optimization
-       tcp-clients 100;
-       recursive-clients 1000;
-   };
+    // Network optimization
+    tcp-clients 100;
+    recursive-clients 1000;
+};
 
 2. Monitor BIND statistics:
-   # rndc stats
-   # cat /var/named/data/named_stats.txt
+# rndc stats
+# cat /var/named/data/named_stats.txt
 
 3. Monitor memory usage:
-   # rndc status
-   # ps aux | grep named
+# rndc status
+# ps aux | grep named
 
 PART K: TESTING AND VALIDATION
 -------------------------------
 
 1. Test DNS server functionality:
-   # dig @192.168.1.10 google.com
-   # nslookup www.example.org 192.168.1.10
-   # host -t MX gmail.com 192.168.1.10
+# dig @20.192.234.100 google.com
+# nslookup www.example.org 20.192.234.100
+# host -t MX gmail.com 20.192.234.100
 
 2. Test from client systems:
-   # Configure client to use DNS server
-   # echo "nameserver 192.168.1.10" > /etc/resolv.conf
-   # dig google.com
-   # ping www.google.com
+# Configure client to use DNS server
+# echo "nameserver 20.192.234.100" > /etc/resolv.conf
+# dig google.com
+# ping www.google.com
 
 3. Test DNS security:
-   # dig @192.168.1.10 version.bind chaos txt
-   # dig @192.168.1.10 hostname.bind chaos txt
+# dig @20.192.234.100 version.bind chaos txt
+# dig @20.192.234.100 hostname.bind chaos txt
 
 4. Monitor DNS queries:
-   # tail -f /var/log/named/query.log
-   # rndc querylog on
+# tail -f /var/log/named/query.log
+# rndc querylog on
 
 5. Test performance:
-   # time dig @192.168.1.10 google.com
-   # for i in {1..100}; do dig @192.168.1.10 test$i.com > /dev/null; done
+# time dig @20.192.234.100 google.com
+# for i in {1..100}; do dig @20.192.234.100 test$i.com > /dev/null; done
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
