@@ -569,3 +569,110 @@ CLEANUP:
 # rm /usr/local/bin/monitor-*.sh
 # rm /usr/local/bin/backup-*.sh
 # crontab -e  # Remove monitoring entries
+
+
+
+ALL UPDATES (Made to do work this lab:
+-----------
+
+1. Custom made file-1. /opt/customapp/myapp.py
+
+#!/usr/bin/env python3
+
+import socket
+import time
+
+def main():
+    # Create socket server
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(('localhost', 9999))
+    sock.listen(5)
+
+    print("Custom app listening on port 9999")
+
+    while True:
+        conn, addr = sock.accept()
+        conn.send(b"Hello from custom app\n")
+        conn.close()
+
+if __name__ == "__main__":
+    main()
+
+
+2. Custom made file-2. /etc/my.cnf
+
+[client]
+socket=/srv/mysql-data/mysql.sock
+
+[mysql]
+socket=/srv/mysql-data/mysql.sock
+
+!includedir /etc/my.cnf.d
+
+
+3. Custom made script file-3. 
+/usr/local/bin/selinux-troubleshoot_mynew.sh
+
+#!/bin/bash
+# SELinux troubleshooting script
+
+echo "=== SELinux Troubleshooting Report ==="
+echo "Date: $(date)"
+echo
+
+echo "SELinux Status:"
+sestatus
+echo
+
+echo "Recent SELinux Denials (last 10):"
+ausearch -m AVC -ts recent | tail -20
+echo
+
+echo "Common SELinux Issues Check:"
+
+echo "Web server file contexts:"
+ls -Z /var/www/html/ | head -5
+echo
+
+echo "Database file contexts:"
+ls -Z /var/lib/mysql/ | head -5
+echo
+
+echo "Critical boolean settings:"
+getsebool httpd_can_network_connect
+getsebool mysql_connect_any
+getsebool ssh_sysadm_login
+
+
+4. Custom made script file-4. 
+/usr/local/bin/selinux-audit-summary_mynew.sh
+
+#!/bin/bash
+# SELinux audit log summary
+
+AUDIT_LOG="/var/log/audit/audit.log"
+
+echo "=== SELinux Audit Summary ==="
+echo "Date: $(date)"
+echo
+
+echo "Denials by service:"
+ausearch -m AVC -ts today 2>/dev/null | \
+grep "denied" | \
+sed 's/.*comm="\([^"]*\)".*/\1/' | \
+sort | uniq -c | sort -nr | head -10
+
+echo
+echo "Denials by target type:"
+ausearch -m AVC -ts today 2>/dev/null | \
+grep "denied" | \
+sed 's/.*tcontext=.*:\([^:]*\):.*/\1/' | \
+sort | uniq -c | sort -nr | head -10
+
+echo
+echo "Most active source contexts:"
+ausearch -m AVC -ts today 2>/dev/null | \
+grep "denied" | \
+sed 's/.*scontext=\([^[:space:]]*\).*/\1/' | \
+sort | uniq -c | sort -nr | head -10
+
