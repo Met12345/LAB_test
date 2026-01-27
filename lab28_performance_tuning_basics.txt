@@ -22,8 +22,16 @@ LAB TASKS:
 PART A: BASELINE PERFORMANCE ASSESSMENT
 ----------------------------------------
 
-1. Enable performance monitoring:
-   # vim /etc/my.cnf
+1: MariaDB Install 
+# yum install vim -y
+# yum install mariadb-server mariadb -y
+# systemctl enable mariadb --now
+# systemctl status mariadb
+# mysql_secure_installation
+# mysql -u root -p
+
+2. Enable performance monitoring:
+# vim /etc/my.cnf
    
    [mysqld]
    # Performance monitoring
@@ -41,8 +49,8 @@ PART A: BASELINE PERFORMANCE ASSESSMENT
    general_log = 0
    general_log_file = /var/log/mariadb/general.log
 
-2. Create performance monitoring user:
-   # mysql -u root -p
+3. Create performance monitoring user:
+# mysql -u root -p
    
    MariaDB> CREATE USER 'perf_monitor'@'localhost' 
    IDENTIFIED BY 'PerfMonitor123!';
@@ -53,8 +61,8 @@ PART A: BASELINE PERFORMANCE ASSESSMENT
    MariaDB> FLUSH PRIVILEGES;
    MariaDB> EXIT;
 
-3. Create performance baseline script:
-   # vim /usr/local/bin/mysql-performance-baseline.sh
+4. Create performance baseline script:
+# vim /usr/local/bin/mysql-performance-baseline.sh
    
    #!/bin/bash
    # MySQL performance baseline assessment
@@ -123,13 +131,13 @@ PART A: BASELINE PERFORMANCE ASSESSMENT
    WHERE VARIABLE_NAME LIKE 'Innodb_buffer_pool%'
    OR VARIABLE_NAME LIKE 'Innodb_rows%';"
    
-   # chmod +x /usr/local/bin/mysql-performance-baseline.sh
+# chmod +x /usr/local/bin/mysql-performance-baseline.sh
 
 PART B: CREATE PERFORMANCE TEST DATA
 -------------------------------------
 
 1. Create performance test database:
-   # mysql -u root -p
+# mysql -u root -p
    
    MariaDB> CREATE DATABASE performance_test;
    MariaDB> USE performance_test;
@@ -160,7 +168,7 @@ PART B: CREATE PERFORMANCE TEST DATA
    );
 
 2. Generate test data:
-   # vim /usr/local/bin/generate-test-data.sh
+# vim /usr/local/bin/generate-test-data.sh
    
    #!/bin/bash
    # Generate test data for performance testing
@@ -218,13 +226,13 @@ PART B: CREATE PERFORMANCE TEST DATA
    
    echo "Test data generation completed"
    
-   # chmod +x /usr/local/bin/generate-test-data.sh
+# chmod +x /usr/local/bin/generate-test-data.sh
 
 PART C: ANALYZE CURRENT PERFORMANCE
 ------------------------------------
 
 1. Create performance analysis script:
-   # vim /usr/local/bin/analyze-performance.sh
+# vim /usr/local/bin/analyze-performance.sh
    
    #!/bin/bash
    # MySQL performance analysis script
@@ -305,7 +313,7 @@ PART C: ANALYZE CURRENT PERFORMANCE
    # chmod +x /usr/local/bin/analyze-performance.sh
 
 2. Create slow query analysis script:
-   # vim /usr/local/bin/analyze-slow-queries.sh
+# vim /usr/local/bin/analyze-slow-queries.sh
    
    #!/bin/bash
    # Analyze slow query log
@@ -340,13 +348,13 @@ PART C: ANALYZE CURRENT PERFORMANCE
        echo "long_query_time = 2"
    fi
    
-   # chmod +x /usr/local/bin/analyze-slow-queries.sh
+# chmod +x /usr/local/bin/analyze-slow-queries.sh
 
 PART D: OPTIMIZE INNODB CONFIGURATION
 --------------------------------------
 
 1. Calculate optimal InnoDB settings:
-   # vim /usr/local/bin/calculate-innodb-settings.sh
+# vim /usr/local/bin/calculate-innodb-settings.sh
    
    #!/bin/bash
    # Calculate optimal InnoDB settings
@@ -378,11 +386,11 @@ PART D: OPTIMIZE INNODB CONFIGURATION
    echo "innodb_file_per_table = 1"
    echo "innodb_buffer_pool_instances = $((BUFFER_POOL_SIZE / 128))"
    
-   # chmod +x /usr/local/bin/calculate-innodb-settings.sh
+# chmod +x /usr/local/bin/calculate-innodb-settings.sh
 
 2. Apply InnoDB optimizations:
-   # /usr/local/bin/calculate-innodb-settings.sh
-   # vim /etc/my.cnf
+# /usr/local/bin/calculate-innodb-settings.sh
+# vim /etc/my.cnf
    
    [mysqld]
    # InnoDB optimizations
@@ -403,7 +411,7 @@ PART E: OPTIMIZE QUERY CACHE AND CONNECTIONS
 ---------------------------------------------
 
 1. Configure query cache:
-   # vim /etc/my.cnf
+# vim /etc/my.cnf
    
    [mysqld]
    # Query cache settings
@@ -413,7 +421,7 @@ PART E: OPTIMIZE QUERY CACHE AND CONNECTIONS
    query_cache_min_res_unit = 4k
 
 2. Configure connection settings:
-   # vim /etc/my.cnf
+# vim /etc/my.cnf
    
    [mysqld]
    # Connection settings
@@ -429,7 +437,7 @@ PART E: OPTIMIZE QUERY CACHE AND CONNECTIONS
    thread_stack = 256K
 
 3. Configure table cache:
-   # vim /etc/my.cnf
+# vim /etc/my.cnf
    
    [mysqld]
    # Table cache settings
@@ -440,7 +448,7 @@ PART F: CREATE AND OPTIMIZE INDEXES
 ------------------------------------
 
 1. Analyze missing indexes:
-   # mysql -u root -p performance_test
+# mysql -u root -p performance_test
    
    MariaDB> EXPLAIN SELECT * FROM large_table WHERE user_id = 1000;
    MariaDB> EXPLAIN SELECT * FROM large_table WHERE category_id = 5 AND status = 'active';
@@ -466,7 +474,7 @@ PART G: IMPLEMENT QUERY OPTIMIZATION
 -------------------------------------
 
 1. Create query optimization test script:
-   # vim /usr/local/bin/test-query-performance.sh
+# vim /usr/local/bin/test-query-performance.sh
    
    #!/bin/bash
    # Test query performance before and after optimization
@@ -514,10 +522,10 @@ PART G: IMPLEMENT QUERY OPTIMIZATION
        WHERE status = 'active' AND price > 500
    );"
    
-   # chmod +x /usr/local/bin/test-query-performance.sh
+# chmod +x /usr/local/bin/test-query-performance.sh
 
 2. Create query optimization recommendations:
-   # vim /usr/local/bin/query-optimization-tips.sh
+# vim /usr/local/bin/query-optimization-tips.sh
    
    #!/bin/bash
    # Query optimization recommendations
@@ -541,32 +549,32 @@ PART G: IMPLEMENT QUERY OPTIMIZATION
    echo "- OR conditions that can't use indexes effectively"
    echo "- Unnecessary GROUP BY and ORDER BY operations"
    
-   # chmod +x /usr/local/bin/query-optimization-tips.sh
+# chmod +x /usr/local/bin/query-optimization-tips.sh
 
 PART H: RESTART AND VALIDATE OPTIMIZATIONS
 -------------------------------------------
 
 1. Restart MariaDB with new configuration:
-   # systemctl restart mariadb
-   # systemctl status mariadb
+# systemctl restart mariadb
+# systemctl status mariadb
 
 2. Validate configuration changes:
-   # mysql -u root -p -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size';"
-   # mysql -u root -p -e "SHOW VARIABLES LIKE 'query_cache%';"
-   # mysql -u root -p -e "SHOW VARIABLES LIKE 'max_connections';"
+# mysql -u root -p -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size';"
+# mysql -u root -p -e "SHOW VARIABLES LIKE 'query_cache%';"
+# mysql -u root -p -e "SHOW VARIABLES LIKE 'max_connections';"
 
 3. Run performance tests:
-   # /usr/local/bin/mysql-performance-baseline.sh
-   # /usr/local/bin/test-query-performance.sh
+# /usr/local/bin/mysql-performance-baseline.sh
+# /usr/local/bin/test-query-performance.sh
 
 4. Compare before and after performance:
-   # /usr/local/bin/analyze-performance.sh
+# /usr/local/bin/analyze-performance.sh
 
 PART I: CONTINUOUS PERFORMANCE MONITORING
 ------------------------------------------
 
 1. Create performance monitoring script:
-   # vim /usr/local/bin/monitor-mysql-performance.sh
+# vim /usr/local/bin/monitor-mysql-performance.sh
    
    #!/bin/bash
    # Continuous MySQL performance monitoring
@@ -634,14 +642,15 @@ PART I: CONTINUOUS PERFORMANCE MONITORING
        mail -s "MySQL Performance Alert" admin@example.com
    fi
    
-   # chmod +x /usr/local/bin/monitor-mysql-performance.sh
+# chmod +x /usr/local/bin/monitor-mysql-performance.sh
 
 2. Schedule performance monitoring:
-   # crontab -e
-   # Add: */10 * * * * /usr/local/bin/monitor-mysql-performance.sh
+# crontab -e
+# Add:
+*/10 * * * * /usr/local/bin/monitor-mysql-performance.sh
 
 3. Create performance report:
-   # vim /usr/local/bin/generate-performance-report.sh
+# vim /usr/local/bin/generate-performance-report.sh
    
    #!/bin/bash
    # Generate MySQL performance report
@@ -664,28 +673,28 @@ PART I: CONTINUOUS PERFORMANCE MONITORING
    
    echo "Performance report generated: $REPORT_FILE"
    
-   # chmod +x /usr/local/bin/generate-performance-report.sh
+# chmod +x /usr/local/bin/generate-performance-report.sh
 
 PART J: PERFORMANCE TESTING AND VALIDATION
 -------------------------------------------
 
 1. Generate test data:
-   # /usr/local/bin/generate-test-data.sh
+# /usr/local/bin/generate-test-data.sh
 
 2. Run performance baseline:
-   # /usr/local/bin/mysql-performance-baseline.sh
+# /usr/local/bin/mysql-performance-baseline.sh
 
 3. Test query performance:
-   # /usr/local/bin/test-query-performance.sh
+# /usr/local/bin/test-query-performance.sh
 
 4. Analyze slow queries:
-   # /usr/local/bin/analyze-slow-queries.sh
+# /usr/local/bin/analyze-slow-queries.sh
 
 5. Generate performance report:
-   # /usr/local/bin/generate-performance-report.sh
+# /usr/local/bin/generate-performance-report.sh
 
 6. Monitor ongoing performance:
-   # tail -f /var/log/mysql-performance.log
+# tail -f /var/log/mysql-performance.log
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
