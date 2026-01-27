@@ -19,418 +19,460 @@ EQUIPMENT NEEDED:
 
 LAB TASKS:
 
-PART A: CONFIGURE FORWARD DNS ZONE
+PART A: INSTALL BIND DNS SERVER in Both Machine 
+--------------------------------
+
+1. Install BIND packages:
+# yum install bind bind-utils -y
+# systemctl enable named
+
+2. Verify BIND installation:
+# rpm -qa | grep bind
+# named -v
+# ls -la /etc/named*
+
+3. Check default configuration:
+# ls -la /var/named/
+# ls -la /etc/named/
+
+4. Verify BIND user and group:
+# id named
+# groups named
+
+5. Backup original configuration:
+# cp /etc/named.conf /etc/named.conf.backup
+
+6.Install Firewall 
+# yum install firewalld -y
+# systemctl enable --now firewalld
+# firewall-cmd --add-service=dns --permanent
+# firewall-cmd --reload
+
+
+PART B: CONFIGURE FORWARD DNS ZONE
 -----------------------------------
 
 1. Add forward zone to named.conf:
-   # vim /etc/named.conf
-   
-   zone "example.com" IN {
-       type master;
-       file "example.com.zone";
-       allow-update { none; };
-       allow-transfer { 192.168.1.11; };
-       notify yes;
-   };
+# vim /etc/named.conf
+
+#change in options
+listen-on port 53 { any; };
+
+zone "example.com" IN {
+   type master;
+   file "example.com.zone";
+   allow-update { none; };
+   allow-transfer { 20.192.238.36; };
+   notify yes;
+};
 
 2. Create forward zone file:
-   # vim /var/named/example.com.zone
+# vim /var/named/example.com.zone
    
-   $TTL 86400
-   @   IN  SOA dns.example.com. admin.example.com. (
-           2024010101  ; Serial number (YYYYMMDDNN)
-           3600        ; Refresh (1 hour)
-           1800        ; Retry (30 minutes)
-           1209600     ; Expire (2 weeks)
-           86400       ; Minimum TTL (1 day)
-   )
-   
-   ; Name servers
-   @           IN  NS      dns.example.com.
-   @           IN  NS      dns2.example.com.
-   
-   ; Mail servers
-   @           IN  MX  10  mail.example.com.
-   @           IN  MX  20  mail2.example.com.
-   
-   ; A records (IPv4 addresses)
-   dns         IN  A       192.168.1.10
-   dns2        IN  A       192.168.1.11
-   mail        IN  A       192.168.1.20
-   mail2       IN  A       192.168.1.21
-   web         IN  A       192.168.1.30
-   web2        IN  A       192.168.1.31
-   ftp         IN  A       192.168.1.40
-   db          IN  A       192.168.1.50
-   
-   ; CNAME records (aliases)
-   www         IN  CNAME   web.example.com.
-   smtp        IN  CNAME   mail.example.com.
-   pop         IN  CNAME   mail.example.com.
-   imap        IN  CNAME   mail.example.com.
-   ns1         IN  CNAME   dns.example.com.
-   ns2         IN  CNAME   dns2.example.com.
+$TTL 86400
+@   IN  SOA dns.example.com. admin.example.com. (
+        2024010101
+        3600
+        1800
+        1209600
+        86400
+)
+
+@   IN  NS      dns.example.com.
+@   IN  NS      dns2.example.com.
+
+@   IN  MX  10  mail.example.com.
+@   IN  MX  20  mail2.example.com.
+
+dns     IN  A   20.192.201.21
+dns2    IN  A   20.192.238.36
+mail    IN  A   20.192.201.21
+mail2   IN  A   20.192.238.36
+web     IN  A   20.192.201.21
+web2    IN  A   20.192.238.36
+ftp     IN  A   20.192.201.21
+db      IN  A   20.192.201.21
+
+www     IN  CNAME web.example.com.
+smtp    IN  CNAME mail.example.com.
+pop     IN  CNAME mail.example.com.
+imap    IN  CNAME mail.example.com.
+ns1     IN  CNAME dns.example.com.
+ns2     IN  CNAME dns2.example.com.
+
 
 3. Set proper permissions:
-   # chown named:named /var/named/example.com.zone
-   # chmod 644 /var/named/example.com.zone
+# chown named:named /var/named/example.com.zone
+# chmod 644 /var/named/example.com.zone
 
 4. Check zone file syntax:
-   # named-checkzone example.com /var/named/example.com.zone
+# named-checkzone example.com /var/named/example.com.zone
 
-PART B: CONFIGURE REVERSE DNS ZONE
+PART C: CONFIGURE REVERSE DNS ZONE
 -----------------------------------
 
 1. Add reverse zone to named.conf:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   zone "1.168.192.in-addr.arpa" IN {
-       type master;
-       file "192.168.1.rev";
-       allow-update { none; };
-       allow-transfer { 192.168.1.11; };
-       notify yes;
-   };
+zone "201.192.20.in-addr.arpa" IN {
+    type master;
+    file "20.192.201.rev";
+    allow-update { none; };
+    allow-transfer { 20.192.238.36; };
+    notify yes;
+};
+
 
 2. Create reverse zone file:
-   # vim /var/named/192.168.1.rev
+# vim /var/named/20.192.197.rev
    
-   $TTL 86400
-   @   IN  SOA dns.example.com. admin.example.com. (
-           2024010101  ; Serial number
-           3600        ; Refresh
-           1800        ; Retry
-           1209600     ; Expire
-           86400       ; Minimum TTL
-   )
-   
-   ; Name servers
-   @           IN  NS      dns.example.com.
-   @           IN  NS      dns2.example.com.
-   
-   ; PTR records (reverse lookups)
-   10          IN  PTR     dns.example.com.
-   11          IN  PTR     dns2.example.com.
-   20          IN  PTR     mail.example.com.
-   21          IN  PTR     mail2.example.com.
-   30          IN  PTR     web.example.com.
-   31          IN  PTR     web2.example.com.
-   40          IN  PTR     ftp.example.com.
-   50          IN  PTR     db.example.com.
+$TTL 86400
+@   IN  SOA dns.example.com. admin.example.com. (
+        2024010101  ; Serial number
+        3600        ; Refresh (1 hour)
+        1800        ; Retry (30 minutes)
+        1209600     ; Expire (2 weeks)
+        86400       ; Minimum TTL (1 day)
+)
+
+; Name servers
+@           IN  NS      dns.example.com.
+@           IN  NS      dns2.example.com.
+
+; PTR records (reverse lookups)
+21          IN  PTR     dns.example.com.
+21          IN  PTR     dns2.example.com.
+21          IN  PTR     mail.example.com.
+21          IN  PTR     mail2.example.com.
+21          IN  PTR     web.example.com.
+21          IN  PTR     web2.example.com.
+21          IN  PTR     ftp.example.com.
+21          IN  PTR     db.example.com.
+
 
 3. Set proper permissions:
-   # chown named:named /var/named/192.168.1.rev
-   # chmod 644 /var/named/192.168.1.rev
+# chown named:named /var/named/20.192.201.rev
+# chmod 644 /var/named/20.192.201.rev
 
 4. Check reverse zone syntax:
-   # named-checkzone 1.168.192.in-addr.arpa /var/named/192.168.1.rev
+# named-checkzone 201.192.20.in-addr.arpa /var/named/20.192.201.rev
 
-PART C: CONFIGURE ADDITIONAL RECORD TYPES
+PART D: CONFIGURE ADDITIONAL RECORD TYPES
 ------------------------------------------
 
 1. Add advanced records to forward zone:
-   # vim /var/named/example.com.zone
+# vim /var/named/example.com.zone
    
-   ; TXT records
-   @           IN  TXT     "v=spf1 mx a ip4:192.168.1.0/24 ~all"
-   _dmarc      IN  TXT     "v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com"
-   
-   ; SRV records
-   _sip._tcp   IN  SRV     10 5 5060 sip.example.com.
-   _http._tcp  IN  SRV     10 5 80   web.example.com.
-   _https._tcp IN  SRV     10 5 443  web.example.com.
-   
-   ; Additional A records
-   sip         IN  A       192.168.1.60
-   ldap        IN  A       192.168.1.70
-   ntp         IN  A       192.168.1.80
-   
-   ; AAAA records (IPv6)
-   web         IN  AAAA    2001:db8:1::30
-   mail        IN  AAAA    2001:db8:1::20
+@       IN TXT "v=spf1 mx a ip4:20.192.201.21/32 ~all"
+_dmarc  IN TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com"
+
+_sip._tcp   IN SRV 10 5 5060 sip.example.com.
+_http._tcp  IN SRV 10 5 80   web.example.com.
+_https._tcp IN SRV 10 5 443  web.example.com.
+
+sip     IN A 20.192.201.21
+ldap    IN A 20.192.201.21
+ntp     IN A 20.192.201.21
+
+web     IN AAAA 2001:db8:1::30
+mail    IN AAAA 2001:db8:1::20
+
 
 2. Add subdomain delegation:
-   # vim /var/named/example.com.zone
+# vim /var/named/example.com.zone
    
-   ; Subdomain delegation
-   dev         IN  NS      ns.dev.example.com.
-   test        IN  NS      ns.test.example.com.
-   
-   ; Glue records for subdomains
-   ns.dev      IN  A       192.168.1.100
-   ns.test     IN  A       192.168.1.101
+; Subdomain delegation
+dev     IN NS ns.dev.example.com.
+test    IN NS ns.test.example.com.
+
+ns.dev  IN A 20.192.201.21
+ns.test IN A 20.192.238.36
+
 
 3. Increment serial number:
-   # vim /var/named/example.com.zone
-   # Change serial to 2024010102
+# vim /var/named/example.com.zone
+# Change serial to 2024010102
 
-PART D: CONFIGURE MULTIPLE DOMAINS
+PART E: CONFIGURE MULTIPLE DOMAINS
 -----------------------------------
 
 1. Add second domain zone:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   zone "company.local" IN {
-       type master;
-       file "company.local.zone";
-       allow-update { none; };
-   };
+zone "company.local" IN {
+    type master;
+    file "company.local.zone";
+    allow-update { none; };
+};
 
 2. Create second domain zone file:
-   # vim /var/named/company.local.zone
+# vim /var/named/company.local.zone
    
-   $TTL 86400
-   @   IN  SOA dns.company.local. admin.company.local. (
-           2024010101
-           3600
-           1800
-           1209600
-           86400
-   )
-   
-   @           IN  NS      dns.company.local.
-   @           IN  MX  10  mail.company.local.
-   
-   dns         IN  A       192.168.2.10
-   mail        IN  A       192.168.2.20
-   web         IN  A       192.168.2.30
-   
-   www         IN  CNAME   web.company.local.
+$TTL 86400
+@   IN  SOA dns.company.local. admin.company.local. (
+        2024010101
+        3600
+        1800
+        1209600
+        86400
+)
 
+@   IN  NS  dns.company.local.
+@   IN  MX 10 mail.company.local.
+
+dns     IN A 20.192.201.21
+mail    IN A 20.192.201.21
+web     IN A 20.192.201.21
+
+www     IN CNAME web.company.local.
+
+
+-------------------------------------------------------
 3. Add corresponding reverse zone:
-   # vim /etc/named.conf
+Do not config named.conf BCZ already config ahead
+# vim /etc/named.conf
    
-   zone "2.168.192.in-addr.arpa" IN {
-       type master;
-       file "192.168.2.rev";
-       allow-update { none; };
-   };
+zone "2.168.192.in-addr.arpa" IN {
+    type master;
+    file "192.168.2.rev";
+    allow-update { none; };
+};
 
 4. Create reverse zone file:
-   # vim /var/named/192.168.2.rev
+# vim /var/named/192.168.2.rev
    
-   $TTL 86400
-   @   IN  SOA dns.company.local. admin.company.local. (
-           2024010101
-           3600
-           1800
-           1209600
-           86400
-   )
-   
-   @           IN  NS      dns.company.local.
-   
-   10          IN  PTR     dns.company.local.
-   20          IN  PTR     mail.company.local.
-   30          IN  PTR     web.company.local.
+$TTL 86400
+@   IN  SOA dns.company.local. admin.company.local. (
+        2024010101  ; Serial number
+        3600        ; Refresh (1 hour)
+        1800        ; Retry (30 minutes)
+        1209600     ; Expire (2 weeks)
+        86400       ; Minimum TTL (1 day)
+)
 
-PART E: CONFIGURE DYNAMIC DNS UPDATES
+; Name servers
+@           IN  NS      dns.company.local.
+
+; PTR records (reverse lookups)
+21          IN  PTR     dns.company.local.
+21          IN  PTR     mail.company.local.
+21          IN  PTR     web.company.local.
+
+
+Do not Config PART F: CONFIGURE DYNAMIC DNS UPDATES Bcz DNS zone can be either static OR dynamic — not both at the same time.
 --------------------------------------
+PART F: CONFIGURE DYNAMIC DNS UPDATES
 
 1. Generate TSIG key for secure updates:
-   # dnssec-keygen -a HMAC-MD5 -b 128 -n HOST example.com
-   # cat Kexample.com.+157+*.key
+tsig-keygen -a hmac-sha256 example.com
+
+# dnssec-keygen -a HMAC-MD5 -b 128 -n HOST example.com
+# cat Kexample.com.+157+*.key
 
 2. Add TSIG key to named.conf:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   key "example.com-key" {
-       algorithm hmac-md5;
-       secret "generated-key-here";
-   };
+key "example.com-key" {
+    algorithm hmac-md5;
+    secret "my3sogYxsRPjS5TAdZxfIIbhCBLjlrMH9oSo9ILn7eY=
+};
 
 3. Configure zone for dynamic updates:
-   # vim /etc/named.conf
+# vim /etc/named.conf
    
-   zone "example.com" IN {
-       type master;
-       file "dynamic/example.com.zone";
-       allow-update { key "example.com-key"; };
-       update-policy {
-           grant example.com-key name example.com. ANY;
-       };
-   };
+zone "example.com" IN {
+    type master;
+    file "dynamic/example.com.zone";
+    allow-update { key "example.com-key"; };
+    update-policy {
+        grant example.com-key name example.com. ANY;
+    };
+};
 
 4. Move zone file to dynamic directory:
-   # mkdir -p /var/named/dynamic
-   # cp /var/named/example.com.zone /var/named/dynamic/
-   # chown named:named /var/named/dynamic/example.com.zone
+# mkdir -p /var/named/dynamic
+# cp /var/named/example.com.zone /var/named/dynamic/
+# chown named:named /var/named/dynamic/example.com.zone
 
-PART F: RELOAD AND TEST ZONES
+PART G: RELOAD AND TEST ZONES
 ------------------------------
 
 1. Reload BIND configuration:
-   # systemctl reload named
-   # rndc reload
+# systemctl reload named
+# rndc reload
 
 2. Check zone loading:
-   # rndc status
-   # tail -f /var/log/messages | grep named
+# rndc status
+# tail -f /var/log/messages | grep named
 
 3. Test forward DNS resolution:
-   # dig @localhost dns.example.com
-   # dig @localhost www.example.com
-   # dig @localhost MX example.com
-   # dig @localhost TXT example.com
+# dig @localhost dns.example.com
+# dig @localhost www.example.com
+# dig @localhost MX example.com
+# dig @localhost TXT example.com
 
 4. Test reverse DNS resolution:
-   # dig @localhost -x 192.168.1.10
-   # dig @localhost -x 192.168.1.30
-   # nslookup 192.168.1.20 localhost
+# dig @localhost -x 192.168.1.10
+# dig @localhost -x 192.168.1.30
+# nslookup 192.168.1.20 localhost
 
 5. Test CNAME resolution:
-   # dig @localhost www.example.com
-   # dig @localhost smtp.example.com
+# dig @localhost www.example.com
+# dig @localhost smtp.example.com
 
-PART G: CONFIGURE ZONE TRANSFERS
+PART H: CONFIGURE ZONE TRANSFERS
 ---------------------------------
 
 1. Configure master zone for transfers:
-   # vim /etc/named.conf
-   
-   zone "example.com" IN {
-       type master;
-       file "example.com.zone";
-       allow-transfer { 192.168.1.11; 192.168.1.12; };
-       also-notify { 192.168.1.11; 192.168.1.12; };
-       notify yes;
-   };
+# vim /etc/named.conf
+
+zone "example.com" IN {
+    type master;
+    file "example.com.zone";
+    allow-transfer { 192.168.1.11; 192.168.1.12; };
+    also-notify { 192.168.1.11; 192.168.1.12; };
+    notify yes;
+};
 
 2. Configure slave zone (on secondary server):
-   # vim /etc/named.conf
+# vim /etc/named.conf
+
+#change in options
+listen-on port 53 { any; };
    
-   zone "example.com" IN {
-       type slave;
-       file "slaves/example.com.zone";
-       masters { 192.168.1.10; };
-   };
+zone "example.com" IN {
+    type slave;
+    file "slaves/example.com.zone";
+    masters { 192.168.1.10; };
+};
 
-3. Create slaves directory:
-   # mkdir -p /var/named/slaves
-   # chown named:named /var/named/slaves
+3. Create slaves directory: (on secondary server):
+# mkdir -p /var/named/slaves
+# chown named:named /var/named/slaves
 
-4. Test zone transfer:
-   # rndc notify example.com
-   # dig @192.168.1.11 example.com SOA
+4. Test zone transfer: (on secondary server):
+# rndc notify example.com
+# dig @192.168.1.11 example.com SOA
 
-PART H: MONITORING ZONE STATUS
+PART I: MONITORING ZONE STATUS
 -------------------------------
 
 1. Create zone monitoring script:
-   # vim /usr/local/bin/zone-monitor.sh
+# vim /usr/local/bin/zone-monitor.sh
    
-   #!/bin/bash
-   # DNS zone monitoring script
+#!/bin/bash
+# DNS zone monitoring script
    
-   ZONES=("example.com" "company.local")
-   DNS_SERVER="localhost"
+ZONES=("example.com" "company.local")
+DNS_SERVER="localhost"
    
-   for zone in "${ZONES[@]}"; do
-       echo "Checking zone: $zone"
+for zone in "${ZONES[@]}"; do
+    echo "Checking zone: $zone"
        
-       # Check SOA record
-       if dig @$DNS_SERVER $zone SOA +short > /dev/null; then
-           echo "  SOA: OK"
-       else
-           echo "  SOA: FAILED"
-       fi
+    # Check SOA record
+    if dig @$DNS_SERVER $zone SOA +short > /dev/null; then
+        echo "  SOA: OK"
+    else
+        echo "  SOA: FAILED"
+    fi
        
-       # Check NS records
-       NS_COUNT=$(dig @$DNS_SERVER $zone NS +short | wc -l)
-       echo "  NS records: $NS_COUNT"
+    # Check NS records
+    NS_COUNT=$(dig @$DNS_SERVER $zone NS +short | wc -l)
+    echo "  NS records: $NS_COUNT"
        
-       # Check serial number
-       SERIAL=$(dig @$DNS_SERVER $zone SOA +short | awk '{print $3}')
-       echo "  Serial: $SERIAL"
+    # Check serial number
+    SERIAL=$(dig @$DNS_SERVER $zone SOA +short | awk '{print $3}')
+    echo "  Serial: $SERIAL"
        
-       echo
-   done
+    echo
+done
    
-   # chmod +x /usr/local/bin/zone-monitor.sh
+# chmod +x /usr/local/bin/zone-monitor.sh
 
 2. Create zone statistics script:
-   # vim /usr/local/bin/zone-stats.sh
+# vim /usr/local/bin/zone-stats.sh
    
-   #!/bin/bash
-   # Zone statistics script
+#!/bin/bash
+# Zone statistics script
    
-   echo "=== DNS Zone Statistics ==="
+echo "=== DNS Zone Statistics ==="
    
-   # Count records by type
-   for zone_file in /var/named/*.zone; do
-       if [ -f "$zone_file" ]; then
-           zone_name=$(basename "$zone_file" .zone)
-           echo "Zone: $zone_name"
-           echo "  A records: $(grep -c "IN.*A" "$zone_file")"
-           echo "  CNAME records: $(grep -c "IN.*CNAME" "$zone_file")"
-           echo "  MX records: $(grep -c "IN.*MX" "$zone_file")"
-           echo "  NS records: $(grep -c "IN.*NS" "$zone_file")"
-           echo
-       fi
-   done
+# Count records by type
+for zone_file in /var/named/*.zone; do
+    if [ -f "$zone_file" ]; then
+        zone_name=$(basename "$zone_file" .zone)
+        echo "Zone: $zone_name"
+        echo "  A records: $(grep -c "IN.*A" "$zone_file")"
+        echo "  CNAME records: $(grep -c "IN.*CNAME" "$zone_file")"
+        echo "  MX records: $(grep -c "IN.*MX" "$zone_file")"
+        echo "  NS records: $(grep -c "IN.*NS" "$zone_file")"
+        echo
+    fi
+done
    
-   # chmod +x /usr/local/bin/zone-stats.sh
+# chmod +x /usr/local/bin/zone-stats.sh
 
-PART I: ZONE MAINTENANCE
+PART J: ZONE MAINTENANCE
 ------------------------
 
 1. Create zone backup script:
-   # vim /usr/local/bin/zone-backup.sh
+# vim /usr/local/bin/zone-backup.sh
    
-   #!/bin/bash
-   # Zone backup script
+#!/bin/bash
+# Zone backup script
    
-   BACKUP_DIR="/var/backups/dns"
-   DATE=$(date +%Y%m%d)
+BACKUP_DIR="/var/backups/dns"
+DATE=$(date +%Y%m%d)
    
-   mkdir -p $BACKUP_DIR
+mkdir -p $BACKUP_DIR
    
-   # Backup zone files
-   tar -czf $BACKUP_DIR/zones-$DATE.tar.gz /var/named/*.zone /var/named/*.rev
+# Backup zone files
+tar -czf $BACKUP_DIR/zones-$DATE.tar.gz /var/named/*.zone /var/named/*.rev
    
-   # Backup configuration
-   cp /etc/named.conf $BACKUP_DIR/named.conf.$DATE
+# Backup configuration
+cp /etc/named.conf $BACKUP_DIR/named.conf.$DATE
    
-   # Remove old backups (keep 30 days)
-   find $BACKUP_DIR -name "*.tar.gz" -mtime +30 -delete
+# Remove old backups (keep 30 days)
+find $BACKUP_DIR -name "*.tar.gz" -mtime +30 -delete
    
-   echo "DNS zones backed up to $BACKUP_DIR"
+echo "DNS zones backed up to $BACKUP_DIR"
    
-   # chmod +x /usr/local/bin/zone-backup.sh
+# chmod +x /usr/local/bin/zone-backup.sh
 
 2. Schedule zone backup:
-   # crontab -e
-   # Add: 0 2 * * * /usr/local/bin/zone-backup.sh
+# crontab -e
+# Add:
+0 2 * * * /usr/local/bin/zone-backup.sh
 
 3. Create zone validation script:
-   # vim /usr/local/bin/validate-zones.sh
+# vim /usr/local/bin/validate-zones.sh
    
-   #!/bin/bash
-   # Zone validation script
+#!/bin/bash
+# Zone validation script
    
-   echo "Validating DNS zones..."
+echo "Validating DNS zones..."
    
-   # Check named.conf syntax
-   if named-checkconf; then
-       echo "named.conf: OK"
-   else
-       echo "named.conf: FAILED"
-       exit 1
-   fi
+# Check named.conf syntax
+if named-checkconf; then
+    echo "named.conf: OK"
+else
+    echo "named.conf: FAILED"
+    exit 1
+fi
    
-   # Check zone files
-   for zone_file in /var/named/*.zone /var/named/*.rev; do
-       if [ -f "$zone_file" ]; then
-           zone_name=$(basename "$zone_file")
-           if named-checkzone "$zone_name" "$zone_file" > /dev/null; then
-               echo "$zone_name: OK"
-           else
-               echo "$zone_name: FAILED"
-           fi
-       fi
-   done
+# Check zone files
+for zone_file in /var/named/*.zone /var/named/*.rev; do
+    if [ -f "$zone_file" ]; then
+        zone_name=$(basename "$zone_file")
+        if named-checkzone "$zone_name" "$zone_file" > /dev/null; then
+            echo "$zone_name: OK"
+        else
+            echo "$zone_name: FAILED"
+        fi
+    fi
+ done
    
-   # chmod +x /usr/local/bin/validate-zones.sh
+# chmod +x /usr/local/bin/validate-zones.sh
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
