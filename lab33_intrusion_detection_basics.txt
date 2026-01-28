@@ -82,6 +82,9 @@ PART A: INSTALL AND CONFIGURE AIDE (FILE INTEGRITY MONITORING)
    # Home directories (basic monitoring)
    /home   L
 
+   # Command to check that our configurations are working or not
+   aide --config-check
+
 3. Create AIDE log directory:
    # mkdir -p /var/log/aide
    # chmod 700 /var/log/aide
@@ -173,8 +176,23 @@ PART C: INSTALL AND CONFIGURE FAIL2BAN
 
 1. Install fail2ban:
    # yum install epel-release -y
+
+   // New command to download on RHEL 9 if "yum install epel-release -y" doesn't work. Use only this if above command(178) didnt worked.
+   # yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+
    # yum install fail2ban -y
    # systemctl enable fail2ban
+
+   // If fail2ban install command is killed. Then probably size issue (<1GB)
+   Do these steps (188-195) only if (183,184) command fails:
+   # fallocate -l 1G /swapfile
+   # chmod 600 /swapfile
+   # mkswap /swapfile
+   # swapon /swapfile
+   # swapon --show
+   # yum clean all
+   # yum makecache
+   # yum install fail2ban -y
 
 2. Configure fail2ban main settings:
    # vim /etc/fail2ban/jail.local
@@ -290,8 +308,12 @@ PART D: CREATE CUSTOM INTRUSION DETECTION RULES
        # Send alert
        tail -20 $LOG_FILE | mail -s "Port Scan Alert" $ALERT_EMAIL
    fi
-   
+
    # chmod +x /usr/local/bin/detect-port-scan.sh
+
+   /usr/local/bin/detect-port-scan.sh
+   // if indentation error occurs use my new created file given line-794
+
 
 PART E: IMPLEMENT LOG-BASED INTRUSION DETECTION
 ------------------------------------------------
@@ -343,6 +365,9 @@ PART E: IMPLEMENT LOG-BASED INTRUSION DETECTION
    
    # chmod +x /usr/local/bin/detect-suspicious-activity.sh
 
+   /usr/local/bin/detect-suspicious-activity.sh
+   // if indentation error occurs use my new created file given line-821
+
 2. Create network intrusion detector:
    # vim /usr/local/bin/network-intrusion-detector.sh
    
@@ -386,6 +411,9 @@ PART E: IMPLEMENT LOG-BASED INTRUSION DETECTION
    } >> $LOG_FILE
    
    # chmod +x /usr/local/bin/network-intrusion-detector.sh
+
+   /usr/local/bin/network-intrusion-detector.SH
+   // if indentation error occurs use my new created file given line-866
 
 PART F: CONFIGURE AUTOMATED RESPONSE SYSTEM
 --------------------------------------------
@@ -442,6 +470,9 @@ PART F: CONFIGURE AUTOMATED RESPONSE SYSTEM
    
    # chmod +x /usr/local/bin/incident-response.sh
 
+   /usr/local/bin/incident-response.sh
+   // if indentation error occurs use my new created file given line-908
+
 2. Create threat intelligence integration:
    # vim /usr/local/bin/threat-intel-check.sh
    
@@ -474,6 +505,9 @@ PART F: CONFIGURE AUTOMATED RESPONSE SYSTEM
    echo "$(date): Threat intel check for $IP_ADDRESS" >> /var/log/threat-intel.log
    
    # chmod +x /usr/local/bin/threat-intel-check.sh
+
+   /usr/local/bin/threat-intel-check.sh
+   // if indentation error occurs use my new created file given line-958
 
 PART G: CONFIGURE SYSTEM INTEGRITY MONITORING
 ----------------------------------------------
@@ -530,12 +564,20 @@ PART G: CONFIGURE SYSTEM INTEGRITY MONITORING
    
    # chmod +x /usr/local/bin/system-integrity-check.sh
 
+   /usr/local/bin/system-integrity-check.sh
+   // if indentation error occurs use my new created file given line-989
+
 PART H: START SERVICES AND SCHEDULE MONITORING
 -----------------------------------------------
 
 1. Start and configure services:
    # systemctl start fail2ban
    # systemctl status fail2ban
+
+// If fail2ben start up failed or status shows inactive, its generally due hhtpd=enabled if in case httpd is not installed on your system. Do these steps : 
+   # dnf install -y httpd
+   # systemctl enable --now httpd
+   # systemctl restart fail2ban
 
 2. Schedule intrusion detection tasks:
    # crontab -e
@@ -660,6 +702,9 @@ PART J: CREATE INTRUSION DETECTION DASHBOARD
    
    # chmod +x /usr/local/bin/ids-dashboard.sh
 
+   /usr/local/bin/ids-dashboard.sh
+   // if indentation error occurs use my new created file given line-1039
+
 2. Create security report generator:
    # vim /usr/local/bin/generate-security-report.sh
    
@@ -684,6 +729,9 @@ PART J: CREATE INTRUSION DETECTION DASHBOARD
    mail -s "Daily Security Report - $(hostname)" security@example.com < $REPORT_FILE
    
    # chmod +x /usr/local/bin/generate-security-report.sh
+
+   /usr/local/bin/generate-security-report.sh
+   // if indentation error occurs use my new created file given line-1092
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
@@ -727,3 +775,339 @@ CLEANUP:
 # rm /usr/local/bin/generate-*.sh
 # crontab -e  # Remove monitoring entries
 # rm -rf /var/lib/aide/
+
+
+// While doing validation if security reports generation fails due to no mailx found, perform these steps.
+   # dnf install -y s-nail
+   # mail -s "Subject" user@example.com
+// To verify
+   # which mail
+   # mail -V
+
+UPDATED LINES:
+------------
+Changes made on lines: 85,86,180,181,186-195, 577-580, 780-785
+
+MY NEW SH CREATED FILES
+------------------------------------------------------------------
+
+# My file-1. : vim /usr/local/bin/detect-port-scan.sh
+#!/bin/bash
+# Port scan detection script
+
+LOG_FILE="/var/log/port-scan-detection.log"
+ALERT_EMAIL="security@example.com"
+THRESHOLD=20
+
+# Monitor netstat for connection attempts
+CONNECTIONS=$(netstat -an | grep SYN_RECV | wc -l)
+
+if [ "$CONNECTIONS" -gt "$THRESHOLD" ]; then
+    {
+        echo "$(date): Possible port scan detected"
+        echo "SYN_RECV connections: $CONNECTIONS (threshold: $THRESHOLD)"
+        echo
+        echo "Top connecting IPs:"
+        netstat -an | grep SYN_RECV | awk '{print $5}' | \
+        cut -d':' -f1 | sort | uniq -c | sort -nr | head -10
+    } | tee -a "$LOG_FILE"
+
+    # Send alert
+    tail -20 "$LOG_FILE" | mail -s "Port Scan Alert" "$ALERT_EMAIL"
+fi
+
+-------------------------------------------------------------------
+
+My file-2 : vim /usr/local/bin/detect-suspicious-activity.sh
+#!/bin/bash
+# Detect suspicious system activity
+
+SECURE_LOG="/var/log/secure"
+MESSAGES_LOG="/var/log/messages"
+ALERT_EMAIL="security@example.com"
+
+echo "=== Suspicious Activity Detection - $(date) ==="
+
+# Check for multiple failed logins
+FAILED_LOGINS=$(grep "$(date '+%b %d')" "$SECURE_LOG" | grep -c "authentication failure")
+if [ "$FAILED_LOGINS" -gt 50 ]; then
+    echo "ALERT: High number of failed logins: $FAILED_LOGINS"
+    {
+        echo "High authentication failure rate detected"
+        echo "Failed logins today: $FAILED_LOGINS"
+        echo "Top attacking IPs:"
+        grep "$(date '+%b %d')" "$SECURE_LOG" | grep "authentication failure" | \
+        awk '{print $14}' | cut -d'=' -f2 | sort | uniq -c | sort -nr | head -10
+    } | mail -s "Authentication Attack Alert" "$ALERT_EMAIL"
+fi
+
+# Check for privilege escalation attempts
+PRIV_ESC=$(grep "$(date '+%b %d')" "$SECURE_LOG" | grep -c "su.*root")
+if [ "$PRIV_ESC" -gt 10 ]; then
+    echo "ALERT: Multiple privilege escalation attempts: $PRIV_ESC"
+fi
+
+# Check for unusual process activity
+UNUSUAL_PROCS=$(ps aux | grep -E "(nc|netcat|nmap|tcpdump)" | grep -v grep | wc -l)
+if [ "$UNUSUAL_PROCS" -gt 0 ]; then
+    echo "ALERT: Unusual processes detected"
+    ps aux | grep -E "(nc|netcat|nmap|tcpdump)" | grep -v grep
+fi
+
+# Check for new user accounts
+NEW_USERS=$(grep "$(date '+%b %d')" "$SECURE_LOG" | grep -c "new user")
+if [ "$NEW_USERS" -gt 0 ]; then
+    echo "ALERT: New user accounts created: $NEW_USERS"
+    grep "$(date '+%b %d')" "$SECURE_LOG" | grep "new user"
+fi
+
+-----------------------------------------------------------------------------
+
+# My file-3 : vim /usr/local/bin/network-intrusion-detector.sh
+#!/bin/bash
+# Network-based intrusion detection
+
+INTERFACE="eth0"
+LOG_FILE="/var/log/network-intrusion.log"
+ALERT_EMAIL="security@example.com"
+
+# Monitor for suspicious network patterns
+{
+    echo "$(date): Starting network monitoring on $INTERFACE"
+
+    # Monitor for port scans (using netstat)
+    SCAN_ATTEMPTS=$(netstat -an | grep SYN_RECV | wc -l)
+    if [ "$SCAN_ATTEMPTS" -gt 10 ]; then
+        echo "$(date): Port scan detected - $SCAN_ATTEMPTS SYN_RECV connections"
+    fi
+
+    # Monitor for unusual traffic patterns
+    RX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes)
+    TX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes)
+
+    # Store previous values for comparison
+    if [ -f /tmp/network_stats ]; then
+        PREV_RX=$(awk '{print $1}' /tmp/network_stats)
+        PREV_TX=$(awk '{print $2}' /tmp/network_stats)
+
+        RX_DIFF=$((RX_BYTES - PREV_RX))
+        TX_DIFF=$((TX_BYTES - PREV_TX))
+
+        # Alert on unusual traffic (>100MB in 5 minutes)
+        if [ "$RX_DIFF" -gt 104857600 ] || [ "$TX_DIFF" -gt 104857600 ]; then
+            echo "$(date): Unusual traffic detected - RX: $RX_DIFF bytes, TX: $TX_DIFF bytes"
+        fi
+    fi
+
+    echo "$RX_BYTES $TX_BYTES" > /tmp/network_stats
+
+} >> "$LOG_FILE"
+
+----------------------------------------------------------------------
+
+# My file-4 : vim /usr/local/bin/incident-response.sh
+#!/bin/bash
+# Automated incident response
+
+INCIDENT_TYPE="$1"
+SOURCE_IP="$2"
+DETAILS="$3"
+
+LOG_FILE="/var/log/incident-response.log"
+ALERT_EMAIL="security@example.com"
+
+{
+    echo "$(date): Incident Response Triggered"
+    echo "Type: $INCIDENT_TYPE"
+    echo "Source IP: $SOURCE_IP"
+    echo "Details: $DETAILS"
+    echo "---"
+} >> "$LOG_FILE"
+
+case "$INCIDENT_TYPE" in
+    "brute_force")
+        # Block IP with iptables
+        iptables -I INPUT -s "$SOURCE_IP" -j DROP
+        echo "$(date): Blocked IP $SOURCE_IP for brute force attack" >> "$LOG_FILE"
+        ;;
+    "port_scan")
+        # Block IP and log
+        iptables -I INPUT -s "$SOURCE_IP" -j DROP
+        echo "$(date): Blocked IP $SOURCE_IP for port scanning" >> "$LOG_FILE"
+        ;;
+    "file_integrity")
+        # Lock down system
+        echo "$(date): File integrity violation - system locked down" >> "$LOG_FILE"
+        # Could implement additional lockdown measures here
+        ;;
+esac
+
+# Send alert email
+{
+    echo "Security incident detected on $(hostname)"
+    echo "Type: $INCIDENT_TYPE"
+    echo "Source: $SOURCE_IP"
+    echo "Time: $(date)"
+    echo "Details: $DETAILS"
+    echo
+    echo "Automated response taken - check $LOG_FILE for details"
+} | mail -s "Security Incident: $INCIDENT_TYPE" "$ALERT_EMAIL"
+
+----------------------------------------------------------------------------
+
+# My file-5 : vim /usr/local/bin/threat-intel-check.sh
+#!/bin/bash
+# Check IPs against threat intelligence feeds
+
+IP_ADDRESS="$1"
+
+if [ -z "$IP_ADDRESS" ]; then
+    echo "Usage: $0 <ip_address>"
+    exit 1
+fi
+
+echo "Checking $IP_ADDRESS against threat intelligence..."
+
+# Check against known bad IP lists (example using public feeds)
+# Note: In production, use proper threat intelligence APIs
+
+# Check if IP is in private ranges (not malicious)
+if echo "$IP_ADDRESS" | grep -qE "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)"; then
+    echo "IP is in private range - likely not malicious"
+    exit 0
+fi
+
+# Simple reputation check (placeholder)
+# In real implementation, integrate with threat intel APIs
+echo "Threat intelligence check for $IP_ADDRESS completed"
+
+# Log the check
+echo "$(date): Threat intel check for $IP_ADDRESS" >> /var/log/threat-intel.log
+
+---------------------------------------------------------------------------------------------
+
+# My file-6 : vim /usr/local/bin/system-integrity-check.sh
+#!/bin/bash
+# Comprehensive system integrity check
+
+LOG_FILE="/var/log/system-integrity.log"
+ALERT_EMAIL="security@example.com"
+
+{
+    echo "=== System Integrity Check - $(date) ==="
+
+    # Check for unauthorized SUID files
+    echo "Checking for unauthorized SUID files..."
+    find / -type f -perm -4000 2>/dev/null | \
+    while read file; do
+        if ! rpm -qf "$file" >/dev/null 2>&1; then
+            echo "WARNING: Unauthorized SUID file: $file"
+        fi
+    done
+
+    # Check for world-writable files
+    echo "Checking for world-writable files..."
+    find / -type f -perm -002 2>/dev/null | head -20
+
+    # Check for files without owner
+    echo "Checking for files without owner..."
+    find / -nouser -o -nogroup 2>/dev/null | head -10
+
+    # Check system accounts
+    echo "Checking system accounts..."
+    awk -F: '$3 == 0 {print "UID 0 account: " $1}' /etc/passwd
+
+    # Check for empty password accounts
+    echo "Checking for empty password accounts..."
+    awk -F: '$2 == "" {print "Empty password: " $1}' /etc/shadow
+
+    # Check listening services
+    echo "Checking listening services..."
+    netstat -tulpn | grep LISTEN
+
+    echo "=== System Integrity Check Complete ==="
+
+} | tee -a "$LOG_FILE"
+
+# Check if any issues were found and alert
+if grep -q "WARNING\|Empty password" "$LOG_FILE"; then
+    tail -50 "$LOG_FILE" | mail -s "System Integrity Issues Found" "$ALERT_EMAIL"
+fi
+
+---------------------------------------------------------------------------------------
+
+My file-7:  vim /usr/local/bin/ids-dashboard.sh
+#!/bin/bash
+# Intrusion Detection System Dashboard
+
+echo "=== Intrusion Detection System Dashboard ==="
+echo "Generated: $(date)"
+echo "Host: $(hostname)"
+echo "============================================="
+echo
+
+# AIDE Status
+echo "=== AIDE File Integrity Monitoring ==="
+if [ -f /var/lib/aide/aide.db.gz ]; then
+    echo "AIDE Database: Present"
+    echo "Last check: $(ls -l /var/log/aide/ | tail -1 | awk '{print $6, $7, $8}')"
+else
+    echo "AIDE Database: Missing - run aide --init"
+fi
+echo
+
+# Fail2ban Status
+echo "=== Fail2ban Status ==="
+if systemctl is-active fail2ban >/dev/null 2>&1; then
+    echo "Fail2ban: Active"
+    fail2ban-client status | grep "Jail list"
+    echo "Currently banned IPs:"
+    fail2ban-client status sshd | grep "Banned IP list"
+else
+    echo "Fail2ban: Inactive"
+fi
+echo
+
+# Recent Security Events
+echo "=== Recent Security Events ==="
+echo "Failed SSH attempts (last 24h):"
+grep "$(date '+%b %d')" /var/log/secure | grep -c "authentication failure"
+
+echo "Blocked IPs (last 24h):"
+if [ -f /var/log/incident-response.log ]; then
+    grep "$(date '+%Y-%m-%d')" /var/log/incident-response.log | grep -c "Blocked IP"
+else
+    echo "0"
+fi
+echo
+
+# System Status
+echo "=== System Security Status ==="
+echo "Load average: $(uptime | awk -F'load average:' '{print $2}')"
+echo "Active connections: $(netstat -an | grep ESTABLISHED | wc -l)"
+echo "Listening services: $(netstat -tulpn | grep LISTEN | wc -l)"
+
+------------------------------------------------------------------------------
+
+My file-8: vim /usr/local/bin/generate-security-report.sh
+#!/bin/bash
+# Generate comprehensive security report
+
+REPORT_FILE="/var/log/security-report-$(date +%Y%m%d).txt"
+
+{
+    /usr/local/bin/ids-dashboard.sh
+    echo
+    echo "=== Detailed Analysis ==="
+    /usr/local/bin/detect-suspicious-activity.sh
+    echo
+    /usr/local/bin/system-integrity-check.sh
+
+} > "$REPORT_FILE"
+
+echo "Security report generated: $REPORT_FILE"
+
+# Email the report
+mail -s "Daily Security Report - $(hostname)" security@example.com < "$REPORT_FILE"
+
+----------------------------------------------------------------------------------------
