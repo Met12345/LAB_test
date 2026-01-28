@@ -23,8 +23,35 @@ PART A: INSTALL MONITORING TOOLS
 ---------------------------------
 
 1. Install system monitoring packages:
-   # dnf install sysstat iotop htop atop nmon perf tuned -y
-   # dnf install mailx postfix -y
+# dnf install sysstat iotop htop atop nmon perf tuned -y   
+   # // If error comes
+    #  dnf install sysstat iotop perf tuned -y
+    #  systemctl status sysstat
+    # // If only inactive do next steps
+    # systemctl list-timers | grep sysstat
+    # systemctl enable --now sysstat-collect.timer
+    # systemctl enable --now sysstat-summary.timer
+    # systemctl list-timers | grep sysstat
+    # // Expected output: sysstat-collect.timer , sysstat-summary.timer
+    # systemctl status sysstat-collect.timer 
+    # // Now it will show active
+    # ls /var/log/sa
+    # //It will be empty. As No data is written until first collection run
+    # // Force one data collection (to avoid waiting)
+    # systemctl start sysstat-collect.service
+    # ls /var/log/sa
+    # // Output-sa28
+    # // Validate CPU and memory monitoring
+    # sar -u      
+    # sar -r	  
+    
+# dnf install mailx postfix -y
+   # // If mailx error occurs
+   # //Installed mail functionality the RHEL 9 way
+   # dnf install s-nail postfix -y
+   # // Now mailx will work. To verify
+   # which mailx
+   # mailx -V
 
 2. Enable system statistics collection:
    # systemctl enable sysstat
@@ -633,3 +660,7 @@ CLEANUP:
 # crontab -e  # Remove monitoring entries
 # rm /usr/local/bin/*monitor*.sh
 # rm -rf /var/log/performance-baseline
+
+UPDATED LINES:
+---------
+Lines added: 27-46, 48-54
