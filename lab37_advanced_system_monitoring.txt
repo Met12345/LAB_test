@@ -1,8 +1,8 @@
-RHCE RH254 HANDS-ON LAB: SAMBA FILE SHARING ADVANCED CONFIGURATION
+RHCE RH254 HANDS-ON LAB: ADVANCED SYSTEM MONITORING, PERFORMANCE TUNING, AND ALERTING
 ================================================================
 
 LAB OBJECTIVE:
-Configure advanced Samba file sharing with domain integration, advanced security, user management, and performance optimization for enterprise file services
+Implement enterprise-grade system monitoring, performance tuning, and automated alerting for production Linux servers using native RHEL tools and custom scripts.
 
 PREREQUISITES:
 - RHEL 8/9 system with root access
