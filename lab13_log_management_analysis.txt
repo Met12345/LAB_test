@@ -93,8 +93,11 @@ PART B: CONFIGURE ADVANCED LOGGING FEATURES
    CustomLog logs/error_requests.log combined env=error_response
 
 2. Configure SSL-specific logging:
+   #  install mod_ssl 
+   #  Yum install mod_ssl -y
+
    # vim /etc/httpd/conf.d/ssl-logs.conf
-   
+
 <VirtualHost *:443>
    ServerName secure.example.com
    SSLEngine on
@@ -111,9 +114,11 @@ PART B: CONFIGURE ADVANCED LOGGING FEATURES
 3. Configure forensic logging:
    # vim /etc/httpd/conf.d/forensic.conf
    
-   LoadModule log_forensic_module modules/mod_log_forensic.so
+   # LoadModule is present so we use coustome module 
+
+      LoadModule log_forensic_module modules/mod_log_forensic.so   (Not Prasent)
    
-   ForensicLog logs/forensic_log
+   ForensicLog logs/forensic_log (Not Prasent)
    
    # Custom forensic format
 <IfModule mod_log_forensic.c>
