@@ -95,6 +95,9 @@ PART B: CPU MONITORING AND TUNING
    
    # chmod +x /usr/local/bin/cpu-monitor.sh
 
+   # /usr/local/bin/cpu-monitor.sh
+   // if indentation error occurs use my new created file given line-713
+
 2. Configure CPU performance profiles:
    # tuned-adm list
    # tuned-adm profile throughput-performance
@@ -145,6 +148,9 @@ PART C: MEMORY MONITORING AND OPTIMIZATION
    done
    
    # chmod +x /usr/local/bin/memory-monitor.sh
+   
+   #  /usr/local/bin/memory-monitor.sh
+    // if indentation error occurs use my new created file given line-742
 
 2. Configure swap monitoring:
    # vim /usr/local/bin/swap-monitor.sh
@@ -168,6 +174,9 @@ PART C: MEMORY MONITORING AND OPTIMIZATION
    done
    
    # chmod +x /usr/local/bin/swap-monitor.sh
+
+   # /usr/local/bin/swap-monitor.sh
+    // if indentation error occurs use my new created file given line-773
 
 3. Optimize memory settings:
    # vim /etc/sysctl.d/memory-tuning.conf
@@ -210,6 +219,9 @@ PART D: DISK I/O MONITORING AND TUNING
    
    # chmod +x /usr/local/bin/disk-monitor.sh
 
+   # /usr/local/bin/disk-monitor.sh
+    // if indentation error occurs use my new created file given line-808
+
 2. Configure disk scheduler optimization:
    # vim /usr/local/bin/optimize-disk-scheduler.sh
    
@@ -230,6 +242,7 @@ PART D: DISK I/O MONITORING AND TUNING
    
    # chmod +x /usr/local/bin/optimize-disk-scheduler.sh
    # /usr/local/bin/optimize-disk-scheduler.sh
+   // if indentation error occurs use my new created file given line-843
 
 3. Monitor disk space usage:
    # vim /usr/local/bin/diskspace-monitor.sh
@@ -252,6 +265,9 @@ PART D: DISK I/O MONITORING AND TUNING
    done
    
    # chmod +x /usr/local/bin/diskspace-monitor.sh
+
+   # /usr/local/bin/diskspace-monitor.sh
+   // if indentation error occurs use my new created file given line-869
 
 PART E: NETWORK MONITORING AND OPTIMIZATION
 --------------------------------------------
@@ -279,6 +295,9 @@ PART E: NETWORK MONITORING AND OPTIMIZATION
    done
    
    # chmod +x /usr/local/bin/network-monitor.sh
+
+   # /usr/local/bin/network-monitor.sh
+    // if indentation error occurs use my new created file given line-898
 
 2. Optimize network settings:
    # vim /etc/sysctl.d/network-tuning.conf
@@ -315,9 +334,11 @@ PART E: NETWORK MONITORING AND OPTIMIZATION
    
    # chmod +x /usr/local/bin/network-security-monitor.sh
 
+    # /usr/local/bin/network-security-monitor.sh
+    // if indentation error occurs use my new created file given line-935
+
 PART F: PROCESS AND SERVICE MONITORING
 ---------------------------------------
-
 1. Create process monitoring script:
    # vim /usr/local/bin/process-monitor.sh
    
@@ -344,6 +365,9 @@ PART F: PROCESS AND SERVICE MONITORING
    fi
    
    # chmod +x /usr/local/bin/process-monitor.sh
+    
+    # /usr/local/bin/process-monitor.sh
+    // if indentation error occurs use my new created file given line-969
 
 2. Create load average monitoring:
    # vim /usr/local/bin/load-monitor.sh
@@ -365,6 +389,10 @@ PART F: PROCESS AND SERVICE MONITORING
    done
    
    # chmod +x /usr/local/bin/load-monitor.sh
+
+   #  /usr/local/bin/load-monitor.sh
+    // if indentation error occurs use my new created file given line-1004
+
 
 PART G: COMPREHENSIVE SYSTEM HEALTH DASHBOARD
 ----------------------------------------------
@@ -421,6 +449,9 @@ PART G: COMPREHENSIVE SYSTEM HEALTH DASHBOARD
    
    # chmod +x /usr/local/bin/system-health.sh
 
+   # /usr/local/bin/system-health.sh
+    // if indentation error occurs use my new created file given line-1033
+
 2. Create performance baseline script:
    # vim /usr/local/bin/performance-baseline.sh
    
@@ -451,6 +482,9 @@ PART G: COMPREHENSIVE SYSTEM HEALTH DASHBOARD
    echo "Baseline created in $BASELINE_DIR"
    
    # chmod +x /usr/local/bin/performance-baseline.sh
+
+   #  /usr/local/bin/performance-baseline.sh
+    // if indentation error occurs use my new created file given line-1095
 
 PART H: AUTOMATED ALERTING SYSTEM
 ----------------------------------
@@ -519,7 +553,10 @@ PART H: AUTOMATED ALERTING SYSTEM
        date +%s > $LAST_ALERT_FILE
    fi
    
-   # chmod +x /usr/local/bin/system-alerts.sh
+    # chmod +x /usr/local/bin/system-alerts.sh
+
+    # /usr/local/bin/system-alerts.sh
+    // if indentation error occurs use my new created file given line-1141
 
 3. Create log cleanup script:
    # vim /usr/local/bin/cleanup-logs.sh
@@ -535,6 +572,9 @@ PART H: AUTOMATED ALERTING SYSTEM
    echo "$(date): Log cleanup completed" >> /var/log/cleanup.log
    
    # chmod +x /usr/local/bin/cleanup-logs.sh
+
+  # /usr/local/bin/cleanup-logs.sh (Dont use it now. Use it at last when the lab ends) 
+ // if indentation error occurs use my new created file given line-1211
 
 PART I: SYSTEMD SERVICE INTEGRATION
 ------------------------------------
@@ -627,7 +667,7 @@ PART K: TESTING AND VALIDATION
    # sysctl -a | grep -E "(vm\.|net\.)"
 
 TROUBLESHOOTING COMMANDS:
--------------------------
+----------------------------------------------------------
 # systemctl status tuned
 # journalctl -u cpu-monitor
 # ps aux | grep monitor
@@ -635,7 +675,7 @@ TROUBLESHOOTING COMMANDS:
 # tail -f /var/log/messages
 
 EXPECTED RESULTS:
------------------
+---------------------------------------------------------
 - Comprehensive monitoring system operational
 - Performance tuning profiles applied
 - Automated alerting functional
@@ -643,7 +683,7 @@ EXPECTED RESULTS:
 - Resource optimization implemented
 
 VALIDATION CHECKLIST:
----------------------
+------------------------------------------------------
 □ Monitoring tools installed
 □ Performance profiles active
 □ Monitoring scripts running
@@ -653,7 +693,7 @@ VALIDATION CHECKLIST:
 □ System optimization applied
 
 CLEANUP:
---------
+---------------------------------------------------------
 # systemctl stop cpu-monitor memory-monitor
 # systemctl disable cpu-monitor memory-monitor
 # rm /etc/systemd/system/*-monitor.service
@@ -662,5 +702,546 @@ CLEANUP:
 # rm -rf /var/log/performance-baseline
 
 UPDATED LINES:
----------
+------------------------------------------------------------
 Lines added: 27-46, 48-54
+
+
+MY CUSTOM CREATED FILES (REMOVING ERRORS)
+-----------------------------------------------------------------
+
+My_file-1. vim /usr/local/bin/cpu-monitor.sh
+#!/bin/bash
+# CPU usage monitoring script
+
+THRESHOLD=80
+LOGFILE="/var/log/cpu-monitor.log"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+while true; do
+    # Get CPU usage (user + system), safe parsing
+    CPU_USAGE=$(top -bn1 | awk '/Cpu\(s\)/ {print $2 + $4}')
+    CPU_INT=${CPU_USAGE%.*}
+
+    # Validate CPU value before comparison
+    if [[ "$CPU_INT" =~ ^[0-9]+$ ]] && [ "$CPU_INT" -gt "$THRESHOLD" ]; then
+        {
+            echo "$(date): HIGH CPU USAGE: ${CPU_USAGE}%"
+            echo "Top processes:"
+            ps aux --sort=-%cpu | head -10
+            echo "-----------------------------------"
+        } >> "$LOGFILE"
+    fi
+    sleep 60
+done
+
+-------------------------------------------------------------------
+
+My_file-2. vim /usr/local/bin/memory-monitor.sh
+#!/bin/bash
+# Memory usage monitoring script
+
+THRESHOLD=85
+LOGFILE="/var/log/memory-monitor.log"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+while true; do
+    # Calculate memory usage percentage safely
+    MEM_USAGE=$(free | awk '/^Mem:/ {printf "%.0f", ($3/$2)*100}')
+
+    # Validate numeric value before comparison
+    if [[ "$MEM_USAGE" =~ ^[0-9]+$ ]] && [ "$MEM_USAGE" -gt "$THRESHOLD" ]; then
+        {
+            echo "$(date): HIGH MEMORY USAGE: ${MEM_USAGE}%"
+            echo "Memory details:"
+            free -h
+            echo "Top memory consumers:"
+            ps aux --sort=-%mem | head -10
+            echo "-----------------------------------"
+        } >> "$LOGFILE"
+    fi
+
+    sleep 60
+done
+
+-------------------------------------------------------------------
+
+My_file-3./usr/local/bin/swap-monitor.sh
+#!/bin/bash
+# Swap usage monitoring script
+
+THRESHOLD=50
+LOGFILE="/var/log/swap-monitor.log"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+while true; do
+    # Get total swap size
+    SWAP_TOTAL=$(free | awk '/^Swap:/ {print $2}')
+
+    # Proceed only if swap is configured
+    if [[ "$SWAP_TOTAL" =~ ^[0-9]+$ ]] && [ "$SWAP_TOTAL" -gt 0 ]; then
+        # Calculate swap usage percentage safely
+        SWAP_USAGE=$(free | awk '/^Swap:/ {printf "%.0f", ($3/$2)*100}')
+
+        # Validate numeric value before comparison
+        if [[ "$SWAP_USAGE" =~ ^[0-9]+$ ]] && [ "$SWAP_USAGE" -gt "$THRESHOLD" ]; then
+            {
+                echo "$(date): HIGH SWAP USAGE: ${SWAP_USAGE}%"
+                swapon -s
+                echo "-----------------------------------"
+            } >> "$LOGFILE"
+        fi
+    fi
+
+    sleep 120
+done
+
+
+-------------------------------------------------------------------
+
+My_file-4.vim /usr/local/bin/disk-monitor.sh
+#!/bin/bash
+# Disk utilization monitoring script
+
+THRESHOLD=80
+LOGFILE="/var/log/disk-monitor.log"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+while true; do
+    # Capture iostat output once to avoid race conditions
+    iostat -x 1 1 | awk '
+        NR>3 && $1 !~ /^Device/ {
+            device=$1
+            util=$(NF)
+            sub(/\..*/, "", util)   # remove decimal part
+            if (util ~ /^[0-9]+$/ && util > '"$THRESHOLD"') {
+                print device, util
+            }
+        }
+    ' | while read -r DEVICE UTIL; do
+        {
+            echo "$(date): HIGH DISK UTILIZATION: $DEVICE ${UTIL}%"
+            iostat -x 1 1
+            echo "-----------------------------------"
+        } >> "$LOGFILE"
+    done
+
+    sleep 60
+done
+
+
+-------------------------------------------------------------------
+
+My_file-5. vim /usr/local/bin/optimize-disk-scheduler.sh
+#!/bin/bash
+# Disk scheduler optimization script
+
+# Set scheduler for SATA/SCSI disks
+for disk in /sys/block/sd*/queue/scheduler; do
+    if [ -f "$disk" ]; then
+        if grep -qw mq-deadline "$disk"; then
+            echo mq-deadline > "$disk"
+            echo "Set mq-deadline for $(basename "$(dirname "$(dirname "$disk")")")"
+        fi
+    fi
+done
+
+# Set scheduler for NVMe disks
+for disk in /sys/block/nvme*/queue/scheduler; do
+    if [ -f "$disk" ]; then
+        if grep -qw none "$disk"; then
+            echo none > "$disk"
+            echo "Set none scheduler for $(basename "$(dirname "$(dirname "$disk")")")"
+        fi
+    fi
+done
+
+-------------------------------------------------------------------
+
+My_file-6. vim /usr/local/bin/diskspace-monitor.sh
+#!/bin/bash
+# Disk space monitoring script
+
+THRESHOLD=85
+LOGFILE="/var/log/diskspace-monitor.log"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+df -hP | awk '$1 ~ /^\/dev\// {print $1, $5, $6}' | while read -r FILESYSTEM USAGE_PCT MOUNTPOINT; do
+    # Remove % sign
+    USAGE=${USAGE_PCT%\%}
+
+    # Validate numeric value before comparison
+    if [[ "$USAGE" =~ ^[0-9]+$ ]] && [ "$USAGE" -gt "$THRESHOLD" ]; then
+        {
+            echo "$(date): HIGH DISK USAGE: $FILESYSTEM ($MOUNTPOINT) ${USAGE}%"
+            echo "Largest files in $MOUNTPOINT:"
+            find "$MOUNTPOINT" -type f -exec ls -lh {} \; 2>/dev/null \
+                | sort -k5 -hr | head -10
+            echo "-----------------------------------"
+        } >> "$LOGFILE"
+    fi
+done
+
+
+-------------------------------------------------------------------
+
+My_file-7. vim /usr/local/bin/network-monitor.sh
+#!/bin/bash
+# Network monitoring script
+
+LOGFILE="/var/log/network-monitor.log"
+INTERFACE="eth0"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+while true; do
+    {
+        echo "$(date): Network Statistics"
+
+        # Interface statistics (safe parsing)
+        awk -v iface="$INTERFACE" '$1 ~ iface":" {print}' /proc/net/dev
+
+        # Monitor network connections (modern replacement for netstat)
+        CONNECTIONS=$(ss -an | wc -l)
+        echo "Active connections: $CONNECTIONS"
+
+        # Monitor bandwidth usage (if sar is available)
+        if command -v sar >/dev/null 2>&1; then
+            sar -n DEV 1 1 | awk -v iface="$INTERFACE" '$1 == iface {print}'
+        else
+            echo "sar command not available"
+        fi
+
+        echo "-----------------------------------"
+    } >> "$LOGFILE"
+
+    sleep 300
+done
+
+
+-------------------------------------------------------------------
+
+My_file-8. vim /usr/local/bin/network-security-monitor.sh
+#!/bin/bash
+# Network security monitoring script
+
+LOGFILE="/var/log/network-security.log"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+while true; do
+    # Monitor failed SSH login attempts in last 5 minutes
+    FAILED_SSH=$(journalctl --since "5 minutes ago" -u sshd 2>/dev/null \
+        | grep -c "Failed password")
+
+    if [[ "$FAILED_SSH" =~ ^[0-9]+$ ]] && [ "$FAILED_SSH" -gt 5 ]; then
+        echo "$(date): HIGH SSH FAILURES: $FAILED_SSH attempts" >> "$LOGFILE"
+    fi
+
+    # Monitor unusual established network connections (modern replacement for netstat)
+    {
+        echo "$(date): Top source IPs with ESTABLISHED connections"
+        ss -an state established \
+            | awk '{print $5}' \
+            | cut -d: -f1 \
+            | sort | uniq -c | sort -nr | head -10
+        echo "-----------------------------------"
+    } >> "$LOGFILE"
+
+    sleep 300
+done
+
+
+-------------------------------------------------------------------
+
+My_file-9. vim /usr/local/bin/process-monitor.sh
+#!/bin/bash
+# Process and service monitoring script
+
+LOGFILE="/var/log/process-monitor.log"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+# Monitor critical services
+SERVICES=("sshd" "httpd" "mysqld" "postfix")
+
+for service in "${SERVICES[@]}"; do
+    if ! systemctl is-active --quiet "$service"; then
+        {
+            echo "$(date): SERVICE DOWN: $service"
+            systemctl status "$service" 2>&1
+            echo "-----------------------------------"
+        } >> "$LOGFILE"
+    fi
+done
+
+# Monitor zombie processes
+ZOMBIES=$(ps -eo stat | awk '$1 ~ /^Z/ {count++} END {print count+0}')
+
+if [[ "$ZOMBIES" =~ ^[0-9]+$ ]] && [ "$ZOMBIES" -gt 0 ]; then
+    {
+        echo "$(date): ZOMBIE PROCESSES DETECTED: $ZOMBIES"
+        ps -eo pid,ppid,stat,cmd | awk '$3 ~ /^Z/ {print}'
+        echo "-----------------------------------"
+    } >> "$LOGFILE"
+fi
+
+-------------------------------------------------------------------
+
+My_file-10. vim /usr/local/bin/load-monitor.sh
+#!/bin/bash
+# Load average monitoring script
+
+THRESHOLD=2.0
+LOGFILE="/var/log/load-monitor.log"
+
+# Ensure log file exists
+touch "$LOGFILE"
+
+while true; do
+    # Read 1-minute load average reliably
+    LOAD_1MIN=$(awk '{print $1}' /proc/loadavg)
+
+    # Compare floating-point numbers safely (no bc dependency)
+    if awk "BEGIN {exit !($LOAD_1MIN > $THRESHOLD)}"; then
+        {
+            echo "$(date): HIGH LOAD AVERAGE: $LOAD_1MIN"
+            uptime
+            ps aux --sort=-%cpu | head -10
+            echo "-----------------------------------"
+        } >> "$LOGFILE"
+    fi
+
+    sleep 60
+done
+
+-------------------------------------------------------------------
+
+My_file-11.vim /usr/local/bin/system-health.sh
+#!/bin/bash
+# System health reporting script
+
+REPORT_FILE="/var/log/system-health-$(date +%Y%m%d_%H%M%S).log"
+
+# Create report file safely
+touch "$REPORT_FILE"
+
+{
+echo "=== SYSTEM HEALTH REPORT - $(date) ==="
+echo
+
+# System uptime and load
+echo "UPTIME AND LOAD:"
+uptime
+echo
+
+# CPU usage
+echo "CPU USAGE:"
+top -bn1 | awk '/Cpu\(s\)/'
+echo
+
+# Memory usage
+echo "MEMORY USAGE:"
+free -h
+echo
+
+# Disk usage
+echo "DISK USAGE:"
+df -hP
+echo
+
+# Network statistics
+echo "NETWORK STATISTICS:"
+if command -v sar >/dev/null 2>&1; then
+    sar -n DEV 1 1 | awk '/Average|eth0/'
+else
+    echo "sar command not available"
+fi
+echo
+
+# Service status
+echo "CRITICAL SERVICES:"
+for service in sshd httpd mysqld postfix; do
+    echo -n "$service: "
+    systemctl is-active "$service" 2>&1
+done
+echo
+
+# Top processes
+echo "TOP PROCESSES (CPU):"
+ps aux --sort=-%cpu | head -10
+echo
+
+echo "TOP PROCESSES (MEMORY):"
+ps aux --sort=-%mem | head -10
+echo
+} >> "$REPORT_FILE"
+
+-------------------------------------------------------------------
+
+My_file-12.vim /usr/local/bin/performance-baseline.sh
+#!/bin/bash
+# Performance baseline collection script
+
+BASELINE_DIR="/var/log/performance-baseline"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# Ensure baseline directory exists
+mkdir -p "$BASELINE_DIR"
+
+echo "Creating performance baseline at $(date)"
+
+# Check if sar is available
+if ! command -v sar >/dev/null 2>&1; then
+    echo "sar command not available. Install sysstat package." >&2
+    exit 1
+fi
+
+# CPU baseline
+{
+    echo "CPU baseline - $(date)"
+    sar -u 1 60
+} > "$BASELINE_DIR/cpu-$DATE.log"
+
+# Memory baseline
+{
+    echo "Memory baseline - $(date)"
+    sar -r 1 60
+} > "$BASELINE_DIR/memory-$DATE.log"
+
+# Disk I/O baseline
+{
+    echo "Disk I/O baseline - $(date)"
+    sar -d 1 60
+} > "$BASELINE_DIR/disk-$DATE.log"
+
+# Network baseline
+{
+    echo "Network baseline - $(date)"
+    sar -n DEV 1 60
+} > "$BASELINE_DIR/network-$DATE.log"
+
+echo "Baseline created in $BASELINE_DIR"
+
+-------------------------------------------------------------------
+
+My_file-13. vim /usr/local/bin/system-alerts.sh
+
+#!/bin/bash
+# System alerting script
+
+CONFIG_FILE="/etc/monitoring-alerts.conf"
+ALERT_LOG="/var/log/system-alerts.log"
+LAST_ALERT_FILE="/tmp/last-alert-time"
+
+# Load configuration safely
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Config file $CONFIG_FILE not found" >&2
+    exit 1
+fi
+# shellcheck source=/etc/monitoring-alerts.conf
+source "$CONFIG_FILE"
+
+# Ensure alert log exists
+touch "$ALERT_LOG"
+
+CURRENT_TIME=$(date +%s)
+
+# ---------------- RATE LIMITING ----------------
+if [ -f "$LAST_ALERT_FILE" ]; then
+    LAST_ALERT=$(cat "$LAST_ALERT_FILE")
+    if [[ "$LAST_ALERT" =~ ^[0-9]+$ ]] && \
+       [ $((CURRENT_TIME - LAST_ALERT)) -lt "$ALERT_INTERVAL" ]; then
+        exit 0
+    fi
+fi
+
+ALERT_MESSAGE=""
+
+# ---------------- CPU CHECK (UPDATED) ----------------
+CPU_IDLE=$(top -bn1 | awk '/Cpu\(s\)/ {print $8}')
+CPU_USAGE=$(echo "100 - $CPU_IDLE" | bc)
+CPU_INT=${CPU_USAGE%.*}
+
+if [[ "$CPU_INT" =~ ^[0-9]+$ ]] && [ "$CPU_INT" -gt "$CPU_THRESHOLD" ]; then
+    ALERT_MESSAGE+="\nHIGH CPU USAGE: ${CPU_INT}%"
+fi
+
+# ---------------- MEMORY CHECK ----------------
+MEM_USAGE=$(free | awk '/^Mem:/ {printf "%.0f", ($3/$2)*100}')
+if [[ "$MEM_USAGE" =~ ^[0-9]+$ ]] && [ "$MEM_USAGE" -gt "$MEMORY_THRESHOLD" ]; then
+    ALERT_MESSAGE+="\nHIGH MEMORY USAGE: ${MEM_USAGE}%"
+fi
+
+# ---------------- DISK CHECK ----------------
+while read -r FS USAGE_PCT MOUNT; do
+    USAGE=${USAGE_PCT%\%}
+    if [[ "$USAGE" =~ ^[0-9]+$ ]] && [ "$USAGE" -gt "$DISK_THRESHOLD" ]; then
+        ALERT_MESSAGE+="\nHIGH DISK USAGE: $MOUNT ${USAGE}%"
+    fi
+done < <(df -hP | awk '$1 ~ /^\/dev\// {print $1, $5, $6}')
+
+# ---------------- SEND ALERT ----------------
+if [ -n "$ALERT_MESSAGE" ]; then
+    {
+        echo -e "SYSTEM ALERT - $(hostname) - $(date)"
+        echo -e "$ALERT_MESSAGE"
+    } | mail -s "System Alert: $(hostname)" "$ALERT_EMAIL"
+
+    echo "$(date): Alert sent:$ALERT_MESSAGE" >> "$ALERT_LOG"
+    echo "$CURRENT_TIME" > "$LAST_ALERT_FILE"
+fi
+
+
+-------------------------------------------------------------------
+
+My_file-14. vim /usr/local/bin/cleanup-logs.sh
+
+#!/bin/bash
+# Log cleanup script
+
+CONFIG_FILE="/etc/monitoring-alerts.conf"
+CLEANUP_LOG="/var/log/cleanup.log"
+
+# Load configuration safely
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Config file $CONFIG_FILE not found" >&2
+    exit 1
+fi
+# shellcheck source=/etc/monitoring-alerts.conf
+source "$CONFIG_FILE"
+
+# Ensure cleanup log exists
+touch "$CLEANUP_LOG"
+
+# Validate retention value
+if [[ ! "$LOG_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+    echo "$(date): Invalid LOG_RETENTION_DAYS value" >> "$CLEANUP_LOG"
+    exit 1
+fi
+
+# Clean up old monitoring logs
+find /var/log -name "*monitor*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
+find /var/log -name "system-health-*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
+
+# Clean up performance baseline logs (if directory exists)
+if [ -d /var/log/performance-baseline ]; then
+    find /var/log/performance-baseline -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
+fi
+
+echo "$(date): Log cleanup completed (retention=${LOG_RETENTION_DAYS} days)" >> "$CLEANUP_LOG"
+
+-------------------------------------------------------------------
+
