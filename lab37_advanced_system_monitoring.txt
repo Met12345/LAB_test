@@ -190,7 +190,7 @@ PART C: MEMORY MONITORING AND OPTIMIZATION
    # sysctl -p /etc/sysctl.d/memory-tuning.conf
 
 PART D: DISK I/O MONITORING AND TUNING
----------------------------------------
+------------------------------------------
 
 1. Create disk I/O monitoring script:
    # vim /usr/local/bin/disk-monitor.sh
