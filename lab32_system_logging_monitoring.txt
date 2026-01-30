@@ -27,87 +27,103 @@ PART A: CONFIGURE RSYSLOG BASICS
    # cat /etc/rsyslog.conf
    # ls -la /etc/rsyslog.d/
 
-2. Configure basic rsyslog settings:
+2. Configure basic rsyslog settings alongwith facility and priority rule (New version accroding to RHEL9) 
    # vim /etc/rsyslog.conf
    
-   # Global directives
-   $ModLoad imuxsock # provides support for local system logging
-   $ModLoad imklog   # provides kernel logging support
+   #######################################
+   # Global directives 
+   
+   module(load="imuxsock")     # local system logging support
+   module(load="imklog")       # kernel logging support
    
    # Use traditional timestamp format
-   $ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat
+   module(load="builtin:omfile" Template="RSYSLOG_TraditionalFileFormat")
    
-   # File syncing capability is disabled by default
-   $ActionFileEnableSync on
+   # Enable file sync
+   global(action.fileEnableSync="on")
    
    # Include all config files in /etc/rsyslog.d/
-   $IncludeConfig /etc/rsyslog.d/*.conf
-
-3. Configure facility and priority rules:
-   # vim /etc/rsyslog.conf
+   include(file="/etc/rsyslog.d/*.conf" mode="optional")
+   
+   # Facility and priority rules 
    
    # Log all kernel messages to the console
-   kern.*                                                 /dev/console
+   kern.* action(type="omfile" file="/dev/console")
    
-   # Log anything (except mail) of level info or higher
-   *.info;mail.none;authpriv.none;cron.none                /var/log/messages
+   # Log anything (except mail, authpriv, cron) of level info or higher
+   *.info;mail.none;authpriv.none;cron.none \
+       action(type="omfile" file="/var/log/messages")
    
-   # The authpriv file has restricted access
-   authpriv.*                                              /var/log/secure
+   # Authentication logs (restricted)
+   authpriv.* action(type="omfile" file="/var/log/secure")
    
-   # Log all the mail messages in one place
-   mail.*                                                  -/var/log/maillog
+   # Mail logs (asynchronous write)
+   mail.* action(type="omfile" file="/var/log/maillog" asyncWriting="on")
    
-   # Log cron stuff
-   cron.*                                                  /var/log/cron
+   # Cron logs
+   cron.* action(type="omfile" file="/var/log/cron")
    
-   # Everybody gets emergency messages
-   *.emerg                                                 :omusrmsg:*
+   # Emergency messages to all users
+   *.emerg action(type="omusrmsg" users="*")
    
-   # Save news errors of level crit and higher in a special file
-   uucp,news.crit                                          /var/log/spooler
+   # News and UUCP critical logs
+   uucp,news.crit action(type="omfile" file="/var/log/spooler")
    
-   # Save boot messages also to boot.log
-   local7.*                                                /var/log/boot.log
+   # Boot messages
+   local7.* action(type="omfile" file="/var/log/boot.log")
+   #######################################
 
 PART B: CONFIGURE CUSTOM LOGGING RULES
 ---------------------------------------
 
-1. Create custom log files:
+1. Create custom log files (New version accroding to RHEL9):
    # vim /etc/rsyslog.d/custom.conf
-   
+   #######################################
    # Security-related logs
-   auth,authpriv.*                     /var/log/auth.log
+   auth,authpriv.* action(type="omfile" file="/var/log/auth.log")
    
    # Network-related logs
-   daemon.*                            /var/log/daemon.log
+   daemon.* action(type="omfile" file="/var/log/daemon.log")
    
    # Application logs
-   local0.*                            /var/log/application.log
-   local1.*                            /var/log/database.log
-   local2.*                            /var/log/webserver.log
+   local0.* action(type="omfile" file="/var/log/application.log")
+   local1.* action(type="omfile" file="/var/log/database.log")
+   local2.* action(type="omfile" file="/var/log/webserver.log")
    
    # High priority messages
-   *.crit                              /var/log/critical.log
+   *.crit action(type="omfile" file="/var/log/critical.log")
    
    # Debug messages (separate file)
-   *.debug                             /var/log/debug.log
+   *.debug action(type="omfile" file="/var/log/debug.log")
+   #######################################
 
-2. Configure log filtering:
+2. Configure log filtering (New version accroding to RHEL9):
    # vim /etc/rsyslog.d/filters.conf
-   
+
+   #######################################
    # Filter out noisy messages
-   :msg, contains, "DHCPDISCOVER"      ~
-   :msg, contains, "DHCPOFFER"         ~
+   if ($msg contains "DHCPDISCOVER") then stop
+   if ($msg contains "DHCPOFFER") then stop
    
    # Filter by program name
-   :programname, isequal, "sshd"       /var/log/ssh.log
-   :programname, isequal, "httpd"      /var/log/apache.log
+   if ($programname == "sshd") then {
+       action(type="omfile" file="/var/log/ssh.log")
+       stop
+   }
+   
+   if ($programname == "httpd") then {
+       action(type="omfile" file="/var/log/apache.log")
+       stop
+   }
    
    # Filter by hostname
-   :hostname, isequal, "webserver"     /var/log/webserver-host.log
+   if ($hostname == "webserver") then {
+       action(type="omfile" file="/var/log/webserver-host.log")
+       stop
+   }
+   #######################################
 
-3. Configure structured logging:
+3. Configure structured logging :
    # vim /etc/rsyslog.d/structured.conf
    
    # JSON format template
@@ -130,46 +146,52 @@ PART B: CONFIGURE CUSTOM LOGGING RULES
 PART C: CONFIGURE REMOTE LOGGING
 ---------------------------------
 
-1. Configure rsyslog server (log collector):
+1. Configure rsyslog server (log collector)(New version accroding to RHEL9):
    # vim /etc/rsyslog.conf
    
    # Enable UDP syslog reception
-   $ModLoad imudp
-   $UDPServerRun 514
-   $UDPServerAddress 0.0.0.0
+   module(load="imudp")
+   input(type="imudp" port="514" address="0.0.0.0")
    
    # Enable TCP syslog reception
-   $ModLoad imtcp
-   $InputTCPServerRun 514
+   module(load="imtcp")
+   input(type="imtcp" port="514")
 
-2. Configure remote log storage:
+2. Configure remote log storage(New version accroding to RHEL9):
    # vim /etc/rsyslog.d/remote.conf
    
    # Template for remote logs
-   $template RemoteHost,"/var/log/remote/%hostname%/%programname%.log"
+   template(name="RemoteHost" type="string"
+         string="/var/log/remote/%hostname%/%programname%.log")
    
    # Store remote logs by hostname
-   *.* ?RemoteHost
+   *.* action(type="omfile" dynaFile="RemoteHost")
    
    # Stop processing after storing remote logs
-   & stop
+   stop
 
-3. Configure rsyslog client (log sender):
+3. Configure rsyslog client (log sender)(New version accroding to RHEL9):
    # vim /etc/rsyslog.d/remote-client.conf
    
    # Send all logs to remote server via UDP
-   *.* @192.168.1.10:514
+   *.* action(type="omfwd" target="192.168.1.10" port="514" protocol="udp")
    
    # Send critical logs via TCP (more reliable)
-   *.crit @@192.168.1.10:514
+   *.crit action(type="omfwd" target="192.168.1.10" port="514" protocol="tcp")
    
    # Send specific facility to remote server
-   local0.* @@192.168.1.10:514
+   local0.* action(type="omfwd" target="192.168.1.10" port="514" protocol="tcp")
 
-4. Configure firewall for remote logging:
+4. Install and start Firewall
+   # dnf install firewalld -y
+   # systemctl enable --now firewalld
+   # firewall-cmd --state
+
+5. Configure firewall for remote logging:
    # firewall-cmd --permanent --add-port=514/udp
    # firewall-cmd --permanent --add-port=514/tcp
    # firewall-cmd --reload
+   # firewall-cmd --list-port
 
 PART D: CONFIGURE JOURNALD INTEGRATION
 ---------------------------------------
@@ -196,18 +218,17 @@ PART D: CONFIGURE JOURNALD INTEGRATION
    ForwardToConsole=no
    ForwardToWall=yes
 
-2. Configure journal forwarding to rsyslog:
+2. Configure journal forwarding to rsyslog(New version accroding to RHEL9):
    # vim /etc/rsyslog.d/journal.conf
    
-   # Load journal input module
-   $ModLoad imjournal
-   
-   # Journal workaround
-   $IMJournalStateFile imjournal.state
+   # Load journal input module and statefile
+   module(load="imjournal"
+       StateFile="imjournal.state")
    
    # Forward journal to rsyslog
-   $IMJournalRatelimitInterval 600
-   $IMJournalRatelimitBurst 20000
+   module(load="imjournal"
+       Ratelimit.Interval="600"
+       Ratelimit.Burst="20000")
 
 3. Restart services:
    # systemctl restart systemd-journald
@@ -275,6 +296,14 @@ PART E: CONFIGURE LOG ROTATION
        endscript
    }
 
+   // Before moving to next part, first of all check and verify all rsyslog configurations file using
+   # rsyslogd -N1
+
+   // You might encounter a specific error (only if comes) 
+   // Error Title -  rsyslogd: module 'imjournal' already in this config, cannot be added. 
+   // Reason - On RHEL 9, rsyslog does NOT need you to manually load imjournal. It is already integrated by systemd automatically.
+   // Solution - Remove module(load="imjournal", StateFile="imjournal.state") from /etc/rsyslog.conf and /etc/rsyslog.d/journal.conf
+
 PART F: IMPLEMENT LOG MONITORING
 ---------------------------------
 
@@ -318,6 +347,9 @@ PART F: IMPLEMENT LOG MONITORING
    echo "Service failures today: $SERVICE_FAILURES"
    
    # chmod +x /usr/local/bin/log-monitor.sh
+   
+   # /usr/local/bin/log-monitor.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-711 (so use that instead). 
 
 2. Create security log analyzer:
    # vim /usr/local/bin/security-log-analyzer.sh
@@ -363,6 +395,9 @@ PART F: IMPLEMENT LOG MONITORING
    
    # chmod +x /usr/local/bin/security-log-analyzer.sh
 
+   # /usr/local/bin/security-log-analyzer.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-750 (so use that instead). 
+
 3. Create log statistics script:
    # vim /usr/local/bin/log-statistics.sh
    
@@ -397,6 +432,9 @@ PART F: IMPLEMENT LOG MONITORING
    
    # chmod +x /usr/local/bin/log-statistics.sh
 
+   # /usr/local/bin/log-statistics.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-793 (so use that instead). 
+
 PART G: CONFIGURE LOG ALERTING
 -------------------------------
 
@@ -427,6 +465,8 @@ PART G: CONFIGURE LOG ALERTING
    done &
    
    # chmod +x /usr/local/bin/realtime-log-alert.sh
+   # /usr/local/bin/realtime-log-alert.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-826 (so use that instead). 
 
 2. Create log threshold monitoring:
    # vim /usr/local/bin/log-threshold-monitor.sh
@@ -467,6 +507,8 @@ PART G: CONFIGURE LOG ALERTING
    fi
    
    # chmod +x /usr/local/bin/log-threshold-monitor.sh
+   # /usr/local/bin/log-threshold-monitor.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-853 (so use that instead). 
 
 PART H: IMPLEMENT LOG ANALYSIS TOOLS
 -------------------------------------
@@ -523,6 +565,8 @@ PART H: IMPLEMENT LOG ANALYSIS TOOLS
    awk '{print $3}' | cut -d':' -f1 | sort | uniq -c
    
    # chmod +x /usr/local/bin/parse-logs.sh
+   # /usr/local/bin/parse-logs.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-892 (so use that instead). 
 
 PART I: CONFIGURE LOG BACKUP AND ARCHIVAL
 ------------------------------------------
@@ -566,6 +610,8 @@ PART I: CONFIGURE LOG BACKUP AND ARCHIVAL
    find $BACKUP_DIR -name "*.log.gz" -mtime +90 -delete
    
    # chmod +x /usr/local/bin/backup-logs.sh
+   # /usr/local/bin/backup-logs.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-927 (so use that instead). 
 
 2. Schedule log management tasks:
    # crontab -e
@@ -645,3 +691,275 @@ CLEANUP:
 # rm /etc/rsyslog.d/structured.conf
 # rm /etc/rsyslog.d/remote.conf
 # crontab -e  # Remove monitoring entries
+
+ADDED/UPDATED LINES - 
+------------------------------------
+33-74,81-98,103-124,153-154,157-158,164-165,168,171,177,180,183,185-188,194,225-226,229-231,299-305,351-352,398-399,435-436,468-469,510-511,568-569,613-614,700-964  
+
+
+MY NEW CREATED .sh files
+------------------------------------------------------------
+Reasons of creation of new .sh files to resolve errors:
+a. Unquoted variables
+b. Missing file / permission errors (2>/dev/null)
+c. Unsafe read usage in loops
+d. Numeric comparison safety
+e. Command failures inside pipelines
+f. Background process safety
+---------------------------------------------------------------
+
+File-1.  vim /usr/local/bin/log_monitor.sh
+#!/bin/bash
+# System log monitoring script
+
+LOG_DIR="/var/log"
+ALERT_EMAIL="admin@example.com"
+
+echo "=== System Log Monitor - $(date) ==="
+
+# Check for critical errors
+CRITICAL_ERRORS=$(grep -i "critical\|fatal\|panic" "$LOG_DIR/messages" 2>/dev/null | grep "$(date '+%b %d')" | wc -l)
+if [ "$CRITICAL_ERRORS" -gt 0 ]; then
+    echo "ALERT: $CRITICAL_ERRORS critical errors found today"
+    grep -i "critical\|fatal\|panic" "$LOG_DIR/messages" 2>/dev/null | grep "$(date '+%b %d')" | \
+    mail -s "Critical System Errors" "$ALERT_EMAIL"
+fi
+
+# Check for authentication failures
+AUTH_FAILURES=$(grep -i "authentication failure\|failed password" "$LOG_DIR/secure" 2>/dev/null | grep "$(date '+%b %d')" | wc -l)
+if [ "$AUTH_FAILURES" -gt 20 ]; then
+    echo "ALERT: $AUTH_FAILURES authentication failures today"
+    echo "High authentication failure rate: $AUTH_FAILURES" | \
+    mail -s "Authentication Alert" "$ALERT_EMAIL"
+fi
+
+# Check disk space for logs
+LOG_USAGE=$(df "$LOG_DIR" 2>/dev/null | tail -1 | awk '{print $5}' | sed 's/%//')
+if [ "$LOG_USAGE" -gt 80 ]; then
+    echo "ALERT: Log directory usage at $LOG_USAGE%"
+    echo "Log directory usage critical: $LOG_USAGE%" | \
+    mail -s "Disk Space Alert" "$ALERT_EMAIL"
+fi
+
+# Check for service failures
+SERVICE_FAILURES=$(grep -i "failed\|error" "$LOG_DIR/messages" 2>/dev/null | grep "$(date '+%b %d')" | wc -l)
+echo "Service failures today: $SERVICE_FAILURES"
+
+-------------------------------------------------------------------------------------
+
+File-2.  vim /usr/local/bin/security-log-analyzer.sh
+
+#!/bin/bash
+# Security log analyzer
+
+SECURE_LOG="/var/log/secure"
+AUTH_LOG="/var/log/auth.log"
+
+echo "=== Security Log Analysis - $(date) ==="
+echo
+
+# Failed SSH attempts
+echo "Failed SSH attempts today:"
+if [ -f "$SECURE_LOG" ]; then
+    grep "$(date '+%b %d')" "$SECURE_LOG" 2>/dev/null | grep -i "failed password" | \
+    awk '{print $11}' | sort | uniq -c | sort -nr | head -10
+fi
+echo
+
+# Successful logins
+echo "Successful logins today:"
+if [ -f "$SECURE_LOG" ]; then
+    grep "$(date '+%b %d')" "$SECURE_LOG" 2>/dev/null | grep -i "accepted password" | \
+    awk '{print $9, $11}' | sort | uniq -c | sort -nr
+fi
+echo
+
+# Root access attempts
+echo "Root access attempts:"
+if [ -f "$SECURE_LOG" ]; then
+    grep "$(date '+%b %d')" "$SECURE_LOG" 2>/dev/null | grep -i "root" | wc -l
+fi
+echo
+
+# Sudo usage
+echo "Sudo usage today:"
+if [ -f "$SECURE_LOG" ]; then
+    grep "$(date '+%b %d')" "$SECURE_LOG" 2>/dev/null | grep -i "sudo" | \
+    awk '{print $5, $6}' | sort | uniq -c | sort -nr | head -10
+fi
+
+-----------------------------------------------------------------------------------------
+
+File-3.  vim /usr/local/bin/log-statistics.sh
+
+#!/bin/bash
+# Generate log statistics
+
+echo "=== System Log Statistics - $(date) ==="
+echo
+
+# Log file sizes
+echo "Log file sizes:"
+du -sh /var/log/*.log 2>/dev/null | sort -hr | head -10
+echo
+
+# Log growth rate
+echo "Log entries today by facility:"
+grep "$(date '+%b %d')" /var/log/messages 2>/dev/null | \
+awk '{print $5}' | cut -d'[' -f1 | sort | uniq -c | sort -nr | head -10
+echo
+
+# Error summary
+echo "Error summary today:"
+grep "$(date '+%b %d')" /var/log/messages 2>/dev/null | grep -i error | \
+awk '{for(i=6;i<=NF;i++) printf "%s ", $i; print ""}' | \
+sort | uniq -c | sort -nr | head -10
+echo
+
+# Journal statistics
+echo "Journal statistics:"
+journalctl --since today --no-pager 2>/dev/null | wc -l | awk '{print "Total journal entries today: " $1}'
+journalctl --since today --priority=err --no-pager 2>/dev/null | wc -l | awk '{print "Error entries today: " $1}'
+
+------------------------------------------------------------------------------------------------------------------------
+
+File-4.  vim /usr/local/bin/real-timelog-alert.sh
+
+#!/bin/bash
+# Real-time log alerting
+
+ALERT_EMAIL="admin@example.com"
+
+# Monitor critical messages in real-time
+tail -F /var/log/messages 2>/dev/null | while read -r line; do
+    # Check for critical keywords
+    if echo "$line" | grep -qi "panic\|oops\|segfault\|out of memory"; then
+        echo "CRITICAL: $line" | mail -s "Critical System Alert" "$ALERT_EMAIL"
+    fi
+
+    # Check for security events
+    if echo "$line" | grep -qi "authentication failure\|invalid user"; then
+        echo "SECURITY: $line" | mail -s "Security Alert" "$ALERT_EMAIL"
+    fi
+
+    # Check for service failures
+    if echo "$line" | grep -qi "service.*failed\|daemon.*died"; then
+        echo "SERVICE: $line" | mail -s "Service Alert" "$ALERT_EMAIL"
+    fi
+done &
+
+----------------------------------------------------------------------------------------------
+
+File-5.  vim /usr/local/bin/log-threshold-monitor.sh
+
+#!/bin/bash
+# Monitor log thresholds
+
+MESSAGES_LOG="/var/log/messages"
+SECURE_LOG="/var/log/secure"
+ALERT_EMAIL="admin@example.com"
+
+# Define thresholds
+ERROR_THRESHOLD=50
+AUTH_FAILURE_THRESHOLD=20
+CRITICAL_THRESHOLD=5
+
+# Count today's events
+TODAY=$(date '+%b %d')
+
+ERROR_COUNT=$(grep "$TODAY" "$MESSAGES_LOG" 2>/dev/null | grep -ci error)
+AUTH_FAILURE_COUNT=$(grep "$TODAY" "$SECURE_LOG" 2>/dev/null | grep -ci "authentication failure")
+CRITICAL_COUNT=$(grep "$TODAY" "$MESSAGES_LOG" 2>/dev/null | grep -ci "critical\|panic\|fatal")
+
+# Check thresholds and alert
+if [ "$ERROR_COUNT" -gt "$ERROR_THRESHOLD" ]; then
+    echo "High error count: $ERROR_COUNT (threshold: $ERROR_THRESHOLD)" | \
+    mail -s "Log Threshold Alert: Errors" "$ALERT_EMAIL"
+fi
+
+if [ "$AUTH_FAILURE_COUNT" -gt "$AUTH_FAILURE_THRESHOLD" ]; then
+    echo "High authentication failure count: $AUTH_FAILURE_COUNT (threshold: $AUTH_FAILURE_THRESHOLD)" | \
+    mail -s "Log Threshold Alert: Auth Failures" "$ALERT_EMAIL"
+fi
+
+if [ "$CRITICAL_COUNT" -gt "$CRITICAL_THRESHOLD" ]; then
+    echo "High critical message count: $CRITICAL_COUNT (threshold: $CRITICAL_THRESHOLD)" | \
+    mail -s "Log Threshold Alert: Critical" "$ALERT_EMAIL"
+fi
+
+--------------------------------------------------------------------------------------------------------------
+
+File-6.  vim /usr/local/bin/parse-logs.sh
+
+#!/bin/bash
+# Custom log parser
+
+LOG_FILE="$1"
+PATTERN="$2"
+
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <log_file> <pattern>"
+    exit 1
+fi
+
+echo "=== Log Analysis for $LOG_FILE ==="
+echo "Pattern: $PATTERN"
+echo "Date: $(date)"
+echo
+
+# Count matches
+MATCH_COUNT=$(grep -c "$PATTERN" "$LOG_FILE" 2>/dev/null)
+echo "Total matches: $MATCH_COUNT"
+echo
+
+# Show recent matches
+echo "Recent matches (last 20):"
+grep "$PATTERN" "$LOG_FILE" 2>/dev/null | tail -20
+echo
+
+# Time distribution
+echo "Hourly distribution today:"
+grep "$(date '+%b %d')" "$LOG_FILE" 2>/dev/null | grep "$PATTERN" | \
+awk '{print $3}' | cut -d':' -f1 | sort | uniq -c
+
+-------------------------------------------------------------------------------------
+
+File-7.  vim /usr/local/bin/backup-logs.sh
+
+#!/bin/bash
+# Backup system logs
+
+BACKUP_DIR="/var/backups/logs"
+DATE=$(date +%Y%m%d)
+
+mkdir -p "$BACKUP_DIR"
+
+echo "Starting log backup for $DATE"
+
+# Backup current logs
+tar -czf "$BACKUP_DIR/logs_$DATE.tar.gz" \
+    /var/log/messages* \
+    /var/log/secure* \
+    /var/log/maillog* \
+    /var/log/cron* \
+    /var/log/boot.log* \
+    /var/log/auth.log* \
+    /var/log/daemon.log* 2>/dev/null
+
+# Backup journal
+journalctl --since="1 day ago" --until="now" 2>/dev/null > "$BACKUP_DIR/journal_$DATE.log"
+gzip "$BACKUP_DIR/journal_$DATE.log"
+
+# Backup remote logs
+if [ -d /var/log/remote ]; then
+    tar -czf "$BACKUP_DIR/remote_logs_$DATE.tar.gz" /var/log/remote/ 2>/dev/null
+fi
+
+echo "Log backup completed: $BACKUP_DIR"
+
+# Remove old backups (keep 90 days)
+find "$BACKUP_DIR" -name "*.tar.gz" -mtime +90 -delete
+find "$BACKUP_DIR" -name "*.log.gz" -mtime +90 -delete
+
+--------------------------------------------------------------------------------------
+
