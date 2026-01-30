@@ -13,8 +13,8 @@ LAB SCENARIO:
 Configure AutoFS to automatically mount NFS shares, user home directories, and removable media on demand to optimize system resources.
 
 EQUIPMENT NEEDED:
-- RHEL system (client: 192.168.1.20)
-- NFS server (server: 192.168.1.10)
+- RHEL system (client: 20.192.209.86)
+- NFS server (server: 20.192.207.245)
 - Test user accounts and directories
 
 LAB TASKS:
@@ -32,8 +32,10 @@ PART A: INSTALL AND CONFIGURE AUTOFS
 
 3. Understand AutoFS configuration structure:
    # vim /etc/auto.master
-   
-   # Format: mount-point map-file [options]
+# Removed documentation line "Format: mount-point map-file" because autofs treats every line in auto.master as a map entry; 
+# this text caused a syntax warning during service startup.
+   # Format: mount-point map-file [options]  \
+
    # /misc /etc/auto.misc --timeout=60
    # /net -hosts
 
@@ -43,6 +45,29 @@ PART A: INSTALL AND CONFIGURE AUTOFS
 
 PART B: CONFIGURE BASIC AUTOFS MOUNTS
 --------------------------------------
+1. Prepare NFS Server Exports in server 2
+
+   # yum install autofs nfs-utils -y
+
+   # mkdir -p /srv/nfs4/shared
+   # mkdir -p /srv/nfs4/data
+   # mkdir -p /srv/nfs4/backup
+   # mkdir -p /home
+   # chmod -R 777 /srv/nfs4 /home
+
+   # install Vim  (If not installed)
+   # yum install vim -y
+
+   # vim /etc/exports
+
+   # /srv/nfs4/shared *(rw,sync,no_root_squash)
+   # /srv/nfs4/data   *(rw,sync,no_root_squash)
+   # /srv/nfs4/backup *(ro,sync,no_root_squash)
+   # /home            *(rw,sync,no_root_squash)
+
+   # exportfs -rav
+   # systemctl enable --now nfs-server
+
 
 1. Configure AutoFS master map:
    # vim /etc/auto.master
@@ -55,32 +80,53 @@ PART B: CONFIGURE BASIC AUTOFS MOUNTS
 2. Create NFS automount map:
    # vim /etc/auto.nfs
    
-   # NFS automounts
-   shared -rw,soft,intr 192.168.1.10:/srv/nfs4/shared
-   data -rw,soft,intr 192.168.1.10:/srv/nfs4/data
-   backup -ro,soft,intr 192.168.1.10:/srv/nfs4/backup
+# NFS automounts
+shared -rw,soft,intr 20.192.207.245:/srv/nfs4/shared
+data -rw,soft,intr 20.192.207.245:/srv/nfs4/data
+backup -ro,soft,intr 20.192.207.245:/srv/nfs4/backup
 
 3. Create home directory automount map:
    # vim /etc/auto.home
    
-   # Home directory automounts
-   * -rw,soft,intr 192.168.1.10:/home/&
+# Home directory automounts
+* -rw,soft,intr 20.192.207.245:/home/&
 
 4. Create media automount map:
    # vim /etc/auto.media
    
-   # Removable media automounts
-   cdrom -fstype=iso9660,ro,nodev,nosuid :/dev/cdrom
-   usb -fstype=vfat,rw,nodev,nosuid,umask=0 :/dev/sdb1
+# Removable media automounts
+cdrom -fstype=iso9660,ro,nodev,nosuid :/dev/cdrom
+usb -fstype=vfat,rw,nodev,nosuid,umask=0 :/dev/sdb1
 
 PART C: CONFIGURE ADVANCED AUTOFS FEATURES
 -------------------------------------------
+1. Prepare NFS paths for Advanced Mounts in server 2
+
+   # mkdir -p /projects
+   # mkdir -p /projects/project1
+   # mkdir -p /projects/project2
+
+   # mkdir -p /export/usr
+   # mkdir -p /export/opt
+   # mkdir -p /export/logs
+
+   # chmod -R 777 /projects /export
+
+   # vim /etc/exports
+   # /projects      *(rw,sync,no_root_squash)
+   # /export/usr    *(ro,sync,no_root_squash)
+   # /export/opt    *(rw,sync,no_root_squash)
+   # /export/logs   *(rw,sync,no_root_squash)
+
+   # exportfs -rav
+
+
 
 1. Configure wildcard automounts:
    # vim /etc/auto.projects
    
-   # Project directory automounts with wildcards
-   * -rw,soft,intr 192.168.1.10:/projects/&
+# Project directory automounts with wildcards
+* -rw,soft,intr 20.192.207.245:/projects/&
 
 2. Add projects to master map:
    # vim /etc/auto.master
@@ -90,10 +136,10 @@ PART C: CONFIGURE ADVANCED AUTOFS FEATURES
 3. Configure multi-mount maps:
    # vim /etc/auto.multi
    
-   # Multi-mount configuration
-   /usr -ro,soft,intr 192.168.1.10:/export/usr
-   /opt -rw,soft,intr 192.168.1.10:/export/opt
-   /var/log -rw,soft,intr 192.168.1.10:/export/logs
+# Multi-mount configuration
+/usr -ro,soft,intr 20.192.207.245:/export/usr
+/opt -rw,soft,intr 20.192.207.245:/export/opt
+/var/log -rw,soft,intr 20.192.207.245:/export/logs
 
 4. Add multi-mount to master map:
    # vim /etc/auto.master
@@ -102,62 +148,83 @@ PART C: CONFIGURE ADVANCED AUTOFS FEATURES
 
 PART D: CONFIGURE AUTOFS WITH LDAP INTEGRATION
 -----------------------------------------------
+1. Install LDAP + SSSD packages
+
+   # yum install sssd sssd-ldap openldap-clients oddjob-mkhomedir -y
+   # systemctl enable --now sssd
+   # systemctl enable --now oddjobd
+   # authselect select sssd with-mkhomedir --force
+
 
 1. Configure LDAP-based automounts (if LDAP available):
    # vim /etc/auto.master
    
-   # LDAP automount maps
-   /home/ldap ldap:ou=auto.home,dc=example,dc=com --timeout=300
+# LDAP automount maps
+/home/ldap ldap:ou=auto.home,dc=example,dc=com --timeout=300
 
 2. Configure AutoFS LDAP settings:
    # vim /etc/autofs.conf
    
-   # LDAP configuration
-   lookup_timeout = 10
-   negative_timeout = 60
-   mount_wait = -1
-   umount_wait = 12
-   browse_mode = no
+# LDAP configuration
+
+negative_timeout = 60
+browse_mode = no
    
-   # LDAP specific settings
-   ldap_timeout = 10
-   ldap_network_timeout = 8
+# LDAP specific settings
+
+ldap_timeout = 10
+ldap_network_timeout = 8
 
 3. Configure LDAP authentication for AutoFS:
    # vim /etc/openldap/ldap.conf
    
-   BASE dc=example,dc=com
+BASE dc=example,dc=com
    URI ldap://ldap.example.com
    TLS_CACERTDIR /etc/openldap/certs
 
 PART E: CONFIGURE AUTOFS SECURITY
 ----------------------------------
+1. Prepare Secure NFS Paths
 
-1. Configure secure AutoFS mounts:
+   # mkdir -p /secure/confidential
+   # mkdir -p /secure/private
+   # chmod -R 700 /secure
+
+   # vim /etc/exports
+   # /secure/confidential *(rw,sync,sec=krb5p,no_root_squash)
+   # /secure/private      *(rw,sync,sec=krb5i,no_root_squash)
+
+   # exportfs -rav
+
+
+2. Configure secure AutoFS mounts:
    # vim /etc/auto.secure
    
-   # Secure mounts with specific options
-   confidential -rw,soft,intr,sec=krb5p 192.168.1.10:/secure/confidential
-   private -rw,soft,intr,sec=krb5i 192.168.1.10:/secure/private
+# Secure mounts with specific options
+confidential -rw,soft,intr,sec=krb5p 20.192.207.245:/secure/confidential
+private -rw,soft,intr,sec=krb5i 20.192.207.245:/secure/private
 
-2. Add secure mounts to master map:
+3. Add secure mounts to master map:
    # vim /etc/auto.master
    
    /secure /etc/auto.secure --timeout=60
 
-3. Configure AutoFS with SELinux:
+4. Configure AutoFS with SELinux:
    # setsebool -P use_nfs_home_dirs on
-   # semanage fcontext -a -t autofs_exec_t "/etc/auto.*"
+
+   #It tries to assign a non-existent SELinux type, which is outdated documentation and not required for AutoFS.
+   # semanage fcontext -a -t autofs_exec_t "/etc/auto.*"  no need to use
+   
    # restorecon -R /etc/auto*
 
-4. Configure AutoFS logging:
+5. Configure AutoFS logging:
    # vim /etc/autofs.conf
    
    # Logging configuration
-   logging = debug
-   log_to_syslog = yes
-   log_to_file = yes
-   log_file = /var/log/autofs.log
+logging = debug
+log_to_syslog = yes
+log_to_file = yes
+log_file = /var/log/autofs.log
 
 PART F: CREATE AUTOFS MANAGEMENT SCRIPTS
 -----------------------------------------
@@ -165,46 +232,46 @@ PART F: CREATE AUTOFS MANAGEMENT SCRIPTS
 1. Create AutoFS status script:
    # vim /usr/local/bin/autofs-status.sh
    
-   #!/bin/bash
-   # AutoFS status monitoring script
+#!/bin/bash
+# AutoFS status monitoring script
    
-   echo "=== AutoFS Status Report - $(date) ==="
+echo "=== AutoFS Status Report - $(date) ==="
    
-   # Check AutoFS service status
-   echo "AutoFS Service Status:"
-   systemctl status autofs --no-pager -l
-   echo
+# Check AutoFS service status
+echo "AutoFS Service Status:"
+systemctl status autofs --no-pager -l
+echo
    
-   # Show active automount points
-   echo "Active Automount Points:"
-   mount | grep autofs
-   echo
+# Show active automount points
+echo "Active Automount Points:"
+mount | grep autofs
+echo
    
-   # Show AutoFS maps
-   echo "Configured AutoFS Maps:"
-   cat /etc/auto.master | grep -v "^#" | grep -v "^$"
-   echo
+# Show AutoFS maps
+echo "Configured AutoFS Maps:"
+cat /etc/auto.master | grep -v "^#" | grep -v "^$"
+echo
    
-   # Check for AutoFS processes
-   echo "AutoFS Processes:"
-   ps aux | grep automount | grep -v grep
-   echo
+# Check for AutoFS processes
+echo "AutoFS Processes:"
+ps aux | grep automount | grep -v grep
+echo
    
-   # Show recent AutoFS activity
-   echo "Recent AutoFS Activity (last 20 lines):"
-   if [ -f /var/log/autofs.log ]; then
-       tail -20 /var/log/autofs.log
-   else
-       journalctl -u autofs --no-pager | tail -20
-   fi
+# Show recent AutoFS activity
+echo "Recent AutoFS Activity (last 20 lines):"
+if [ -f /var/log/autofs.log ]; then
+   tail -20 /var/log/autofs.log
+else
+   journalctl -u autofs --no-pager | tail -20
+fi
    
    # chmod +x /usr/local/bin/autofs-status.sh
 
 2. Create AutoFS mount tester:
    # vim /usr/local/bin/test-autofs-mounts.sh
    
-   #!/bin/bash
-   # Test AutoFS mount functionality
+#!/bin/bash
+# Test AutoFS mount functionality
    
    echo "=== AutoFS Mount Testing - $(date) ==="
    
@@ -248,50 +315,56 @@ PART F: CREATE AUTOFS MANAGEMENT SCRIPTS
 3. Create AutoFS troubleshooting script:
    # vim /usr/local/bin/autofs-troubleshoot.sh
    
-   #!/bin/bash
-   # AutoFS troubleshooting script
+#!/bin/bash
+# AutoFS troubleshooting script
    
-   echo "=== AutoFS Troubleshooting - $(date) ==="
+echo "=== AutoFS Troubleshooting - $(date) ==="
+ 
+# Check AutoFS configuration syntax
+echo "Checking AutoFS configuration:"
+
+# Removed "automount -f -v" because it starts the automount daemon in foreground debug mode,
+# which causes the script to hang and interferes with the systemd-managed autofs service.
+# Replaced with a safe map check method to avoid disrupting running mounts.
+
+
+if automount -m >/dev/null 2>&1; then    (Here we modify -f -v to -m)
+   echo "  Configuration syntax: OK"
+else
+   echo "  Configuration syntax: ERROR"
+   automount -f -v 2>&1 | head -10
+fi
+echo
    
-   # Check AutoFS configuration syntax
-   echo "Checking AutoFS configuration:"
-   if automount -f -v >/dev/null 2>&1; then
-       echo "  Configuration syntax: OK"
-   else
-       echo "  Configuration syntax: ERROR"
-       automount -f -v 2>&1 | head -10
+# Check network connectivity to NFS servers
+echo "Checking NFS server connectivity:"
+for server in 20.192.207.245; do
+   echo -n "  Testing $server: "
+if timeout 5 showmount -e $server >/dev/null 2>&1; then
+   echo "OK"
+else
+   echo "FAILED"
+fi
+done
+echo
+   
+# Check for stale mounts
+echo "Checking for stale mounts:"
+mount | grep autofs | while read line; do
+   mount_point=$(echo $line | awk '{print $3}')
+   if ! timeout 5 ls "$mount_point" >/dev/null 2>&1; then
+      echo "  Stale mount detected: $mount_point"
    fi
-   echo
+done
+echo
    
-   # Check network connectivity to NFS servers
-   echo "Checking NFS server connectivity:"
-   for server in 192.168.1.10; do
-       echo -n "  Testing $server: "
-       if timeout 5 showmount -e $server >/dev/null 2>&1; then
-           echo "OK"
-       else
-           echo "FAILED"
-       fi
-   done
-   echo
-   
-   # Check for stale mounts
-   echo "Checking for stale mounts:"
-   mount | grep autofs | while read line; do
-       mount_point=$(echo $line | awk '{print $3}')
-       if ! timeout 5 ls "$mount_point" >/dev/null 2>&1; then
-           echo "  Stale mount detected: $mount_point"
-       fi
-   done
-   echo
-   
-   # Check AutoFS logs for errors
-   echo "Recent AutoFS errors:"
-   if [ -f /var/log/autofs.log ]; then
-       grep -i error /var/log/autofs.log | tail -10
-   else
-       journalctl -u autofs --no-pager | grep -i error | tail -10
-   fi
+# Check AutoFS logs for errors
+echo "Recent AutoFS errors:"
+if [ -f /var/log/autofs.log ]; then
+   grep -i error /var/log/autofs.log | tail -10
+else
+   journalctl -u autofs --no-pager | grep -i error | tail -10
+fi
    
    # chmod +x /usr/local/bin/autofs-troubleshoot.sh
 
@@ -317,102 +390,142 @@ PART G: CONFIGURE AUTOFS PERFORMANCE TUNING
    # vim /etc/auto.nfs
    
    # Optimized NFS mount options
-   shared -rw,soft,intr,rsize=32768,wsize=32768,timeo=14,intr 192.168.1.10:/srv/nfs4/shared
-   data -rw,soft,intr,rsize=32768,wsize=32768,timeo=14,intr 192.168.1.10:/srv/nfs4/data
+shared -rw,soft,intr,rsize=32768,wsize=32768,timeo=14,intr 20.192.207.245:/srv/nfs4/shared
+data -rw,soft,intr,rsize=32768,wsize=32768,timeo=14,intr 20.192.207.245:/srv/nfs4/data
 
 3. Create AutoFS performance monitor:
    # vim /usr/local/bin/autofs-performance.sh
    
-   #!/bin/bash
-   # AutoFS performance monitoring
+#!/bin/bash
+# AutoFS performance monitoring
    
-   echo "=== AutoFS Performance Monitor - $(date) ==="
+echo "=== AutoFS Performance Monitor - $(date) ==="
    
-   # Check mount/unmount times
-   echo "Testing mount performance:"
-   for i in {1..5}; do
-       start_time=$(date +%s.%N)
-       ls /mnt/auto/shared >/dev/null 2>&1
-       end_time=$(date +%s.%N)
-       mount_time=$(echo "$end_time - $start_time" | bc)
-       echo "  Mount test $i: ${mount_time}s"
-       sleep 2
-   done
-   echo
+# Check mount/unmount times
+echo "Testing mount performance:"
+for i in {1..5}; do
+   start_time=$(date +%s.%N)
+   ls /mnt/auto/shared >/dev/null 2>&1
+   end_time=$(date +%s.%N)
+   mount_time=$(echo "$end_time - $start_time" | bc)
+   echo "  Mount test $i: ${mount_time}s"
+   sleep 2
+done
+echo
    
-   # Check AutoFS memory usage
-   echo "AutoFS Memory Usage:"
-   ps aux | grep automount | grep -v grep | awk '{print "  PID: " $2 ", Memory: " $4 "%, RSS: " $6 "KB"}'
-   echo
+# Check AutoFS memory usage
+echo "AutoFS Memory Usage:"
+ps aux | grep automount | grep -v grep | awk '{print "  PID: " $2 ", Memory: " $4 "%, RSS: " $6 "KB"}'
+echo
    
-   # Check active mounts count
-   echo "Active AutoFS Mounts:"
-   mount | grep autofs | wc -l | awk '{print "  Count: " $1}'
+# Check active mounts count
+echo "Active AutoFS Mounts:"
+mount | grep autofs | wc -l | awk '{print "  Count: " $1}'
    
    # chmod +x /usr/local/bin/autofs-performance.sh
+   
+   # install Bc packages
+   # yum install bc -y
 
 PART H: CONFIGURE AUTOFS FOR USER HOME DIRECTORIES
 ---------------------------------------------------
+1. Prepare Home Directories on server 2
+   # mkdir -p /home/user1
+   # mkdir -p /home/user2
+   # mkdir -p /home/testuser
 
-1. Create user accounts for testing:
-   # useradd -m testuser1
-   # useradd -m testuser2
-   # useradd -m remoteuser
+   # chmod -R 755 /home/user1 /home/user2 /home/testuser
 
-2. Configure home directory automount:
+   # vim /etc/exports
+   # /home *(rw,sync,no_root_squash)
+
+   # exportfs -rav
+
+
+2. Create user accounts for testing:
+   # useradd user1
+   # useradd user2
+   # useradd testuser
+3. modify users to set on mount 
+   # usermod -d /home/remote/user1 user1
+   # usermod -d /home/remote/user2 user2
+   # usermod -d /home/remote/testuser testuser
+
+4. Configure home directory automount:
    # vim /etc/auto.home
    
-   # User home directory automounts
-   testuser1 -rw,soft,intr 192.168.1.10:/home/testuser1
-   testuser2 -rw,soft,intr 192.168.1.10:/home/testuser2
-   remoteuser -rw,soft,intr 192.168.1.10:/home/remoteuser
+# User home directory automounts  (optional Becuse we use Wildcard and wildcard cover all the user)
+user1 -rw,soft,intr 20.192.207.245:/home/remote/user1
+user2 -rw,soft,intr 20.192.207.245:/home/remote/user2
+testuser -rw,soft,intr 20.192.207.245:/home/remote/testuser
    
-   # Wildcard for all users
-   * -rw,soft,intr 192.168.1.10:/home/&
+# Wildcard for all users
+* -rw,soft,intr 20.192.207.245:/home/&
 
-3. Configure PAM for AutoFS home directories:
+5. Configure PAM for AutoFS home directories:
    # vim /etc/pam.d/system-auth
    
    # Add after other session modules
    session optional pam_mkhomedir.so skel=/etc/skel umask=0022
 
-4. Test user home directory automounting:
-   # su - testuser1
+6. Test user home directory automounting:
+   # su - user1 
    $ pwd
+   $ ls -la
+   $ exit
+
+   # su - user2 
+   $ pwd 
+   $ ls -la
+   $ exit
+
+   # su - testuser 
+   $ pwd 
    $ ls -la
    $ exit
 
 PART I: CONFIGURE AUTOFS WITH SYSTEMD INTEGRATION
 --------------------------------------------------
+1. Prepare NFS directories for custom map on server 2
 
-1. Create custom AutoFS service:
-   # vim /etc/systemd/system/autofs-custom.service
+   # mkdir -p /test
+   # mkdir -p /tmp/shared
+   # chmod -R 777 /test /tmp/shared
    
-   [Unit]
-   Description=Custom AutoFS automounter
-   After=network.target ypbind.service sssd.service
-   Wants=network-online.target rpc-statd.service rpcbind.service
-   
-   [Service]
-   Type=forking
-   PIDFile=/var/run/autofs-custom.pid
-   ExecStart=/usr/sbin/automount -f -v --pid-file=/var/run/autofs-custom.pid /custom /etc/auto.custom
-   ExecReload=/bin/kill -HUP $MAINPID
-   TimeoutSec=180
-   
-   [Install]
-   WantedBy=multi-user.target
+   # vim /etc/exports
+   # /test       *(rw,sync,no_root_squash)
+   # /tmp/shared *(rw,sync,no_root_squash)
+
+   # exportfs -rav
 
 2. Create custom AutoFS map:
    # vim /etc/auto.custom
    
    # Custom automount map
-   test -rw,soft,intr 192.168.1.10:/test
-   temp -rw,soft,intr 192.168.1.10:/tmp/shared
+   test -rw,soft,intr 20.192.207.245:/test
+   temp -rw,soft,intr 20.192.207.245:/tmp/shared
 
-3. Enable custom AutoFS service:
-   # systemctl enable autofs-custom
-   # systemctl start autofs-custom
+3. Add custom map to AutoFS master map
+
+   # mkdir -p /custom
+   # vim /etc/auto.master
+
+4. Enable custom AutoFS service:
+   # systemctl enable autofs
+   # systemctl start autofs
+
+
+📝 NOTE (What we changed & why)
+# NOTE:
+# We removed the old "autofs-custom.service" method because it manually starts
+# the automount daemon using "automount -f", which runs in foreground mode and
+# causes systemd to hang or hit a timeout. It also creates a second automount
+# process that conflicts with the default autofs.service.
+#
+# Instead, we integrated the custom map into /etc/auto.master and let the
+# existing systemd-managed autofs.service handle all maps. This is the
+# standard, stable, and RHCE-recommended approach.
+
 
 PART J: START AUTOFS AND TESTING
 ---------------------------------
@@ -432,12 +545,12 @@ PART J: START AUTOFS AND TESTING
    # mount | grep shared  # Should be unmounted
 
 4. Test home directory automounting:
-   # ls /home/remote/testuser1
-   # su - testuser1 -c "pwd"
+   # ls /home/remote/user1
+   # su - user1 -c "pwd"
 
 5. Test AutoFS with different users:
-   # su - testuser1 -c "ls /home/remote/testuser1"
-   # su - testuser2 -c "ls /home/remote/testuser2"
+   # su - user1 -c "ls /home/remote/user1"
+   # su - user2 -c "ls /home/remote/user2"
 
 PART K: CONFIGURE AUTOFS MONITORING AND MAINTENANCE
 ----------------------------------------------------
@@ -445,9 +558,9 @@ PART K: CONFIGURE AUTOFS MONITORING AND MAINTENANCE
 1. Configure AutoFS log rotation:
    # vim /etc/logrotate.d/autofs
    
-   /var/log/autofs.log {
-       weekly
-       missingok
+/var/log/autofs.log {
+   weekly
+   missingok
        rotate 12
        compress
        delaycompress
@@ -461,30 +574,30 @@ PART K: CONFIGURE AUTOFS MONITORING AND MAINTENANCE
 2. Create AutoFS maintenance script:
    # vim /usr/local/bin/autofs-maintenance.sh
    
-   #!/bin/bash
-   # AutoFS maintenance script
+#!/bin/bash
+# AutoFS maintenance script
    
-   echo "Starting AutoFS maintenance at $(date)"
+echo "Starting AutoFS maintenance at $(date)"
    
-   # Clean up stale mounts
-   echo "Cleaning up stale mounts..."
-   mount | grep autofs | while read line; do
-       mount_point=$(echo $line | awk '{print $3}')
-       if ! timeout 5 ls "$mount_point" >/dev/null 2>&1; then
-           echo "Unmounting stale mount: $mount_point"
-           umount "$mount_point" 2>/dev/null
-       fi
-   done
-   
-   # Reload AutoFS configuration
-   echo "Reloading AutoFS configuration..."
-   systemctl reload autofs
-   
-   # Check AutoFS status
-   if ! systemctl is-active autofs >/dev/null 2>&1; then
-       echo "AutoFS service is not running, starting..."
-       systemctl start autofs
+# Clean up stale mounts
+echo "Cleaning up stale mounts..."
+mount | grep autofs | while read line; do
+   mount_point=$(echo $line | awk '{print $3}')
+   if ! timeout 5 ls "$mount_point" >/dev/null 2>&1; then
+      echo "Unmounting stale mount: $mount_point"
+      umount "$mount_point" 2>/dev/null
    fi
+done
+   
+# Reload AutoFS configuration
+echo "Reloading AutoFS configuration..."
+systemctl reload autofs
+   
+# Check AutoFS status
+if ! systemctl is-active autofs >/dev/null 2>&1; then
+   echo "AutoFS service is not running, starting..."
+   systemctl start autofs
+fi
    
    echo "AutoFS maintenance completed at $(date)"
    
@@ -520,6 +633,11 @@ PART L: TESTING AND VALIDATION
    # ls /projects/project1  # Should auto-create mount
    # ls /home/remote/newuser  # Should auto-create mount
 
+# NOTE:
+# Wildcard mounts work only if the corresponding directories exist on the NFS server.
+# Ensure /projects/project1 and /home/newuser are created and exported on Server 20.192.207.245.
+
+
 TROUBLESHOOTING COMMANDS:
 -------------------------
 # systemctl status autofs
@@ -540,14 +658,14 @@ EXPECTED RESULTS:
 
 VALIDATION CHECKLIST:
 ---------------------
-□ AutoFS service running
-□ Master map configured correctly
-□ NFS automounts working
-□ Home directory automounts functional
-□ Timeout settings working
-□ Security features configured
-□ Performance tuning applied
-□ Monitoring scripts operational
+□ AutoFS service running                           Wokring
+□ Master map configured correctly                  Wokring
+□ NFS automounts working                           Wokring
+□ Home directory automounts functional             Wokring
+□ Timeout settings working                         Wokring
+□ Security features configured                     Wokring
+□ Performance tuning applied                       Wokring
+□ Monitoring scripts operational                   Wokring
 
 CLEANUP:
 --------
