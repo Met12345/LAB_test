@@ -26,6 +26,12 @@ PART A: CONFIGURE NFSV4 SERVER
    # yum install nfs-utils rpcbind -y
    # systemctl enable nfs-server rpcbind nfs-lock nfs-idmap
 
+// Error: nfs-lock.service and nfs-idmap.service does NOT exist. These service names existed in RHEL 6/7.
+// So instead of those use this in RHEL 9
+   # systemctl enable --now rpcbind
+   # systemctl enable --now nfs-server
+   # systemctl status nfs-server
+
 2. Configure NFSv4 domain:
    # vim /etc/idmapd.conf
    
@@ -48,12 +54,12 @@ PART A: CONFIGURE NFSV4 SERVER
    # vim /etc/exports
    
    # NFSv4 root
-   /srv/nfs4 192.168.1.0/24(rw,sync,fsid=0,crossmnt,no_subtree_check)
+   /srv/nfs4 20.192.0.0/16(rw,sync,fsid=0,crossmnt,no_subtree_check)
    
    # NFSv4 exports
-   /srv/nfs4/shared 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash)
-   /srv/nfs4/home 192.168.1.0/24(rw,sync,no_subtree_check,root_squash)
-   /srv/nfs4/data 192.168.1.0/24(rw,sync,no_subtree_check,all_squash,anonuid=1001,anongid=1001)
+   /srv/nfs4/shared 20.192.0.0/16(rw,sync,no_subtree_check,no_root_squash)
+   /srv/nfs4/home 20.192.0.0/16(rw,sync,no_subtree_check,root_squash)
+   /srv/nfs4/data 20.192.0.0/16(rw,sync,no_subtree_check,all_squash,anonuid=1001,anongid=1001)
 
 5. Bind mount existing directories:
    # mkdir -p /export/shared /export/home /export/data
@@ -71,6 +77,10 @@ PART A: CONFIGURE NFSV4 SERVER
 
 PART B: CONFIGURE NFS SECURITY
 -------------------------------
+// Install firewall first before proceeding
+   # yum install -y firewalld
+   # systemctl enable --now firewalld
+   # systemctl status firewalld
 
 1. Configure firewall for NFS:
    # firewall-cmd --permanent --add-service=nfs
@@ -89,7 +99,7 @@ PART B: CONFIGURE NFS SECURITY
    # vim /etc/exports
    
    # Kerberos secured exports
-   /srv/nfs4/secure 192.168.1.0/24(rw,sync,sec=krb5p,no_subtree_check)
+   /srv/nfs4/secure 20.192.0.0/16(rw,sync,sec=krb5p,no_subtree_check)
 
 4. Configure NFS server for Kerberos:
    # vim /etc/sysconfig/nfs
@@ -142,11 +152,9 @@ PART D: START NFS SERVICES
 ---------------------------
 
 1. Start and enable NFS services:
-   # systemctl start rpcbind
-   # systemctl start nfs-server
-   # systemctl start nfs-lock
-   # systemctl start nfs-idmap
-   # systemctl enable rpcbind nfs-server nfs-lock nfs-idmap
+   # systemctl enable --now rpcbind
+   # systemctl enable --now nfs-server
+   # systemctl status nfs-server
 
 2. Export NFS filesystems:
    # exportfs -av
@@ -162,8 +170,10 @@ PART E: CONFIGURE NFS CLIENTS
 
 1. Install NFS client packages:
    # yum install nfs-utils -y
-   # systemctl enable rpcbind nfs-lock nfs-idmap
-
+   # systemctl enable --now rpcbind
+   # systemctl enable --now nfs-client.target
+   # systemctl status nfs-client.target
+   
 2. Configure NFSv4 client:
    # vim /etc/idmapd.conf
    
@@ -176,17 +186,17 @@ PART E: CONFIGURE NFS CLIENTS
    # mkdir -p /mnt/nfs4/data
 
 4. Test NFSv4 mounts:
-   # mount -t nfs4 192.168.1.10:/ /mnt/nfs4
+   # mount -t nfs4 20.192.234.134:/ /mnt/nfs4
    # ls -la /mnt/nfs4/
-   # mount -t nfs4 192.168.1.10:/shared /mnt/nfs4/shared
-   # mount -t nfs4 192.168.1.10:/home /mnt/nfs4/home
+   # mount -t nfs4 20.192.234.134:/shared /mnt/nfs4/shared
+   # mount -t nfs4 20.192.234.134:/home /mnt/nfs4/home
 
 5. Configure persistent mounts:
    # vim /etc/fstab
    
-   192.168.1.10:/shared /mnt/nfs4/shared nfs4 defaults,_netdev 0 0
-   192.168.1.10:/home /mnt/nfs4/home nfs4 defaults,_netdev 0 0
-   192.168.1.10:/data /mnt/nfs4/data nfs4 defaults,_netdev 0 0
+   20.192.234.134:/shared /mnt/nfs4/shared nfs4 defaults,_netdev 0 0
+   20.192.234.134:/home /mnt/nfs4/home nfs4 defaults,_netdev 0 0
+   20.192.234.134:/data /mnt/nfs4/data nfs4 defaults,_netdev 0 0
 
 PART F: CONFIGURE ADVANCED NFS FEATURES
 ----------------------------------------
@@ -195,18 +205,28 @@ PART F: CONFIGURE ADVANCED NFS FEATURES
    # vim /etc/exports
    
    # Add quota options
-   /srv/nfs4/home 192.168.1.0/24(rw,sync,no_subtree_check,usrquota,grpquota)
+   /srv/nfs4/home 20.192.0.0/16(rw,sync,no_subtree_check,usrquota,grpquota)
 
 2. Enable quotas on NFS filesystem:
    # quotacheck -cum /export/home
    # quotaon /export/home
    # setquota -u testuser 100000 120000 0 0 /export/home
 
+   // Enabling Quotas step would return error. To cross verify write the below command:
+    # mount | grep /export/home 
+   // If the above command returns nothing then we can conclude /export/home is NOT a separate mounted filesystem.
+   // Therefore, we cannot run the above 2 steps as "Quotas require a dedicated filesystem. Directories and bind mounts do not qualify."
+   // This lab does not require NFS quotas. Implementing quotas would require: new disk / partition, new filesystem and fstab changes. 
+
 3. Configure NFS access control lists:
    # vim /etc/exports
-   
+
+   // Create a path to export 
+   # mkdir -p /export/restricted /srv/nfs4/restricted
+   # mount --bind /export/restricted /srv/nfs4/restricted
+      
    # Host-based access control
-   /srv/nfs4/restricted 192.168.1.20(rw,sync,no_subtree_check) 192.168.1.21(ro,sync,no_subtree_check)
+   /srv/nfs4/restricted 20.192.201.1(rw,sync,no_subtree_check) 20.192.203.169(ro,sync,no_subtree_check)
 
 4. Configure NFS with LDAP integration:
    # vim /etc/idmapd.conf
@@ -261,6 +281,9 @@ PART G: IMPLEMENT NFS MONITORING
    
    # chmod +x /usr/local/bin/nfs-monitor.sh
 
+   # /usr/local/bin/nfs-monitor.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-612 (so use that instead). 
+
 2. Create NFS performance monitor:
    # vim /usr/local/bin/nfs-performance.sh
    
@@ -289,6 +312,9 @@ PART G: IMPLEMENT NFS MONITORING
    dmesg | grep -i nfs | tail -10
    
    # chmod +x /usr/local/bin/nfs-performance.sh
+
+   # /usr/local/bin/nfs-performance.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-651 (so use that instead). 
 
 3. Create NFS client monitoring:
    # vim /usr/local/bin/nfs-client-monitor.sh
@@ -321,6 +347,9 @@ PART G: IMPLEMENT NFS MONITORING
    
    # chmod +x /usr/local/bin/nfs-client-monitor.sh
 
+   # /usr/local/bin/nfs-client-monitor.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-679 (so use that instead). 
+
 PART H: CONFIGURE NFS HIGH AVAILABILITY
 ----------------------------------------
 
@@ -351,11 +380,14 @@ PART H: CONFIGURE NFS HIGH AVAILABILITY
    
    # chmod +x /usr/local/bin/nfs-failover.sh
 
+   # /usr/local/bin/nfs-failover.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-709 (so use that instead). 
+
 2. Configure NFS with shared storage:
    # vim /etc/exports
    
    # Shared storage exports (for cluster)
-   /shared/cluster 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash)
+   /shared/cluster 20.192.0.0/16(rw,sync,no_subtree_check,no_root_squash)
 
 PART I: IMPLEMENT NFS SECURITY HARDENING
 -----------------------------------------
@@ -364,7 +396,7 @@ PART I: IMPLEMENT NFS SECURITY HARDENING
    # vim /etc/exports
    
    # Secure exports with specific options
-   /srv/nfs4/secure 192.168.1.0/24(rw,sync,sec=sys:krb5:krb5i:krb5p,no_subtree_check)
+   /srv/nfs4/secure 20.192.0.0/16(rw,sync,sec=sys:krb5:krb5i:krb5p,no_subtree_check)
 
 2. Create NFS security audit script:
    # vim /usr/local/bin/nfs-security-audit.sh
@@ -401,6 +433,9 @@ PART I: IMPLEMENT NFS SECURITY HARDENING
    ls -ld /srv/nfs4/*
    
    # chmod +x /usr/local/bin/nfs-security-audit.sh
+
+   # /usr/local/bin/nfs-security-audit.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-735 (so use that instead). 
 
 PART J: CONFIGURE NFS BACKUP AND RECOVERY
 ------------------------------------------
@@ -449,6 +484,9 @@ PART J: CONFIGURE NFS BACKUP AND RECOVERY
    
    # chmod +x /usr/local/bin/nfs-backup.sh
 
+   # /usr/local/bin/nfs-backup.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-770 (so use that instead). 
+
 2. Create NFS restore script:
    # vim /usr/local/bin/nfs-restore.sh
    
@@ -487,12 +525,15 @@ PART J: CONFIGURE NFS BACKUP AND RECOVERY
    
    # chmod +x /usr/local/bin/nfs-restore.sh
 
+   # /usr/local/bin/nfs-restore.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-814 (so use that instead). 
+
 PART K: TESTING AND VALIDATION
 -------------------------------
 
 1. Test NFSv4 functionality:
    # showmount -e 192.168.1.10
-   # mount -t nfs4 192.168.1.10:/shared /mnt/test
+   # mount -t nfs4 20.192.234.134:/shared /mnt/test
    # echo "test" > /mnt/test/nfs-test.txt
    # ls -la /mnt/test/
 
@@ -552,3 +593,258 @@ CLEANUP:
 # umount /srv/nfs4/*
 # rm /usr/local/bin/nfs-*.sh
 # crontab -e  # Remove NFS monitoring entries
+
+ADDED/UPDATED LINES - 
+---------------------------------------------------------------------------------------------
+ 29-33, 80-83, 154-157, 173-175, 215-219, 224-226, 602-849
+
+
+MY NEW CREATED .sh files
+--------------------------------------------------------------------------------------------
+Reasons of creation of new .sh files to resolve errors:
+a. Use of Deprecated or Non-Existent Services
+b. Unhandled Command Errors and Noisy Output
+c. Assumptions About System States
+d. Backup and Restore Command Failures
+e. Maintaining Script Integrity
+--------------------------------------------------------------------------------------------
+
+File-1.  vim /usr/local/bin/nfs-monitor.sh
+
+#!/bin/bash
+# NFS server monitoring script
+
+echo "=== NFS Server Status - $(date) ==="
+
+# Check NFS services
+echo "NFS Services Status:"
+for service in rpcbind nfs-server; do
+    if systemctl is-active $service >/dev/null 2>&1; then
+        echo "  $service: Active"
+    else
+        echo "  $service: Inactive"
+    fi
+done
+echo
+
+# Check exports
+echo "Active NFS Exports:"
+exportfs -v
+echo
+
+# Check connected clients
+echo "Connected NFS Clients:"
+ss -tn state established '( dport = :2049 or sport = :2049 )' | grep -v "Local Address"
+echo
+
+# Check NFS statistics
+echo "NFS Server Statistics:"
+nfsstat -s | head -10
+echo
+
+# Check mount points usage
+echo "NFS Export Usage:"
+df -h /srv/nfs4/* 2>/dev/null
+
+---------------------------------------------------------------------------------------------
+
+File-2.  vim /usr/local/bin/nfs-performance.sh
+
+#!/bin/bash
+# NFS performance monitoring
+
+echo "=== NFS Performance Monitor - $(date) ==="
+
+# NFS I/O statistics
+echo "NFS I/O Statistics:"
+nfsiostat 1 1 2>/dev/null | tail -20
+echo
+
+# Network statistics for NFS
+echo "Network Statistics (NFS ports):"
+ss -s
+echo
+
+# RPC statistics
+echo "RPC Statistics:"
+rpcinfo -p localhost | grep nfs
+echo
+
+# Check for NFS errors
+echo "Recent NFS Errors:"
+dmesg 2>/dev/null | grep -i nfs | tail -10
+
+---------------------------------------------------------------------------------------------
+
+File-3.  vim /usr/local/bin/nfs-client-monitor.sh
+
+#!/bin/bash
+# NFS client monitoring script
+
+echo "=== NFS Client Status - $(date) ==="
+
+# Check mounted NFS filesystems
+echo "Mounted NFS Filesystems:"
+mount | grep nfs 2>/dev/null
+echo
+
+# Check NFS mount status
+echo "NFS Mount Status:"
+for mount in $(mount | grep nfs4 2>/dev/null | awk '{print $3}'); do
+    echo -n "  $mount: "
+    if timeout 5 ls $mount >/dev/null 2>&1; then
+        echo "OK"
+    else
+        echo "STALE/ERROR"
+    fi
+done
+echo
+
+# NFS client statistics
+echo "NFS Client Statistics:"
+nfsstat -c 2>/dev/null | head -10
+
+---------------------------------------------------------------------------------------------
+
+File-4.  vim /usr/local/bin/nfs-failover.sh
+
+#!/bin/bash
+# Basic NFS failover script
+
+PRIMARY_SERVER="192.168.1.10"
+BACKUP_SERVER="192.168.1.11"
+MOUNT_POINT="/mnt/nfs4/shared"
+
+# Check if primary server is available
+if timeout 5 showmount -e $PRIMARY_SERVER >/dev/null 2>&1; then
+    echo "Primary NFS server is available"
+    # Ensure mounted from primary
+    if ! mount 2>/dev/null | grep -q "$PRIMARY_SERVER.*$MOUNT_POINT"; then
+        umount $MOUNT_POINT 2>/dev/null
+        mount -t nfs4 $PRIMARY_SERVER:/shared $MOUNT_POINT 2>/dev/null
+    fi
+else
+    echo "Primary NFS server unavailable, failing over to backup"
+    # Mount from backup server
+    umount $MOUNT_POINT 2>/dev/null
+    mount -t nfs4 $BACKUP_SERVER:/shared $MOUNT_POINT 2>/dev/null
+fi
+
+---------------------------------------------------------------------------------------------
+
+File-5.  vim /usr/local/bin/nfs-security-audit.sh
+
+#!/bin/bash
+# NFS security audit script
+
+echo "=== NFS Security Audit - $(date) ==="
+
+# Check export permissions
+echo "Export Security Analysis:"
+exportfs -v 2>/dev/null | while read line; do
+    if echo "$line" | grep -q "no_root_squash"; then
+        echo "WARNING: no_root_squash found in: $line"
+    fi
+    if echo "$line" | grep -q "rw.*\*"; then
+        echo "WARNING: World-writable export: $line"
+    fi
+done
+echo
+
+# Check for insecure options
+echo "Checking for insecure export options:"
+grep -E "(insecure|no_root_squash)" /etc/exports 2>/dev/null
+echo
+
+# Check NFS service versions
+echo "NFS Service Versions:"
+rpcinfo -p localhost 2>/dev/null | grep nfs
+echo
+
+# Check file permissions on exports
+echo "Export Directory Permissions:"
+ls -ld /srv/nfs4/* 2>/dev/null
+
+---------------------------------------------------------------------------------------------
+
+File-6.  vim /usr/local/bin/nfs-backup.sh
+
+#!/bin/bash
+# NFS data backup script
+
+BACKUP_DIR="/var/backups/nfs"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+mkdir -p $BACKUP_DIR 2>/dev/null
+
+echo "Starting NFS backup at $(date)"
+
+# Backup NFS configuration
+cp /etc/exports $BACKUP_DIR/exports.$DATE 2>/dev/null
+cp /etc/idmapd.conf $BACKUP_DIR/idmapd.conf.$DATE 2>/dev/null
+
+# Backup NFS data
+for export in /export/shared /export/home /export/data; do
+    if [ -d "$export" ]; then
+        export_name=$(basename $export)
+        tar -czf $BACKUP_DIR/nfs_${export_name}_$DATE.tar.gz \
+            -C $(dirname $export) $(basename $export) 2>/dev/null
+        echo "Backed up $export"
+    fi
+done
+
+# Create backup manifest
+{
+    echo "NFS Backup Manifest - $DATE"
+    echo "================================"
+    echo "Backup location: $BACKUP_DIR"
+    echo "Backup date: $(date)"
+    echo "Exports backed up:"
+    exportfs -v 2>/dev/null
+} > $BACKUP_DIR/manifest_$DATE.txt
+
+echo "NFS backup completed at $(date)"
+
+# Remove old backups (keep 30 days)
+find $BACKUP_DIR -name "*.tar.gz" -mtime +30 -delete 2>/dev/null
+find $BACKUP_DIR -name "*.txt" -mtime +30 -delete 2>/dev/null
+
+---------------------------------------------------------------------------------------------
+
+File-7.  vim /usr/local/bin/nfs-restore.sh
+
+#!/bin/bash
+# NFS data restore script
+
+BACKUP_FILE="$1"
+RESTORE_PATH="$2"
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <backup_file.tar.gz> <restore_path>"
+    exit 1
+fi
+
+if [ ! -f "$BACKUP_FILE" ]; then
+    echo "Backup file not found: $BACKUP_FILE"
+    exit 1
+fi
+
+echo "Restoring NFS data from $BACKUP_FILE to $RESTORE_PATH"
+
+# Create restore directory
+mkdir -p "$RESTORE_PATH" 2>/dev/null
+
+# Extract backup
+tar -xzf "$BACKUP_FILE" -C "$RESTORE_PATH" 2>/dev/null
+
+if [ $? -eq 0 ]; then
+    echo "NFS data restored successfully"
+    echo "Restored to: $RESTORE_PATH"
+    ls -la "$RESTORE_PATH" 2>/dev/null
+else
+    echo "NFS restore failed"
+    exit 1
+fi
+
+---------------------------------------------------------------------------------------------
+
