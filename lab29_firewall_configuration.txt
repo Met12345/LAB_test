@@ -233,6 +233,9 @@ PART H: CREATE FIREWALL MANAGEMENT SCRIPTS
    
    # chmod +x /usr/local/bin/firewall-status.sh
 
+   # /usr/local/bin/firewall-status.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-558 (so use that instead).
+
 2. Create firewall backup script:
    # vim /usr/local/bin/backup-firewall.sh
    
@@ -272,6 +275,9 @@ PART H: CREATE FIREWALL MANAGEMENT SCRIPTS
    
    # chmod +x /usr/local/bin/backup-firewall.sh
 
+   # /usr/local/bin/backup-firewall.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-602 (so use that instead).
+
 3. Create firewall testing script:
    # vim /usr/local/bin/test-firewall.sh
    
@@ -306,6 +312,9 @@ PART H: CREATE FIREWALL MANAGEMENT SCRIPTS
    fi
    
    # chmod +x /usr/local/bin/test-firewall.sh
+
+   # /usr/local/bin/test-firewall.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-640 (so use that instead).
 
 PART I: CONFIGURE LOGGING AND MONITORING
 -----------------------------------------
@@ -346,6 +355,9 @@ PART I: CONFIGURE LOGGING AND MONITORING
    
    # chmod +x /usr/local/bin/monitor-firewall-logs.sh
 
+   # /usr/local/bin/monitor-firewall.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-674 (so use that instead).
+
 4. Create security alert script:
    # vim /usr/local/bin/firewall-security-alert.sh
    
@@ -372,6 +384,9 @@ PART I: CONFIGURE LOGGING AND MONITORING
    fi
    
    # chmod +x /usr/local/bin/firewall-security-alert.sh
+
+   # /usr/local/bin/firewall-security-alert.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-702 (so use that instead).
 
 PART J: APPLY AND TEST FIREWALL RULES
 --------------------------------------
@@ -454,6 +469,9 @@ PART L: PERFORMANCE AND OPTIMIZATION
    
    # chmod +x /usr/local/bin/firewall-performance.sh
 
+   # /usr/local/bin/firewall-performance.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-728 (so use that instead).
+
 3. Schedule monitoring:
    # crontab -e
    # Add: */15 * * * * /usr/local/bin/firewall-security-alert.sh
@@ -521,4 +539,221 @@ CLEANUP:
 
 UPDATED LINE 
 -----------
-- Lines added at 83,84,116,117,118,119,164,165,166
+- Lines added at 83,84,116,117,118,119,164,165,166,544-756
+
+MY NEW CREATED .sh files
+--------------------------------------------------------------------------------------------------------
+Reasons of creation of new .sh files to resolve errors:
+a.) Incorrect shebang placement fixed by moving #!/bin/bash to the first line
+b.) Leading indentation errors removed that caused scripts to fail at runtime
+c.) Scripts not executable resolved by ensuring proper execution format
+d.) Shell syntax issues cleaned so scripts pass bash -n validation
+e.) Improper script start/end structure corrected for POSIX compliance
+f.) Execution failures due to formatting eliminated (spaces before commands)
+g.) Inconsistent script parsing fixed by aligning commands correctly
+h.) Runtime errors from malformed blocks prevented by proper brace alignment
+i.) Missing end-of-file newline corrected to avoid unexpected behavior
+--------------------------------------------------------------------------------------------
+
+File-1.  vim /usr/local/bin/firewall-status.sh
+
+#!/bin/bash
+# Firewall status checker
+
+echo "=== Firewall Status Report ==="
+echo "Date: $(date)"
+echo
+
+# Check which firewall is active
+if systemctl is-active firewalld >/dev/null 2>&1; then
+    echo "Active Firewall: firewalld"
+    echo
+    echo "Default Zone: $(firewall-cmd --get-default-zone)"
+    echo "Active Zones:"
+    firewall-cmd --get-active-zones
+    echo
+    echo "Allowed Services:"
+    firewall-cmd --list-services
+    echo
+    echo "Allowed Ports:"
+    firewall-cmd --list-ports
+    echo
+    echo "Rich Rules:"
+    firewall-cmd --list-rich-rules
+
+elif systemctl is-active iptables >/dev/null 2>&1; then
+    echo "Active Firewall: iptables"
+    echo
+    echo "INPUT Chain Rules:"
+    iptables -L INPUT -n --line-numbers
+    echo
+    echo "FORWARD Chain Rules:"
+    iptables -L FORWARD -n --line-numbers
+    echo
+    echo "OUTPUT Chain Rules:"
+    iptables -L OUTPUT -n --line-numbers
+
+else
+    echo "No firewall service is active!"
+fi
+
+--------------------------------------------------------------------------------------------
+
+File-2.  vim /usr/local/bin/backup-firewall.sh
+
+#!/bin/bash
+# Backup firewall configuration
+
+BACKUP_DIR="/var/backups/firewall"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+mkdir -p $BACKUP_DIR
+
+if systemctl is-active firewalld >/dev/null 2>&1; then
+    echo "Backing up firewalld configuration..."
+
+    # Backup firewalld configuration
+    tar -czf $BACKUP_DIR/firewalld_backup_$DATE.tar.gz \
+        /etc/firewalld/ \
+        /usr/lib/firewalld/
+
+    # Export current configuration
+    firewall-cmd --list-all-zones > $BACKUP_DIR/firewalld_zones_$DATE.txt
+    firewall-cmd --list-all > $BACKUP_DIR/firewalld_default_$DATE.txt
+
+elif systemctl is-active iptables >/dev/null 2>&1; then
+    echo "Backing up iptables configuration..."
+
+    # Backup iptables rules
+    iptables-save > $BACKUP_DIR/iptables_rules_$DATE.txt
+    cp /etc/sysconfig/iptables $BACKUP_DIR/iptables_config_$DATE.txt
+
+fi
+
+echo "Firewall backup completed: $BACKUP_DIR"
+
+# Remove old backups (keep 30 days)
+find $BACKUP_DIR -name "*backup*" -mtime +30 -delete
+
+--------------------------------------------------------------------------------------------
+
+File-3.  vim /usr/local/bin/test-firewall.sh
+
+#!/bin/bash
+# Test firewall rules
+
+TARGET_HOST="${1:-192.168.1.10}"
+
+echo "=== Firewall Rule Testing ==="
+echo "Target: $TARGET_HOST"
+echo "Date: $(date)"
+echo
+
+# Test common ports
+PORTS=(22 80 443 3306 5432 8080)
+
+for port in "${PORTS[@]}"; do
+    echo -n "Testing port $port: "
+    if timeout 3 bash -c "</dev/tcp/$TARGET_HOST/$port" 2>/dev/null; then
+        echo "OPEN"
+    else
+        echo "CLOSED/FILTERED"
+    fi
+done
+
+echo
+echo "Testing ICMP (ping):"
+if ping -c 1 -W 3 $TARGET_HOST >/dev/null 2>&1; then
+    echo "ICMP: ALLOWED"
+else
+    echo "ICMP: BLOCKED"
+fi
+
+--------------------------------------------------------------------------------------------
+
+File-4.  vim /usr/local/bin/monitor-firewall-logs.sh
+
+#!/bin/bash
+# Monitor firewall logs
+
+LOG_FILE="/var/log/messages"
+
+echo "=== Firewall Log Monitor ==="
+echo "Date: $(date)"
+echo
+
+# Recent firewall denials
+echo "Recent denied connections (last 50):"
+grep "$(date '+%b %d')" $LOG_FILE | grep -i "reject\|drop\|deny" | tail -50
+
+echo
+echo "Top 10 blocked source IPs:"
+grep "$(date '+%b %d')" $LOG_FILE | grep -i "reject\|drop" | \
+grep -oE "SRC=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | \
+cut -d= -f2 | sort | uniq -c | sort -nr | head -10
+
+echo
+echo "Top 10 blocked destination ports:"
+grep "$(date '+%b %d')" $LOG_FILE | grep -i "reject\|drop" | \
+grep -oE "DPT=[0-9]+" | cut -d= -f2 | sort | uniq -c | sort -nr | head -10
+
+--------------------------------------------------------------------------------------------
+
+File-5.  vim /usr/local/bin/firewall-security-alert.sh
+
+#!/bin/bash
+# Firewall security alerting
+
+LOG_FILE="/var/log/messages"
+ALERT_EMAIL="security@example.com"
+THRESHOLD=100
+
+# Count recent denied connections
+DENIED_COUNT=$(grep "$(date '+%b %d')" $LOG_FILE | grep -c -i "reject\|drop")
+
+if [ $DENIED_COUNT -gt $THRESHOLD ]; then
+    {
+        echo "High number of firewall denials detected: $DENIED_COUNT"
+        echo "Date: $(date)"
+        echo
+        echo "Top blocked IPs:"
+        grep "$(date '+%b %d')" $LOG_FILE | grep -i "reject\|drop" | \
+        grep -oE "SRC=[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | \
+        cut -d= -f2 | sort | uniq -c | sort -nr | head -5
+    } | mail -s "Firewall Security Alert" $ALERT_EMAIL
+fi
+
+--------------------------------------------------------------------------------------------
+
+File-6.  vim /usr/local/bin/firewall-performance.sh
+
+#!/bin/bash
+# Monitor firewall performance
+
+echo "=== Firewall Performance Monitor ==="
+echo "Date: $(date)"
+echo
+
+# Check firewall rule count
+if systemctl is-active firewalld >/dev/null 2>&1; then
+    RULE_COUNT=$(firewall-cmd --list-all | wc -l)
+    echo "Firewalld rules: $RULE_COUNT"
+
+elif systemctl is-active iptables >/dev/null 2>&1; then
+    RULE_COUNT=$(iptables -L | grep -c "^Chain\|^target")
+    echo "Iptables rules: $RULE_COUNT"
+fi
+
+# Check system load
+echo "System load: $(uptime | awk -F'load average:' '{print $2}')"
+
+# Check network connections
+echo "Active connections: $(netstat -an | grep ESTABLISHED | wc -l)"
+
+# Check dropped packets
+echo "Dropped packets: $(cat /proc/net/dev | awk '{sum+=$5} END {print sum}')"
+
+--------------------------------------------------------------------------------------------
+
+
+
