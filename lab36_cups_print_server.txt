@@ -14,9 +14,9 @@ LAB SCENARIO:
 Set up a centralized print server using CUPS to manage network printers, configure print queues, implement access controls, and provide printing services to network clients.
 
 EQUIPMENT NEEDED:
-- RHEL system (server: 192.168.1.10)
-- Network printer (192.168.1.50) or USB printer
-- Client systems for testing (192.168.1.20-30)
+- RHEL system (server: 20.192.255.178)
+- Client systems for testing (20.192.213.99)
+- Network printer (20.192.250.238) or USB printer
 
 LAB TASKS:
 
@@ -47,26 +47,27 @@ PART A: INSTALL AND CONFIGURE CUPS
    
    # Location directives
    <Location />
-     Order allow,deny
      Allow localhost
-     Allow 192.168.1.*
+     Allow 20.192.0.0/16
    </Location>
    
    <Location /admin>
-     Order allow,deny
      Allow localhost
-     Allow 192.168.1.*
+     Allow 20.192.0.0/16
    </Location>
    
    <Location /admin/conf>
      AuthType Default
      Require user @SYSTEM
-     Order allow,deny
      Allow localhost
-     Allow 192.168.1.*
+     Allow 20.192.0.0/16
    </Location>
 
-3. Configure firewall for CUPS:
+3. Install and Configure firewall for CUPS:   
+   # yum install -y firewalld
+   # systemctl enable --now firewalld
+   # systemctl status firewalld
+
    # firewall-cmd --add-service=ipp --permanent
    # firewall-cmd --add-service=ipp-client --permanent
    # firewall-cmd --add-port=631/tcp --permanent
@@ -80,12 +81,12 @@ PART B: ADD NETWORK PRINTERS
 -----------------------------
 
 1. Add network printer via command line:
-   # lpadmin -p NetworkPrinter1 -E -v ipp://192.168.1.50/ipp/print -m everywhere
+   # lpadmin -p NetworkPrinter1 -E -v ipp://20.192.250.238/ipp/print -m everywhere
    # lpadmin -p NetworkPrinter1 -D "Network Printer 1" -L "Office Floor 1"
 
 2. Add printer with specific driver:
    # lpinfo -m | grep -i hp
-   # lpadmin -p HPLaserJet -E -v ipp://192.168.1.51/ipp/print -m drv:///hp/hpcups.drv/hp-laserjet_p3005-pcl3.ppd
+   # lpadmin -p HPLaserJet -E -v ipp://20.192.250.238/ipp/print -m drv:///hp/hpcups.drv/hp-laserjet_p3005-pcl3.ppd
 
 3. Add USB printer:
    # lpinfo -v | grep usb
@@ -95,19 +96,38 @@ PART B: ADD NETWORK PRINTERS
    # lpadmin -d NetworkPrinter1
    # lpstat -d
 
+// Errors will be encountered in some above steps
+// Error Summary - The printer endpoint (20.192.250.238) is NOT reachable on IPP (631). 
+// Reason of Error - NOT have a real network printer thats why “printer IP” is often fake / unreachable.
+
+// To cleanup the error files and bring the system back to normal
+
+   # lpadmin -x HPLaserJet
+   # lpadmin -x USBPrinter
+   # lpadmin -p NetworkPrinter1 -E -v ipp://20.192.250.238/ipp/print -m everywhere
+   # lpstat -p
+
+// If status shows "printer NetworkPrinter1 disabled ...reason unknown" then
+// Clean the status
+
+   # cupsenable NetworkPrinter1
+   # lpstat -t
+
 PART C: CONFIGURE PRINTER SHARING
 ----------------------------------
 
 1. Enable printer sharing:
    # lpadmin -p NetworkPrinter1 -o printer-is-shared=true
-   # lpadmin -p HPLaserJet -o printer-is-shared=true
+   # lpadmin -p HPLaserJet -o printer-is-shared=true       // Command not required if specified real printer is not attached to the system. 
 
 2. Configure printer access control:
    # lpadmin -p NetworkPrinter1 -u allow:all
-   # lpadmin -p HPLaserJet -u allow:@printusers,admin
+   # lpadmin -p HPLaserJet -u allow:@printusers,admin      // Command not required if specified real printer is not attached to the system. 
 
 3. Create print user group:
    # groupadd printusers
+   # useradd user1 
+   # useradd user2
    # usermod -a -G printusers user1
    # usermod -a -G printusers user2
 
@@ -116,11 +136,20 @@ PART C: CONFIGURE PRINTER SHARING
    # lpadmin -p NetworkPrinter1 -o media=a4
    # lpadmin -p NetworkPrinter1 -o resolution=600dpi
 
+// To check printer status
+   # lpstat -p NetworkPrinter1 -l 
+// Could expect output "printer NetworkPrinter1 is idle. enabled"
+
 PART D: CONFIGURE PRINT CLASSES
 --------------------------------
 
 1. Create printer class:
-   # lpadmin -p OfficeClass -c NetworkPrinter1,HPLaserJet
+   # lpadmin -p OfficeClass -c NetworkPrinter1,HPLaserJet   // Delete - Incorrect line. -p is for printers, OfficeClass is a class, not a printer and HPLaserJet does not exist in your lab. Add other lines form update files. 
+   // Instead of above command, use this. 
+   # lpadmin -p NetworkPrinter1 -c OfficeClass
+   // To verify 
+   # lpstat -c
+   
    # lpadmin -p OfficeClass -D "Office Printer Class" -L "Main Office"
 
 2. Set class as default:
@@ -130,8 +159,27 @@ PART D: CONFIGURE PRINT CLASSES
    # lpadmin -p OfficeClass -o printer-is-shared=true
    # lpadmin -p OfficeClass -u allow:@printusers
 
-PART E: CONFIGURE PRINT QUOTAS
--------------------------------
+PART E: CONFIGURE PRINT QUOTAS [Note: Drop this entire part,as it has critical issues]
+----------------------------------------------------------------------------------------------
+
+// Critical Issue
+// CUPS DOES NOT SUPPORT REAL PRINT QUOTAS- JobKLimit, PageLimit, job-page-limit, job-k-limit
+// a.) These do NOT enforce quotas.
+// b.) They are deprecated / informational only
+
+// The problem with this part is that it is not related to CUPS printing.
+// a.) quotas- related to filesystem quotas. Not related to CUPS printing.
+// b.) <Policy> block - is related to AUTHORIZATION, not quotas. Controls who can do what, not how much they can print.
+// c.) JobKLimit & PageLimit - Do not block users and stop printing. And are ignored in modern CUPS (RHEL 8/9).
+
+---------------------------------------------------------------------------------------------------
+// Conclusion of this step - CUPS supports print accounting, not enforced print quotas.
+
+// But you can track usage using these files:
+// a.) /var/log/cups/page_log
+// b.) /var/log/cups/access_log
+// c.) Any custom made external scripts
+----------------------------------------------------------------------------------------------------
 
 1. Install quota tools:
    # dnf install quota -y
@@ -213,28 +261,35 @@ PART F: CONFIGURE PRINT ACCOUNTING
    
    # chmod +x /usr/local/bin/print-accounting.sh
 
+    # /usr/local/bin/print-accounting.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-558 (so use that instead).
+
 PART G: CONFIGURE CLIENT ACCESS
 --------------------------------
 
 1. Configure client printer discovery:
    # vim /etc/cups/client.conf
    
-   ServerName 192.168.1.10
+   ServerName 20.192.255.178
    Encryption IfRequested
 
 2. Install client packages on client systems:
    # dnf install cups-client -y
 
 3. Test client connectivity:
-   # lpstat -h 192.168.1.10 -p
-   # lpstat -h 192.168.1.10 -a
+   # lpstat -h 20.192.255.178 -p
+   # lpstat -h 20.192.255.178 -a
 
 4. Add printer on client:
-   # lpadmin -p RemotePrinter -E -v ipp://192.168.1.10:631/printers/NetworkPrinter1
+   # lpadmin -p RemotePrinter -E -v ipp://192.168.1.10:631/printers/NetworkPrinter1  // Not Required. As client already knows the server via client.conf
+   // Instead use this to test. 
+   # echo "Client test" | lp -h 20.192.255.178 -d NetworkPrinter1
 
 PART H: CONFIGURE PRINT SECURITY
 ---------------------------------
 
+// Don't do the entire below step(point-1), as it has critcal issues. 
+// Critical issue: SSLListen on port 443 (DO NOT DO THIS)- Can break CUPS, Port 443 not required and SELinux & firewall issues
 1. Enable SSL/TLS encryption:
    # vim /etc/cups/cupsd.conf
    
@@ -244,11 +299,18 @@ PART H: CONFIGURE PRINT SECURITY
    SSLCertificate /etc/cups/ssl/server.crt
    SSLKey /etc/cups/ssl/server.key
 
+// Don't do the entire below step(point-2), as it has critcal issues. 
+// Critical issue: Manual SSL certificate generation (DO NOT DO THIS)- Not Required and can introduce permission mistakes
 2. Generate SSL certificates:
    # mkdir -p /etc/cups/ssl
    # openssl req -new -x509 -keyout /etc/cups/ssl/server.key -out /etc/cups/ssl/server.crt -days 365 -nodes
    # chown root:lp /etc/cups/ssl/server.*
    # chmod 600 /etc/cups/ssl/server.key
+
+// Instead just do these steps to enable encryption
+   # vim /etc/cups/cupsd.conf
+// Verify it contains this line inside   
+   # DefaultEncryption Required
 
 3. Configure authentication:
    # vim /etc/cups/cupsd.conf
@@ -258,7 +320,7 @@ PART H: CONFIGURE PRINT SECURITY
      Require valid-user
      Order allow,deny
      Allow localhost
-     Allow 192.168.1.*
+     Allow 20.192.0.0/16
    </Location>
 
 4. Create print users:
@@ -296,6 +358,9 @@ PART I: CONFIGURE PRINT MONITORING
    
    # chmod +x /usr/local/bin/print-monitor.sh
 
+    # /usr/local/bin/print-monitor.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-591 (so use that instead).
+
 2. Create printer health check:
    # vim /usr/local/bin/printer-health.sh
    
@@ -315,6 +380,9 @@ PART I: CONFIGURE PRINT MONITORING
    done
    
    # chmod +x /usr/local/bin/printer-health.sh
+
+   # /usr/local/bin/printer-health.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-634 (so use that instead).
 
 PART J: CONFIGURE PRINT MANAGEMENT TOOLS
 -----------------------------------------
@@ -357,9 +425,12 @@ PART J: CONFIGURE PRINT MANAGEMENT TOOLS
            echo "Usage: $0 {list|cancel|hold|release|purge} [job-id]"
            ;;
    esac
-   
+
    # chmod +x /usr/local/bin/manage-print-jobs.sh
 
+   # /usr/local/bin/manage-print-jobs.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-666 (so use that instead).
+   
 2. Create printer maintenance script:
    # vim /usr/local/bin/printer-maintenance.sh
    
@@ -396,6 +467,9 @@ PART J: CONFIGURE PRINT MANAGEMENT TOOLS
    echo "Maintenance completed"
    
    # chmod +x /usr/local/bin/printer-maintenance.sh
+
+   # /usr/local/bin/printer-maintenance.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-730 (so use that instead).
 
 PART K: TESTING AND VALIDATION
 -------------------------------
@@ -464,3 +538,232 @@ CLEANUP:
 # groupdel printusers
 # rm /usr/local/bin/print-*.sh
 # rm /usr/local/bin/manage-*.sh
+
+ADDED/UPDATED LINES - 
+----------------------------------------------------------------------------------------------------
+Lines - 68-70,84,89,93,99-114,129-130,139-141,147-151,165-182,284-286,291-292,302-303,310-313,547-769
+
+
+MY NEW CREATED .sh files
+--------------------------------------------------------------------------------------------------------
+Reasons of creation of new .sh files to resolve errors:
+a. Added command existence checks (command -v) to prevent command not found error.
+b. Quoted all variables to avoid word-splitting and test failures.
+c. Added file and directory existence checks before accessing logs or spool paths.
+d. Redirected stderr output where needed to prevent noisy failures.
+e. Handled empty or missing data gracefully instead of crashing.
+f. Ensured scripts run cleanly even if printers/backends are unavailable. 
+--------------------------------------------------------------------------------------------
+
+File-1.  vim /usr/local/bin/print-accounting.sh
+
+#!/bin/bash
+
+LOGFILE="/var/log/cups/page_log"
+REPORT_FILE="/var/log/print-accounting-$(date +%Y%m%d).log"
+
+# Create report file safely
+echo "=== Print Accounting Report - $(date) ===" > "$REPORT_FILE"
+echo >> "$REPORT_FILE"
+
+# Check if log file exists and is readable
+if [ ! -r "$LOGFILE" ]; then
+    echo "CUPS page log not found or not readable: $LOGFILE" >> "$REPORT_FILE"
+    exit 0
+fi
+
+# Pages printed by user
+echo "Pages printed by user:" >> "$REPORT_FILE"
+awk '{print $2, $7}' "$LOGFILE" | sort | uniq -c | sort -nr >> "$REPORT_FILE"
+echo >> "$REPORT_FILE"
+
+# Pages printed by printer
+echo "Pages printed by printer:" >> "$REPORT_FILE"
+awk '{print $1, $7}' "$LOGFILE" | sort | uniq -c | sort -nr >> "$REPORT_FILE"
+echo >> "$REPORT_FILE"
+
+# Daily usage summary
+echo "Daily usage summary:" >> "$REPORT_FILE"
+awk '{print $4, $7}' "$LOGFILE" | sort | uniq -c | sort -nr >> "$REPORT_FILE"
+
+--------------------------------------------------------------------------------------------
+
+File-2.  vim /usr/local/bin/print-monitor.sh
+
+#!/bin/bash
+
+LOGFILE="/var/log/print-monitor.log"
+CUPS_ERROR_LOG="/var/log/cups/error_log"
+
+# Ensure log file exists and is writable
+touch "$LOGFILE" 2>/dev/null || exit 1
+
+while true; do
+    echo "=== Print Queue Status - $(date) ===" >> "$LOGFILE"
+
+    # Check printer status
+    if command -v lpstat >/dev/null 2>&1; then
+        lpstat -p >> "$LOGFILE" 2>&1
+    else
+        echo "lpstat command not found" >> "$LOGFILE"
+    fi
+    echo >> "$LOGFILE"
+
+    # Check print jobs
+    if command -v lpstat >/dev/null 2>&1; then
+        lpstat -o >> "$LOGFILE" 2>&1
+    else
+        echo "lpstat command not found" >> "$LOGFILE"
+    fi
+    echo >> "$LOGFILE"
+
+    # Check for errors
+    if [ -r "$CUPS_ERROR_LOG" ]; then
+        tail -10 "$CUPS_ERROR_LOG" >> "$LOGFILE"
+    else
+        echo "CUPS error log not found or not readable" >> "$LOGFILE"
+    fi
+
+    echo "---" >> "$LOGFILE"
+
+    sleep 300
+done
+
+--------------------------------------------------------------------------------------------
+
+File-3.  vim /usr/local/bin/printer-health.sh
+
+#!/bin/bash
+
+PRINTERS=("NetworkPrinter1" "HPLaserJet")
+LOGFILE="/var/log/printer-health.log"
+
+# Ensure log file exists
+touch "$LOGFILE" 2>/dev/null || exit 1
+
+for printer in "${PRINTERS[@]}"; do
+    if command -v lpstat >/dev/null 2>&1; then
+        STATUS=$(lpstat -p "$printer" 2>/dev/null | grep -o "idle\|printing\|stopped")
+    else
+        STATUS="unknown"
+    fi
+
+    if [ -z "$STATUS" ]; then
+        STATUS="unknown"
+    fi
+
+    echo "$(date): $printer - $STATUS" >> "$LOGFILE"
+
+    if [ "$STATUS" = "stopped" ]; then
+        echo "$(date): ALERT - $printer is stopped" >> "$LOGFILE"
+        # Send notification or restart printer
+        cupsenable "$printer" 2>/dev/null
+    fi
+done
+
+--------------------------------------------------------------------------------------------
+
+File-4.  vim /usr/local/bin/manage-print-jobs.sh
+
+#!/bin/bash
+
+case "$1" in
+    "list")
+        echo "Active print jobs:"
+        if command -v lpstat >/dev/null 2>&1; then
+            lpstat -o
+        else
+            echo "lpstat command not found"
+        fi
+        ;;
+    "cancel")
+        if [ -n "$2" ]; then
+            if command -v cancel >/dev/null 2>&1; then
+                cancel "$2" 2>/dev/null
+                echo "Job $2 cancelled"
+            else
+                echo "cancel command not found"
+            fi
+        else
+            echo "Usage: $0 cancel <job-id>"
+        fi
+        ;;
+    "hold")
+        if [ -n "$2" ]; then
+            if command -v lp >/dev/null 2>&1; then
+                lp -i "$2" -H hold 2>/dev/null
+                echo "Job $2 held"
+            else
+                echo "lp command not found"
+            fi
+        else
+            echo "Usage: $0 hold <job-id>"
+        fi
+        ;;
+    "release")
+        if [ -n "$2" ]; then
+            if command -v lp >/dev/null 2>&1; then
+                lp -i "$2" -H resume 2>/dev/null
+                echo "Job $2 released"
+            else
+                echo "lp command not found"
+            fi
+        else
+            echo "Usage: $0 release <job-id>"
+        fi
+        ;;
+    "purge")
+        if command -v cancel >/dev/null 2>&1; then
+            cancel -a 2>/dev/null
+            echo "All jobs cancelled"
+        else
+            echo "cancel command not found"
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {list|cancel|hold|release|purge} [job-id]"
+        ;;
+esac
+
+--------------------------------------------------------------------------------------------
+
+File-5.  vim /usr/local/bin/printer-maintenance.sh
+
+#!/bin/bash
+
+echo "=== Printer Maintenance - $(date) ==="
+
+# Clean print queues
+echo "Cleaning completed jobs..."
+if command -v cancel >/dev/null 2>&1; then
+    cancel -a -x 2>/dev/null
+fi
+
+# Restart CUPS if needed
+if ! systemctl is-active cups >/dev/null 2>&1; then
+    echo "Restarting CUPS service..."
+    systemctl restart cups 2>/dev/null
+fi
+
+# Check disk space for spool directory
+if [ -d /var/spool/cups ]; then
+    SPOOL_USAGE=$(df /var/spool/cups 2>/dev/null | tail -1 | awk '{print $5}' | cut -d'%' -f1)
+    if [ -n "$SPOOL_USAGE" ] && [ "$SPOOL_USAGE" -gt 80 ]; then
+        echo "WARNING: Print spool directory is ${SPOOL_USAGE}% full"
+        find /var/spool/cups -name "c*" -mtime +7 -delete 2>/dev/null
+        find /var/spool/cups -name "d*" -mtime +7 -delete 2>/dev/null
+    fi
+fi
+
+# Rotate logs
+if [ -f /var/log/cups/access_log ]; then
+    LOG_SIZE=$(stat -c%s /var/log/cups/access_log 2>/dev/null)
+    if [ -n "$LOG_SIZE" ] && [ "$LOG_SIZE" -gt 10485760 ]; then
+        mv /var/log/cups/access_log /var/log/cups/access_log.old 2>/dev/null
+        systemctl reload cups 2>/dev/null
+    fi
+fi
+
+echo "Maintenance completed"
+
+--------------------------------------------------------------------------------------------
