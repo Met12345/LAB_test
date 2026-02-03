@@ -1,5 +1,5 @@
 RHCE RH254 HANDS-ON LAB: SELINUX POLICY MANAGEMENT
-===================================================
+=========================================================
 
 LAB OBJECTIVE:
 Configure and manage SELinux policies, contexts, and booleans for enhanced system security
