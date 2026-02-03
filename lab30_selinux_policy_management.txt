@@ -298,6 +298,9 @@ PART I: TROUBLESHOOT SELINUX ISSUES
    
    # chmod +x /usr/local/bin/selinux-troubleshoot.sh
 
+   # /usr/local/bin/selinux-troubleshoot.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-633 (so use that instead).
+
 2. Create SELinux denial analyzer:
    # vim /usr/local/bin/analyze-selinux-denials.sh
    
@@ -440,6 +443,10 @@ PART J: MONITOR SELINUX ACTIVITY
    
    # chmod +x /usr/local/bin/selinux-audit-summary.sh
 
+   # /usr/local/bin/selinux-troubleshoot.sh
+   // If errors encountered in running this script, I have created new updated script of this .sh file at line-667 (so use that instead).
+
+
 PART K: CONFIGURE SELINUX FOR CUSTOM PORTS
 -------------------------------------------
 
@@ -495,6 +502,7 @@ PART L: BACKUP AND RESTORE SELINUX POLICIES
    echo "SELinux backup completed: $BACKUP_DIR"
    
    # chmod +x /usr/local/bin/backup-selinux.sh
+
 
 2. Schedule SELinux monitoring:
    # crontab -e
@@ -572,8 +580,8 @@ CLEANUP:
 
 
 
-ALL UPDATES (Made to do work this lab:
------------
+MY UPDATED FILES (Made to do work this lab):
+-----------------------------------------------------------------
 
 1. Custom made file-1. /opt/customapp/myapp.py
 
@@ -609,8 +617,20 @@ socket=/srv/mysql-data/mysql.sock
 
 !includedir /etc/my.cnf.d
 
+MY NEW CREATED .sh files
+--------------------------------------------------------------------------------------------------------
+Reasons of creation of new .sh files to resolve errors:
+a.) Multiple commands were written on a single line without proper separators, causing commands to be printed instead of executed.
+b.) Incorrect use of pipes (|) with echo, which broke command pipelines.
+c.) Command options (e.g., -nr) were placed on separate lines, making Bash treat them as standalone commands.
+d.) Missing or incorrect line breaks in long command pipelines (ausearch | grep | sed | sort).
+e.) Typographical errors such as duplicated echo statements (echo echo).
+f.) Improper line continuation using backslashes (\) leading to malformed commands.
+g.) Scripts lacked clear command sequencing, resulting in “command not found” errors.
 
-3. Custom made script file-3. 
+--------------------------------------------------------------------------------------------
+
+1. My_file-1. 
 /usr/local/bin/selinux-troubleshoot_mynew.sh
 
 #!/bin/bash
@@ -644,7 +664,7 @@ getsebool mysql_connect_any
 getsebool ssh_sysadm_login
 
 
-4. Custom made script file-4. 
+2. My_file-2. 
 /usr/local/bin/selinux-audit-summary_mynew.sh
 
 #!/bin/bash
