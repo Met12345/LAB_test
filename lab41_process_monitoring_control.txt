@@ -24,7 +24,18 @@ PART A: CONFIGURE BASIC PROCESS MONITORING
 -------------------------------------------
 
 1. Install process monitoring tools:
-   # dnf install htop atop iotop lsof psmisc -y
+   # Create Swap File 
+   # fallocate -l 2G /swapfile
+   # chmod 600 /swapfile
+   # mkswap /swapfile
+   # swapon /swapfile
+   # echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+
+   # dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+   # dnf repolist | grep epel
+
+   # dnf install htop atop iotop lsof psmisc stress -y
    # dnf install procps-ng util-linux -y
 
 2. Configure process accounting:
@@ -37,19 +48,20 @@ PART A: CONFIGURE BASIC PROCESS MONITORING
    # ls -la /var/account/
 
 4. Configure process limits:
+   # yum install vim -y
    # vim /etc/security/limits.conf
    
-   # Process limits for users
-   @users soft nproc 1024
-   @users hard nproc 2048
-   @users soft nofile 4096
-   @users hard nofile 8192
+# Process limits for users
+@users soft nproc 1024
+@users hard nproc 2048
+@users soft nofile 4096
+@users hard nofile 8192
    
-   # Specific user limits
-   testuser soft nproc 512
-   testuser hard nproc 1024
-   testuser soft cpu 300
-   testuser hard cpu 600
+# Specific user limits
+testuser soft nproc 512
+testuser hard nproc 1024
+testuser soft cpu 300
+testuser hard cpu 600
 
 PART B: CREATE PROCESS MONITORING SCRIPTS
 ------------------------------------------
@@ -57,116 +69,119 @@ PART B: CREATE PROCESS MONITORING SCRIPTS
 1. Create comprehensive process monitor:
    # vim /usr/local/bin/process-monitor.sh
    
-   #!/bin/bash
-   LOGFILE="/var/log/process-monitor.log"
-   THRESHOLD_CPU=80
-   THRESHOLD_MEM=80
+#!/bin/bash
+LOGFILE="/var/log/process-monitor.log"
+THRESHOLD_CPU=80
+THRESHOLD_MEM=80
    
-   echo "=== Process Monitor - $(date) ===" >> $LOGFILE
+echo "=== Process Monitor - $(date) ===" >> $LOGFILE
    
-   # System load and process count
-   echo "SYSTEM LOAD:" >> $LOGFILE
-   uptime >> $LOGFILE
-   echo "Total processes: $(ps aux | wc -l)" >> $LOGFILE
-   echo "Running processes: $(ps aux | grep -c ' R ')" >> $LOGFILE
-   echo "Sleeping processes: $(ps aux | grep -c ' S ')" >> $LOGFILE
-   echo "Zombie processes: $(ps aux | grep -c ' Z ')" >> $LOGFILE
-   echo >> $LOGFILE
+# System load and process count
+
+echo "SYSTEM LOAD:" >> $LOGFILE
+uptime >> $LOGFILE
+echo "Total processes: $(ps aux | wc -l)" >> $LOGFILE
+echo "Running processes: $(ps aux | grep -c ' R ')" >> $LOGFILE
+echo "Sleeping processes: $(ps aux | grep -c ' S ')" >> $LOGFILE
+echo "Zombie processes: $(ps aux | grep -c ' Z ')" >> $LOGFILE
+echo >> $LOGFILE
    
-   # Top CPU consuming processes
-   echo "TOP CPU PROCESSES:" >> $LOGFILE
-   ps aux --sort=-%cpu | head -10 >> $LOGFILE
-   echo >> $LOGFILE
+# Top CPU consuming processes
+
+echo "TOP CPU PROCESSES:" >> $LOGFILE
+ps aux --sort=-%cpu | head -10 >> $LOGFILE
+echo >> $LOGFILE
    
-   # Top memory consuming processes
-   echo "TOP MEMORY PROCESSES:" >> $LOGFILE
-   ps aux --sort=-%mem | head -10 >> $LOGFILE
-   echo >> $LOGFILE
+# Top memory consuming processes
    
-   # Check for high resource usage
-   ps aux --no-headers | while read line; do
-       CPU=$(echo $line | awk '{print $3}' | cut -d. -f1)
-       MEM=$(echo $line | awk '{print $4}' | cut -d. -f1)
-       PID=$(echo $line | awk '{print $2}')
-       COMMAND=$(echo $line | awk '{for(i=11;i<=NF;i++) printf "%s ", $i; print ""}')
+echo "TOP MEMORY PROCESSES:" >> $LOGFILE
+ps aux --sort=-%mem | head -10 >> $LOGFILE
+echo >> $LOGFILE
+   
+# Check for high resource usage
+ps aux --no-headers | while read line; do
+    CPU=$(echo $line | awk '{print $3}' | cut -d. -f1)
+    MEM=$(echo $line | awk '{print $4}' | cut -d. -f1)
+    PID=$(echo $line | awk '{print $2}')
+    COMMAND=$(echo $line | awk '{for(i=11;i<=NF;i++) printf "%s ", $i; print ""}')
        
-       if [ "$CPU" -gt $THRESHOLD_CPU ] 2>/dev/null; then
-           echo "HIGH CPU ALERT: PID $PID ($COMMAND) using ${CPU}% CPU" >> $LOGFILE
-       fi
+    if [ "$CPU" -gt $THRESHOLD_CPU ] 2>/dev/null; then
+        echo "HIGH CPU ALERT: PID $PID ($COMMAND) using ${CPU}% CPU" >> $LOGFILE
+    fi
        
-       if [ "$MEM" -gt $THRESHOLD_MEM ] 2>/dev/null; then
-           echo "HIGH MEMORY ALERT: PID $PID ($COMMAND) using ${MEM}% memory" >> $LOGFILE
-       fi
-   done
+    if [ "$MEM" -gt $THRESHOLD_MEM ] 2>/dev/null; then
+        echo "HIGH MEMORY ALERT: PID $PID ($COMMAND) using ${MEM}% memory" >> $LOGFILE
+    fi
+done
    
-   echo "---" >> $LOGFILE
+echo "---" >> $LOGFILE
    
    # chmod +x /usr/local/bin/process-monitor.sh
 
 2. Create process tree analyzer:
    # vim /usr/local/bin/process-tree-analyzer.sh
    
-   #!/bin/bash
-   LOGFILE="/var/log/process-tree-$(date +%Y%m%d_%H%M%S).log"
+#!/bin/bash
+LOGFILE="/var/log/process-tree-$(date +%Y%m%d_%H%M%S).log"
    
-   echo "=== Process Tree Analysis - $(date) ===" > $LOGFILE
-   echo >> $LOGFILE
+echo "=== Process Tree Analysis - $(date) ===" > $LOGFILE
+echo >> $LOGFILE
    
-   # Full process tree
-   echo "COMPLETE PROCESS TREE:" >> $LOGFILE
-   pstree -p >> $LOGFILE
-   echo >> $LOGFILE
+# Full process tree
+echo "COMPLETE PROCESS TREE:" >> $LOGFILE
+pstree -p >> $LOGFILE
+echo >> $LOGFILE
    
-   # Process tree with resource usage
-   echo "PROCESS TREE WITH RESOURCES:" >> $LOGFILE
-   ps auxf >> $LOGFILE
-   echo >> $LOGFILE
+# Process tree with resource usage
+echo "PROCESS TREE WITH RESOURCES:" >> $LOGFILE
+ps auxf >> $LOGFILE
+echo >> $LOGFILE
    
-   # Parent-child relationships
-   echo "PARENT-CHILD RELATIONSHIPS:" >> $LOGFILE
-   ps -eo pid,ppid,cmd --sort=ppid >> $LOGFILE
-   echo >> $LOGFILE
+# Parent-child relationships
+echo "PARENT-CHILD RELATIONSHIPS:" >> $LOGFILE
+ps -eo pid,ppid,cmd --sort=ppid >> $LOGFILE
+echo >> $LOGFILE
    
-   # Orphaned processes
-   echo "ORPHANED PROCESSES:" >> $LOGFILE
-   ps -eo pid,ppid,cmd | awk '$2 == 1 && $1 != 1' >> $LOGFILE
+# Orphaned processes
+echo "ORPHANED PROCESSES:" >> $LOGFILE
+ps -eo pid,ppid,cmd | awk '$2 == 1 && $1 != 1' >> $LOGFILE
    
-   echo "Process tree analysis saved to: $LOGFILE"
+echo "Process tree analysis saved to: $LOGFILE"
    
    # chmod +x /usr/local/bin/process-tree-analyzer.sh
 
 3. Create process state monitor:
    # vim /usr/local/bin/process-state-monitor.sh
    
-   #!/bin/bash
-   LOGFILE="/var/log/process-states.log"
+#!/bin/bash
+LOGFILE="/var/log/process-states.log"
    
-   echo "=== Process State Monitor - $(date) ===" >> $LOGFILE
+echo "=== Process State Monitor - $(date) ===" >> $LOGFILE
    
-   # Process states summary
-   echo "PROCESS STATES SUMMARY:" >> $LOGFILE
-   echo "Running (R): $(ps aux | grep -c ' R ')" >> $LOGFILE
-   echo "Sleeping (S): $(ps aux | grep -c ' S ')" >> $LOGFILE
-   echo "Disk Sleep (D): $(ps aux | grep -c ' D ')" >> $LOGFILE
-   echo "Zombie (Z): $(ps aux | grep -c ' Z ')" >> $LOGFILE
-   echo "Stopped (T): $(ps aux | grep -c ' T ')" >> $LOGFILE
-   echo >> $LOGFILE
+# Process states summary
+echo "PROCESS STATES SUMMARY:" >> $LOGFILE
+echo "Running (R): $(ps aux | grep -c ' R ')" >> $LOGFILE
+echo "Sleeping (S): $(ps aux | grep -c ' S ')" >> $LOGFILE
+echo "Disk Sleep (D): $(ps aux | grep -c ' D ')" >> $LOGFILE
+echo "Zombie (Z): $(ps aux | grep -c ' Z ')" >> $LOGFILE
+echo "Stopped (T): $(ps aux | grep -c ' T ')" >> $LOGFILE
+echo >> $LOGFILE
    
-   # Detailed process states
-   echo "DETAILED PROCESS STATES:" >> $LOGFILE
-   ps axo pid,ppid,state,comm,wchan:20 >> $LOGFILE
-   echo >> $LOGFILE
+# Detailed process states
+echo "DETAILED PROCESS STATES:" >> $LOGFILE
+ps axo pid,ppid,state,comm,wchan:20 >> $LOGFILE
+echo >> $LOGFILE
    
-   # Processes in uninterruptible sleep
-   echo "UNINTERRUPTIBLE SLEEP PROCESSES:" >> $LOGFILE
-   ps aux | grep ' D ' >> $LOGFILE
-   echo >> $LOGFILE
+# Processes in uninterruptible sleep
+echo "UNINTERRUPTIBLE SLEEP PROCESSES:" >> $LOGFILE
+ps aux | grep ' D ' >> $LOGFILE
+echo >> $LOGFILE
    
-   # Zombie processes
-   echo "ZOMBIE PROCESSES:" >> $LOGFILE
-   ps aux | grep ' Z ' >> $LOGFILE
+# Zombie processes
+echo "ZOMBIE PROCESSES:" >> $LOGFILE
+ps aux | grep ' Z ' >> $LOGFILE
    
-   echo "---" >> $LOGFILE
+echo "---" >> $LOGFILE
    
    # chmod +x /usr/local/bin/process-state-monitor.sh
 
@@ -176,24 +191,24 @@ PART C: CONFIGURE PROCESS RESOURCE MONITORING
 1. Create resource usage tracker:
    # vim /usr/local/bin/resource-usage-tracker.sh
    
-   #!/bin/bash
-   PID=$1
-   DURATION=${2:-60}
-   INTERVAL=${3:-5}
+#!/bin/bash
+PID=$1
+DURATION=${2:-60}
+INTERVAL=${3:-5}
    
    if [ -z "$PID" ]; then
        echo "Usage: $0 <PID> [duration_seconds] [interval_seconds]"
        exit 1
    fi
    
-   LOGFILE="/var/log/resource-tracking-$PID-$(date +%Y%m%d_%H%M%S).log"
+LOGFILE="/var/log/resource-tracking-$PID-$(date +%Y%m%d_%H%M%S).log"
    
-   echo "=== Resource Usage Tracking - PID $PID ===" > $LOGFILE
-   echo "Duration: $DURATION seconds, Interval: $INTERVAL seconds" >> $LOGFILE
-   echo "Started: $(date)" >> $LOGFILE
-   echo >> $LOGFILE
+echo "=== Resource Usage Tracking - PID $PID ===" > $LOGFILE
+echo "Duration: $DURATION seconds, Interval: $INTERVAL seconds" >> $LOGFILE
+echo "Started: $(date)" >> $LOGFILE
+echo >> $LOGFILE
    
-   END_TIME=$(($(date +%s) + DURATION))
+END_TIME=$(($(date +%s) + DURATION))
    
    while [ $(date +%s) -lt $END_TIME ]; do
        if kill -0 $PID 2>/dev/null; then
@@ -220,32 +235,32 @@ PART C: CONFIGURE PROCESS RESOURCE MONITORING
        sleep $INTERVAL
    done
    
-   echo "Resource tracking completed: $LOGFILE"
+echo "Resource tracking completed: $LOGFILE"
    
    # chmod +x /usr/local/bin/resource-usage-tracker.sh
 
 2. Create process I/O monitor:
    # vim /usr/local/bin/process-io-monitor.sh
    
-   #!/bin/bash
-   LOGFILE="/var/log/process-io-$(date +%Y%m%d_%H%M%S).log"
+#!/bin/bash
+LOGFILE="/var/log/process-io-$(date +%Y%m%d_%H%M%S).log"
    
-   echo "=== Process I/O Monitor - $(date) ===" > $LOGFILE
-   echo >> $LOGFILE
+echo "=== Process I/O Monitor - $(date) ===" > $LOGFILE
+echo >> $LOGFILE
    
-   # I/O statistics for all processes
+# I/O statistics for all processes
    echo "PROCESS I/O STATISTICS:" >> $LOGFILE
    if command -v iotop >/dev/null 2>&1; then
        iotop -b -n 1 -a >> $LOGFILE 2>/dev/null
    fi
-   echo >> $LOGFILE
+    echo >> $LOGFILE
    
    # Top I/O processes from /proc
    echo "TOP I/O PROCESSES (from /proc):" >> $LOGFILE
    for pid in $(ps -eo pid --no-headers); do
        if [ -f /proc/$pid/io ]; then
-           read_bytes=$(grep "read_bytes" /proc/$pid/io 2>/dev/null | awk '{print $2}')
-           write_bytes=$(grep "write_bytes" /proc/$pid/io 2>/dev/null | awk '{print $2}')
+           read_bytes=$(grep "read_bytes" /proc/$pid/io 2>/dev/null | awk '{print $2}') | tr -dc '0-9')
+           write_bytes=$(grep "write_bytes" /proc/$pid/io 2>/dev/null | awk '{print $2}') | tr -dc '0-9')
            comm=$(ps -p $pid -o comm --no-headers 2>/dev/null)
            
            if [ -n "$read_bytes" ] && [ -n "$write_bytes" ]; then
@@ -259,6 +274,9 @@ PART C: CONFIGURE PROCESS RESOURCE MONITORING
    echo "Process I/O monitoring saved to: $LOGFILE"
    
    # chmod +x /usr/local/bin/process-io-monitor.sh
+
+#NOTE:
+    Sanitized /proc I/O values using tr -dc '0-9' and added safe defaults to prevent arithmetic errors caused by dynamic or malformed process data.
 
 PART D: CONFIGURE PROCESS CONTROL AND MANAGEMENT
 -------------------------------------------------
@@ -339,10 +357,10 @@ PART D: CONFIGURE PROCESS CONTROL AND MANAGEMENT
 2. Create process restart manager:
    # vim /usr/local/bin/process-restart-manager.sh
    
-   #!/bin/bash
-   PROCESS_NAME=$1
-   MAX_RESTARTS=${2:-3}
-   RESTART_DELAY=${3:-10}
+#!/bin/bash
+PROCESS_NAME=$1
+MAX_RESTARTS=${2:-3}
+RESTART_DELAY=${3:-10}
    
    if [ -z "$PROCESS_NAME" ]; then
        echo "Usage: $0 <process_name> [max_restarts] [delay_seconds]"
@@ -474,82 +492,82 @@ PART F: CONFIGURE PROCESS ACCOUNTING ANALYSIS
 1. Create process accounting analyzer:
    # vim /usr/local/bin/process-accounting-analyzer.sh
    
-   #!/bin/bash
-   REPORT_FILE="/var/log/process-accounting-$(date +%Y%m%d).log"
+#!/bin/bash
+REPORT_FILE="/var/log/process-accounting-$(date +%Y%m%d).log"
    
-   echo "=== Process Accounting Analysis - $(date) ===" > $REPORT_FILE
-   echo >> $REPORT_FILE
+echo "=== Process Accounting Analysis - $(date) ===" > $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Most CPU-intensive commands
-   echo "TOP CPU-INTENSIVE COMMANDS:" >> $REPORT_FILE
-   sa -m | head -20 >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Most CPU-intensive commands
+echo "TOP CPU-INTENSIVE COMMANDS:" >> $REPORT_FILE
+sa -m | head -20 >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Most frequently executed commands
-   echo "MOST FREQUENTLY EXECUTED COMMANDS:" >> $REPORT_FILE
-   sa -c | head -20 >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Most frequently executed commands
+echo "MOST FREQUENTLY EXECUTED COMMANDS:" >> $REPORT_FILE
+sa -c | head -20 >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # User activity summary
-   echo "USER ACTIVITY SUMMARY:" >> $REPORT_FILE
-   sa -u | head -20 >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# User activity summary
+echo "USER ACTIVITY SUMMARY:" >> $REPORT_FILE
+sa -u | head -20 >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Daily usage summary
-   echo "DAILY USAGE SUMMARY:" >> $REPORT_FILE
-   sa -d >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Daily usage summary
+echo "DAILY USAGE SUMMARY:" >> $REPORT_FILE
+sa -d >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Last executed commands
-   echo "RECENT COMMAND EXECUTIONS:" >> $REPORT_FILE
-   lastcomm | head -50 >> $REPORT_FILE
+# Last executed commands
+echo "RECENT COMMAND EXECUTIONS:" >> $REPORT_FILE
+lastcomm | head -50 >> $REPORT_FILE
    
-   echo "Process accounting analysis saved to: $REPORT_FILE"
+echo "Process accounting analysis saved to: $REPORT_FILE"
    
    # chmod +x /usr/local/bin/process-accounting-analyzer.sh
 
 2. Create user process analyzer:
    # vim /usr/local/bin/user-process-analyzer.sh
    
-   #!/bin/bash
-   USERNAME=${1:-$(whoami)}
-   REPORT_FILE="/var/log/user-process-analysis-$USERNAME-$(date +%Y%m%d).log"
+#!/bin/bash
+USERNAME=${1:-$(whoami)}
+REPORT_FILE="/var/log/user-process-analysis-$USERNAME-$(date +%Y%m%d).log"
    
-   echo "=== User Process Analysis - $USERNAME - $(date) ===" > $REPORT_FILE
-   echo >> $REPORT_FILE
+echo "=== User Process Analysis - $USERNAME - $(date) ===" > $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Current processes for user
-   echo "CURRENT PROCESSES:" >> $REPORT_FILE
-   ps -u $USERNAME -o pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Current processes for user
+echo "CURRENT PROCESSES:" >> $REPORT_FILE
+ps -u $USERNAME -o pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Process count by state
-   echo "PROCESS COUNT BY STATE:" >> $REPORT_FILE
-   ps -u $USERNAME -o stat --no-headers | sort | uniq -c >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Process count by state
+echo "PROCESS COUNT BY STATE:" >> $REPORT_FILE
+ps -u $USERNAME -o stat --no-headers | sort | uniq -c >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Resource usage summary
-   echo "RESOURCE USAGE SUMMARY:" >> $REPORT_FILE
-   ps -u $USERNAME --no-headers -o %cpu,%mem | awk '
-   {
-       cpu_total += $1
-       mem_total += $2
-       count++
-   }
-   END {
-       printf "Total processes: %d\n", count
-       printf "Total CPU usage: %.2f%%\n", cpu_total
-       printf "Total memory usage: %.2f%%\n", mem_total
-       printf "Average CPU per process: %.2f%%\n", cpu_total/count
-       printf "Average memory per process: %.2f%%\n", mem_total/count
-   }' >> $REPORT_FILE
-   echo >> $REPORT_FILE
+# Resource usage summary
+echo "RESOURCE USAGE SUMMARY:" >> $REPORT_FILE
+ps -u $USERNAME --no-headers -o %cpu,%mem | awk '
+{
+    cpu_total += $1
+    mem_total += $2
+    count++
+}
+END {
+    printf "Total processes: %d\n", count
+    printf "Total CPU usage: %.2f%%\n", cpu_total
+    printf "Total memory usage: %.2f%%\n", mem_total
+    printf "Average CPU per process: %.2f%%\n", cpu_total/count
+    printf "Average memory per process: %.2f%%\n", mem_total/count
+}' >> $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Process tree for user
-   echo "PROCESS TREE:" >> $REPORT_FILE
-   pstree -p $USERNAME >> $REPORT_FILE 2>/dev/null
+# Process tree for user
+echo "PROCESS TREE:" >> $REPORT_FILE
+pstree -p $USERNAME >> $REPORT_FILE 2>/dev/null
    
-   echo "User process analysis saved to: $REPORT_FILE"
+echo "User process analysis saved to: $REPORT_FILE"
    
    # chmod +x /usr/local/bin/user-process-analyzer.sh
 
@@ -622,26 +640,26 @@ PART G: CONFIGURE AUTOMATED PROCESS MANAGEMENT
 2. Schedule process management tasks:
    # vim /etc/cron.d/process-management
    
-   # Process monitoring every 5 minutes
-   */5 * * * * root /usr/local/bin/process-monitor.sh
+# Process monitoring every 5 minutes
+*/5 * * * * root /usr/local/bin/process-monitor.sh
    
-   # Process state monitoring every 10 minutes
-   */10 * * * * root /usr/local/bin/process-state-monitor.sh
+# Process state monitoring every 10 minutes
+*/10 * * * * root /usr/local/bin/process-state-monitor.sh
    
-   # Process alerts every 2 minutes
-   */2 * * * * root /usr/local/bin/process-alert-monitor.sh
+# Process alerts every 2 minutes
+*/2 * * * * root /usr/local/bin/process-alert-monitor.sh
    
-   # Zombie process cleanup every 15 minutes
-   */15 * * * * root /usr/local/bin/zombie-cleaner.sh
+# Zombie process cleanup every 15 minutes
+*/15 * * * * root /usr/local/bin/zombie-cleaner.sh
    
-   # Process watchdog every minute
-   * * * * * root /usr/local/bin/process-watchdog.sh
+# Process watchdog every minute
+* * * * * root /usr/local/bin/process-watchdog.sh
    
-   # Process accounting analysis daily
-   0 2 * * * root /usr/local/bin/process-accounting-analyzer.sh
+# Process accounting analysis daily
+0 2 * * * root /usr/local/bin/process-accounting-analyzer.sh
    
-   # Process I/O monitoring every 30 minutes
-   */30 * * * * root /usr/local/bin/process-io-monitor.sh
+# Process I/O monitoring every 30 minutes
+*/30 * * * * root /usr/local/bin/process-io-monitor.sh
 
 PART H: TESTING AND VALIDATION
 -------------------------------
@@ -697,14 +715,14 @@ EXPECTED RESULTS:
 
 VALIDATION CHECKLIST:
 ---------------------
-□ Process monitoring scripts operational
-□ Resource usage tracking working
-□ Process control commands functional
-□ Alerting system configured
-□ Process accounting enabled
-□ Automated management scheduled
-□ Zombie process cleanup working
-□ User process analysis available
+□ Process monitoring scripts operational               Pass
+□ Resource usage tracking working                      Pass
+□ Process control commands functional                  Pass
+□ Alerting system configured                           Pass
+□ Process accounting enabled                           Pass
+□ Automated management scheduled                       Pass
+□ Zombie process cleanup working                       Pass
+□ User process analysis available                      Pass
 
 CLEANUP:
 --------
