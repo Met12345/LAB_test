@@ -24,11 +24,17 @@ PART A: CONFIGURE SYSTEM RESOURCE TRACKING
 -------------------------------------------
 
 1. Install resource tracking tools:
-   # dnf install sysstat sar iostat vmstat -y
+   # dnf install sysstat procps-ng -y 
+   
+   # dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm -y
+   # dnf makecache
    # dnf install collectd collectd-utils -y
-   # dnf install rrdtool rrdtool-devel -y
+   
+   # dnf install rrdtool -y
 
 2. Configure sysstat for detailed tracking:
+   #Install Vim 
+   # yum install vim -y 
    # vim /etc/sysconfig/sysstat
    
    # History length in days
@@ -63,6 +69,7 @@ PART B: CREATE CPU RESOURCE TRACKING
    mkdir -p $LOGDIR
    
    echo "$(date +%Y-%m-%d\ %H:%M:%S),$(sar -u 1 1 | grep Average | awk '{print $3","$4","$5","$6","$8}')" >> $LOGFILE
+
    
    # chmod +x /usr/local/bin/cpu-resource-tracker.sh
 
@@ -254,70 +261,70 @@ PART E: CREATE NETWORK RESOURCE TRACKING
 1. Create network usage tracker:
    # vim /usr/local/bin/network-resource-tracker.sh
    
-   #!/bin/bash
-   LOGDIR="/var/log/resource-tracking"
-   LOGFILE="$LOGDIR/network-usage-$(date +%Y%m%d).log"
-   INTERFACE=${1:-eth0}
+#!/bin/bash
+LOGDIR="/var/log/resource-tracking"
+LOGFILE="$LOGDIR/network-usage-$(date +%Y%m%d).log"
+INTERFACE=${1:-eth0}
    
-   mkdir -p $LOGDIR
+mkdir -p $LOGDIR
    
-   # Get network statistics
-   RX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes 2>/dev/null || echo 0)
-   TX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes 2>/dev/null || echo 0)
-   RX_PACKETS=$(cat /sys/class/net/$INTERFACE/statistics/rx_packets 2>/dev/null || echo 0)
-   TX_PACKETS=$(cat /sys/class/net/$INTERFACE/statistics/tx_packets 2>/dev/null || echo 0)
-   RX_ERRORS=$(cat /sys/class/net/$INTERFACE/statistics/rx_errors 2>/dev/null || echo 0)
-   TX_ERRORS=$(cat /sys/class/net/$INTERFACE/statistics/tx_errors 2>/dev/null || echo 0)
+# Get network statistics
+RX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes 2>/dev/null || echo 0)
+TX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes 2>/dev/null || echo 0)
+RX_PACKETS=$(cat /sys/class/net/$INTERFACE/statistics/rx_packets 2>/dev/null || echo 0)
+TX_PACKETS=$(cat /sys/class/net/$INTERFACE/statistics/tx_packets 2>/dev/null || echo 0)
+RX_ERRORS=$(cat /sys/class/net/$INTERFACE/statistics/rx_errors 2>/dev/null || echo 0)
+TX_ERRORS=$(cat /sys/class/net/$INTERFACE/statistics/tx_errors 2>/dev/null || echo 0)
    
-   echo "$(date +%Y-%m-%d\ %H:%M:%S),$INTERFACE,$RX_BYTES,$TX_BYTES,$RX_PACKETS,$TX_PACKETS,$RX_ERRORS,$TX_ERRORS" >> $LOGFILE
+echo "$(date +%Y-%m-%d\ %H:%M:%S),$INTERFACE,$RX_BYTES,$TX_BYTES,$RX_PACKETS,$TX_PACKETS,$RX_ERRORS,$TX_ERRORS" >> $LOGFILE
    
    # chmod +x /usr/local/bin/network-resource-tracker.sh
 
 2. Create network trend analyzer:
    # vim /usr/local/bin/network-trend-analyzer.sh
    
-   #!/bin/bash
-   DAYS=${1:-7}
-   INTERFACE=${2:-eth0}
-   REPORT_FILE="/var/log/network-trend-analysis-$(date +%Y%m%d).log"
+#!/bin/bash
+DAYS=${1:-7}
+INTERFACE=${2:-eth0}
+REPORT_FILE="/var/log/network-trend-analysis-$(date +%Y%m%d).log"
    
-   echo "=== Network Trend Analysis - $INTERFACE (Last $DAYS days) - $(date) ===" > $REPORT_FILE
-   echo >> $REPORT_FILE
+echo "=== Network Trend Analysis - $INTERFACE (Last $DAYS days) - $(date) ===" > $REPORT_FILE
+echo >> $REPORT_FILE
    
-   # Daily network averages
-   echo "DAILY NETWORK AVERAGES:" >> $REPORT_FILE
-   for i in $(seq 1 $DAYS); do
-       DATE=$(date -d "$i days ago" +%d)
-       if [ -f /var/log/sa/sa$DATE ]; then
-           echo "$(date -d "$i days ago" +%Y-%m-%d):" >> $REPORT_FILE
-           sar -n DEV -f /var/log/sa/sa$DATE | grep $INTERFACE | grep Average >> $REPORT_FILE
-           echo >> $REPORT_FILE
-       fi
-   done
+# Daily network averages
+echo "DAILY NETWORK AVERAGES:" >> $REPORT_FILE
+for i in $(seq 1 $DAYS); do
+    DATE=$(date -d "$i days ago" +%d)
+    if [ -f /var/log/sa/sa$DATE ]; then
+        echo "$(date -d "$i days ago" +%Y-%m-%d):" >> $REPORT_FILE
+        sar -n DEV -f /var/log/sa/sa$DATE | grep $INTERFACE | grep Average >> $REPORT_FILE
+        echo >> $REPORT_FILE
+    fi
+done
    
-   # Network usage patterns
-   echo "NETWORK USAGE PATTERNS:" >> $REPORT_FILE
-   LOGFILE="/var/log/resource-tracking/network-usage-$(date +%Y%m%d).log"
-   if [ -f "$LOGFILE" ]; then
-       echo "Today's network statistics for $INTERFACE:" >> $REPORT_FILE
-       FIRST_LINE=$(head -2 $LOGFILE | tail -1)
-       LAST_LINE=$(tail -1 $LOGFILE)
+# Network usage patterns
+echo "NETWORK USAGE PATTERNS:" >> $REPORT_FILE
+LOGFILE="/var/log/resource-tracking/network-usage-$(date +%Y%m%d).log"
+if [ -f "$LOGFILE" ]; then
+    echo "Today's network statistics for $INTERFACE:" >> $REPORT_FILE
+    FIRST_LINE=$(head -2 $LOGFILE | tail -1)
+    LAST_LINE=$(tail -1 $LOGFILE)
        
-       if [ -n "$FIRST_LINE" ] && [ -n "$LAST_LINE" ]; then
-           FIRST_RX=$(echo $FIRST_LINE | cut -d',' -f3)
-           FIRST_TX=$(echo $FIRST_LINE | cut -d',' -f4)
-           LAST_RX=$(echo $LAST_LINE | cut -d',' -f3)
-           LAST_TX=$(echo $LAST_LINE | cut -d',' -f4)
+    if [ -n "$FIRST_LINE" ] && [ -n "$LAST_LINE" ]; then
+        FIRST_RX=$(echo $FIRST_LINE | cut -d',' -f3)
+        FIRST_TX=$(echo $FIRST_LINE | cut -d',' -f4)
+        LAST_RX=$(echo $LAST_LINE | cut -d',' -f3)
+        LAST_TX=$(echo $LAST_LINE | cut -d',' -f4)
            
-           RX_DIFF=$((LAST_RX - FIRST_RX))
-           TX_DIFF=$((LAST_TX - FIRST_TX))
+        RX_DIFF=$((LAST_RX - FIRST_RX))
+        TX_DIFF=$((LAST_TX - FIRST_TX))
            
-           echo "Total RX bytes: $RX_DIFF" >> $REPORT_FILE
-           echo "Total TX bytes: $TX_DIFF" >> $REPORT_FILE
-       fi
-   fi
+        echo "Total RX bytes: $RX_DIFF" >> $REPORT_FILE
+        echo "Total TX bytes: $TX_DIFF" >> $REPORT_FILE
+    fi
+fi
    
-   echo "Network trend analysis saved to: $REPORT_FILE"
+echo "Network trend analysis saved to: $REPORT_FILE"
    
    # chmod +x /usr/local/bin/network-trend-analyzer.sh
 
@@ -568,11 +575,15 @@ PART H: CREATE RESOURCE USAGE REPORTS
    LOGFILE="/var/log/resource-tracking/cpu-usage-$(date +%Y%m%d).log"
    if [ -f "$LOGFILE" ]; then
        echo "Samples collected: $(wc -l < $LOGFILE)" >> $REPORT_FILE
-       awk -F',' '{if(NR>1) {user+=$2; system+=$3; idle+=$5; count++}} END {printf "Average - User: %.1f%%, System: %.1f%%, Idle: %.1f%%\n", user/count, system/count, idle/count}' $LOGFILE >> $REPORT_FILE
+
+#note: the default awk treats system as a reserved function name, so the variable system in the CPU summary section was renamed to syscpu to avoid syntax errors.
+       awk -F',' '{if(NR>1) {user+=$2; syscpu+=$3; idle+=$5; count++}} END {printf "Average - User: %.1f%%, System: %.1f%%, Idle: %.1f%%\n", user/count, syscpu/count, idle/count}' $LOGFILE >> $REPORT_FILE    
+
        awk -F',' '{if(NR>1 && $5<min_idle) min_idle=$5} END {printf "Minimum idle: %.1f%%\n", min_idle}' $LOGFILE >> $REPORT_FILE
    fi
    echo >> $REPORT_FILE
-   
+
+
    # Memory usage summary
    echo "MEMORY USAGE SUMMARY:" >> $REPORT_FILE
    LOGFILE="/var/log/resource-tracking/memory-usage-$(date +%Y%m%d).log"
@@ -621,24 +632,24 @@ PART H: CREATE RESOURCE USAGE REPORTS
    # vim /usr/local/bin/resource-cleanup.sh
    
    #!/bin/bash
-   RETENTION_DAYS=30
-   LOGDIR="/var/log/resource-tracking"
+RETENTION_DAYS=30
+LOGDIR="/var/log/resource-tracking"
    
-   echo "Starting resource tracking cleanup - $(date)"
+echo "Starting resource tracking cleanup - $(date)"
    
-   # Clean old tracking files
-   find $LOGDIR -name "*.log" -mtime +$RETENTION_DAYS -delete
+# Clean old tracking files
+find $LOGDIR -name "*.log" -mtime +$RETENTION_DAYS -delete
    
-   # Clean old reports
-   find /var/log -name "*resource*report*.log" -mtime +$RETENTION_DAYS -delete
-   find /var/log -name "*trend-analysis*.log" -mtime +$RETENTION_DAYS -delete
-   find /var/log -name "*capacity-planning*.log" -mtime +$RETENTION_DAYS -delete
-   find /var/log -name "*dashboard*.log" -mtime +$RETENTION_DAYS -delete
+# Clean old reports
+find /var/log -name "*resource*report*.log" -mtime +$RETENTION_DAYS -delete
+find /var/log -name "*trend-analysis*.log" -mtime +$RETENTION_DAYS -delete
+find /var/log -name "*capacity-planning*.log" -mtime +$RETENTION_DAYS -delete
+find /var/log -name "*dashboard*.log" -mtime +$RETENTION_DAYS -delete
    
-   # Compress old files
-   find $LOGDIR -name "*.log" -mtime +7 -exec gzip {} \;
+# Compress old files
+find $LOGDIR -name "*.log" -mtime +7 -exec gzip {} \;
    
-   echo "Resource tracking cleanup completed - $(date)"
+echo "Resource tracking cleanup completed - $(date)"
    
    # chmod +x /usr/local/bin/resource-cleanup.sh
 
@@ -700,14 +711,14 @@ EXPECTED RESULTS:
 
 VALIDATION CHECKLIST:
 ---------------------
-□ Resource tracking scripts operational
-□ Data collection automated
-□ Trend analysis working
-□ Dashboard reports generated
-□ Alert system configured
-□ Capacity planning functional
-□ Historical data preserved
-□ Cleanup procedures scheduled
+□ Resource tracking scripts operational             Pass
+□ Data collection automated                         Pass   
+□ Trend analysis working                            Pass 
+□ Dashboard reports generated                       Pass
+□ Alert system configured                           Pass 
+□ Capacity planning functional                      Pass
+□ Historical data preserved                         Pass
+□ Cleanup procedures scheduled                      Pass 
 
 CLEANUP:
 --------
