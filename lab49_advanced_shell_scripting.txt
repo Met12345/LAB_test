@@ -1649,7 +1649,7 @@ PART F: TESTING AND VALIDATION
    # /opt/scripts/user-management.sh list regular
    # /opt/scripts/user-management.sh create testuser "Test User" "users"
 
-   // If error comes while validating Test-4, then follow the below steps, or else move directly to Test-6
+   // If error comes while validating Test-5, then follow the below steps, or else move directly to Test-6
    // Error: Logging executed as commands. Readonly variable conflicts
    
    // Solution:   
