@@ -1617,10 +1617,75 @@ PART F: TESTING AND VALIDATION
    # /opt/scripts/system-monitor.sh
    # cat /var/log/system-monitor.log
 
+   // If error comes while validating Test-4, then follow the below steps, or else move directly to Test-5
+   //   Error: readonly SCRIPT_NAME / LOG_FILE errors because of Script-template variables conflict
+      
+   //   Solution: 
+   // a.) Dont source the script template
+   // source /opt/scripts/templates/advanced-script-template.sh // Dont do this step
+      
+   // b.) Update ths script - /opt/scripts/system-monitor.sh (Search around top of file). To define logging locally.
+      
+      log_message() {
+          local level="$1"; shift
+          printf '[%s] [%s] %s\n' "$(date '+%F %T')" "$level" "$*" >> "$LOG_FILE"
+      }
+      log_info()  { log_message INFO "$@"; }
+      log_warn()  { log_message WARN "$@"; }
+      log_error() { log_message ERROR "$@"; }
+      log_debug() { :; }
+      
+   // Using own variable
+      readonly SCRIPT_NAME="system-monitor"
+      readonly CONFIG_FILE="/opt/scripts/configs/system-monitor.conf"
+      readonly LOG_FILE="/var/log/system-monitor.log"
+      
+   // c.) Run the script
+   // chmod +x /opt/scripts/system-monitor.sh
+   // /opt/scripts/system-monitor.sh 
+
 5. Test user management script:
    # chmod +x /opt/scripts/user-management.sh
    # /opt/scripts/user-management.sh list regular
    # /opt/scripts/user-management.sh create testuser "Test User" "users"
+
+   // If error comes while validating Test-4, then follow the below steps, or else move directly to Test-6
+   // Error: Logging executed as commands. Readonly variable conflicts
+   
+   // Solution:   
+   // a.) Near the top of user-management.sh update:
+      
+      log_message() {
+          local level="$1"; shift
+          printf '[%s] [%s] %s\n' "$(date '+%F %T')" "$level" "$*" >> "$LOG_FILE"
+      }
+      log_info()  { log_message INFO "$@"; }
+      log_warn()  { log_message WARN "$@"; }
+      log_error() { log_message ERROR "$@"; }
+      log_debug() { :; }
+      
+   // b.) Fix execute_command function inside advanced-function.sh
+       
+      execute_command() {
+          local cmd="$1"
+          local description="${2:-Executing command}"
+          if [ "$DRY_RUN" = true ]; then
+              log_info "[DRY RUN] Would execute: %s" "$cmd"
+              return 0
+          fi
+          if eval "$cmd"; then
+              log_info "%s: SUCCESS" "$description"
+              return 0
+          else
+              local exit_code=$?
+              log_error "%s: FAILED (exit code: %d)" "$description" "$exit_code"
+              return "$exit_code"
+          fi
+      }
+      
+   // 3.) Test
+      # /opt/scripts/user-management.sh create testuser_pass "Test User" "users"
+      # id testuser_pass
 
 6. Test task automation:
    # chmod +x /opt/scripts/config-deployment.sh
@@ -1670,4 +1735,4 @@ CLEANUP:
 
 MODIFIED LINES:
 ---------------------------------------------
-30-235, 240- 485, 493-597, 602-681, 689-826, 831-930, 938-1100, 1106-1270, 1278-1424, 1430-1589, 1605, 846 
+30-235, 240- 485, 493-597, 602-681, 689-826, 831-930, 938-1100, 1106-1270, 1278-1424, 1430-1589, 1605, 846, 1620-1645, 1652-1688
