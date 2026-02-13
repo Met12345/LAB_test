@@ -25,58 +25,37 @@ PART A: INSTALL AND CONFIGURE ADVANCED SAMBA
 ---------------------------------------------
 
 1. Install Samba packages:
-   # dnf install samba samba-client samba-common cifs-utils -y
-   # dnf install krb5-workstation realmd sssd adcli -y
-
+   # dnf install -y samba samba-client samba-common cifs-utils
+  
 2. Configure main Samba configuration:
    # cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
    # vim /etc/samba/smb.conf
-   
    [global]
    workgroup = COMPANY
-   realm = COMPANY.LOCAL
    server string = Enterprise Samba Server
    netbios name = SAMBASERVER
-   
-   # Security and authentication
-   security = ads
-   encrypt passwords = yes
+
+   security = user
    passdb backend = tdbsam
-   
-   # Logging
+
    log file = /var/log/samba/log.%m
    max log size = 1000
    log level = 2
-   
-   # Performance optimization
-   socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=131072 SO_SNDBUF=131072
-   read raw = yes
-   write raw = yes
-   max xmit = 65535
-   dead time = 15
-   getwd cache = yes
-   
-   # Advanced features
-   unix extensions = yes
-   wide links = no
+
    unix charset = UTF-8
    dos charset = CP850
-   
-   # Printing
-   load printers = yes
-   printing = cups
-   printcap name = cups
-   
-   # File system options
-   create mask = 0664
-   directory mask = 0775
-   force create mode = 0664
-   force directory mode = 0775
+
+   map to guest = Bad User
+
+testparm
+systemctl enable --now smb
+systemctl status smb --no-pager
 
 3. Configure firewall:
+yum install firewalld -y
+
    # firewall-cmd --add-service=samba --permanent
-   # firewall-cmd --add-service=samba-client --permanent
-   # firewall-cmd --reload
+      # firewall-cmd --reload
 
 4. Enable and start services:
    # systemctl enable smb nmb
@@ -85,150 +64,152 @@ PART A: INSTALL AND CONFIGURE ADVANCED SAMBA
 PART B: CONFIGURE DOMAIN INTEGRATION
 -------------------------------------
 
-1. Join Active Directory domain:
-   # realm discover company.local
-   # realm join --user=administrator company.local
+1. Verify Samba role
+  testparm -s | grep "Server role"
 
-2. Configure Kerberos:
-   # vim /etc/krb5.conf
-   
-   [libdefaults]
-   default_realm = COMPANY.LOCAL
-   dns_lookup_realm = true
-   dns_lookup_kdc = true
-   ticket_lifetime = 24h
-   renew_lifetime = 7d
-   forwardable = true
-   
-   [realms]
-   COMPANY.LOCAL = {
-       kdc = dc1.company.local
-       admin_server = dc1.company.local
-   }
-   
-   [domain_realm]
-   .company.local = COMPANY.LOCAL
-   company.local = COMPANY.LOCAL
+2. Create local groups (department simulation)
+ 
+   groupadd finance
+groupadd hr
+groupadd it
+getent group finance hr it
 
-3. Configure SSSD for domain users:
-   # vim /etc/sssd/sssd.conf
-   
-   [sssd]
-   domains = company.local
-   config_file_version = 2
-   services = nss, pam
-   
-   [domain/company.local]
-   ad_domain = company.local
-   krb5_realm = COMPANY.LOCAL
-   realmd_tags = manages-system joined-with-samba
-   cache_credentials = True
-   id_provider = ad
-   krb5_store_password_if_offline = True
-   default_shell = /bin/bash
-   ldap_id_mapping = True
-   use_fully_qualified_names = False
-   fallback_homedir = /home/%u
-   access_provider = ad
 
-4. Test domain integration:
-   # kinit administrator@COMPANY.LOCAL
-   # klist
-   # id domainuser
+3. Create local users (REAL-WORLD PRACTICE USERS)
+
+   useradd -M -s /sbin/nologin finuser
+useradd -M -s /sbin/nologin hruser
+useradd -M -s /sbin/nologin ituser
+
+getent passwd finuser hruser ituser
+
+usermod -aG finance finuser
+usermod -aG hr hruser
+usermod -aG it ituser
+
+id finuser
+id hruser
+id ituser
+
+4. Add users to Samba database
+   smbpasswd -a finuser
+smbpasswd -a hruser
+smbpasswd -a ituser
+
+smbpasswd -e finuser
+smbpasswd -e hruser
+smbpasswd -e ituser
+
+pdbedit -L
+
+systemctl restart smb
+systemctl status smb --no-pager
+
+smbclient -L localhost -U finuser
 
 PART C: CONFIGURE ADVANCED SHARES
 ----------------------------------
 
 1. Create shared directories:
-   # mkdir -p /srv/samba/{public,finance,hr,it,projects}
-   # mkdir -p /srv/samba/users/{user1,user2,user3}
+  mkdir -p /srv/samba/{public,finance,hr,it,projects}
+  ls -ld /srv/samba/*
 
 2. Set permissions and SELinux contexts:
-   # chown -R nobody:nobody /srv/samba/public
-   # chown -R root:finance /srv/samba/finance
-   # chown -R root:hr /srv/samba/hr
-   # chown -R root:it /srv/samba/it
-   # chmod -R 755 /srv/samba
-   # setsebool -P samba_export_all_rw on
-   # semanage fcontext -a -t samba_share_t "/srv/samba(/.*)?"
-   # restorecon -R /srv/samba
+   chown -R nobody:nobody /srv/samba/public
+chown -R root:finance /srv/samba/finance
+chown -R root:hr /srv/samba/hr
+chown -R root:it /srv/samba/it
+chown -R root:it /srv/samba/projects
+
+chmod 0777 /srv/samba/public
+chmod 2770 /srv/samba/finance
+chmod 2770 /srv/samba/hr
+chmod 2775 /srv/samba/it
+chmod 2775 /srv/samba/projects
+
+ls -ld /srv/samba/*
+
+getenforce
+setsebool -P samba_export_all_rw on
+semanage fcontext -a -t samba_share_t "/srv/samba(/.*)?"
+restorecon -Rv /srv/samba
+ls -Zd /srv/samba/*
 
 3. Configure advanced shares:
    # vim /etc/samba/smb.conf
-   
+
    [public]
    comment = Public Share
    path = /srv/samba/public
    browseable = yes
    writable = yes
    guest ok = yes
-   create mask = 0664
-   directory mask = 0775
-   
-   [finance]
+
+[finance]
    comment = Finance Department
    path = /srv/samba/finance
-   valid users = @finance, @"Domain Admins"
+   valid users = @finance
    write list = @finance
    browseable = yes
    writable = yes
-   create mask = 0660
-   directory mask = 0770
    force group = finance
-   
-   [hr]
+   create mask = 0660
+   directory mask = 2770
+
+[hr]
    comment = Human Resources
    path = /srv/samba/hr
-   valid users = @hr, @"Domain Admins"
-   write list = @hr
+   valid users = @hr
    browseable = no
    writable = yes
+   force group = hr
    create mask = 0600
-   directory mask = 0700
-   hide unreadable = yes
-   
-   [it]
+   directory mask = 2770
+
+[it]
    comment = IT Department
    path = /srv/samba/it
-   valid users = @it, @"Domain Admins"
-   admin users = @"Domain Admins"
-   write list = @it
+   valid users = @it
    browseable = yes
    writable = yes
+   force group = it
    create mask = 0664
-   directory mask = 0775
-   
-   [projects]
+   directory mask = 2775
+
+[projects]
    comment = Project Files
    path = /srv/samba/projects
-   valid users = @finance, @hr, @it
-   write list = @finance, @hr, @it
+   valid users = @finance @hr @it
+   write list = @finance @hr @it
    browseable = yes
    writable = yes
+   force group = it
    create mask = 0664
-   directory mask = 0775
-   vfs objects = recycle, audit
-   recycle:repository = .recycle
-   recycle:keeptree = yes
-   recycle:versions = yes
+   directory mask = 2775
 
-4. Configure user home directories:
-   # vim /etc/samba/smb.conf
-   
-   [homes]
-   comment = User Home Directories
-   browseable = no
-   writable = yes
-   valid users = %S
-   create mask = 0600
-   directory mask = 0700
+testparm
+systemctl restart smb
+systemctl status smb --no-pager
+
+smbclient //localhost/public -N
+smbclient //localhost/finance -U finuser
+smbclient -L localhost -U hruser
 
 PART D: CONFIGURE PRINT SHARING
 --------------------------------
+1.Create required directories
+mkdir -p /var/spool/samba
+mkdir -p /var/lib/samba/drivers
 
-1. Configure print sharing:
+chown -R root:root /var/spool/samba /var/lib/samba/drivers
+chmod 1777 /var/spool/samba
+chmod 755 /var/lib/samba/drivers
+
+ls -ld /var/spool/samba /var/lib/samba/drivers
+
+2. Configure print sharing:
    # vim /etc/samba/smb.conf
-   
+
    [printers]
    comment = All Printers
    path = /var/spool/samba
@@ -236,32 +217,19 @@ PART D: CONFIGURE PRINT SHARING
    guest ok = no
    writable = no
    printable = yes
-   create mask = 0600
-   
-   [print$]
-   comment = Printer Driver Download Area
+
+[print$]
+   comment = Printer Drivers
    path = /var/lib/samba/drivers
    browseable = yes
-   guest ok = yes
-   read only = yes
-   write list = @"Domain Admins", root
-
-2. Create print directories:
-   # mkdir -p /var/spool/samba
-   # mkdir -p /var/lib/samba/drivers/{W32X86,x64}
-   # chown -R root:root /var/lib/samba/drivers
-   # chmod -R 755 /var/lib/samba/drivers
-
-3. Configure specific printer:
-   # vim /etc/samba/smb.conf
-   
-   [HPLaserJet]
-   comment = HP LaserJet Printer
-   path = /var/spool/samba
-   printer name = HPLaserJet
-   printable = yes
    guest ok = no
-   valid users = @printusers, @"Domain Users"
+   read only = yes
+
+testparm
+systemctl restart smb
+systemctl status smb --no-pager
+
+smbclient -L localhost -U finuser
 
 PART E: CONFIGURE ADVANCED SECURITY
 ------------------------------------
@@ -270,19 +238,17 @@ PART E: CONFIGURE ADVANCED SECURITY
    # vim /etc/samba/smb.conf
    
    # Add to [global] section
-   map acl inherit = yes
+      map acl inherit = yes
    store dos attributes = yes
    vfs objects = acl_xattr
    
    # Add to sensitive shares
    [finance]
-   # ... existing config ...
-   hosts allow = 192.168.1. 192.168.10.
+      hosts allow = 20.192.251.
    hosts deny = ALL
    
    [hr]
-   # ... existing config ...
-   hosts allow = 192.168.1.100 192.168.1.101
+      hosts allow = 20.192.251.114
    hosts deny = ALL
 
 2. Configure audit logging:
@@ -299,12 +265,12 @@ PART E: CONFIGURE ADVANCED SECURITY
    # vim /etc/rsyslog.conf
    local5.*    /var/log/samba-audit.log
 
-3. Configure password policies:
-   # pdbedit -P "min password length" -C 8
-   # pdbedit -P "password history" -C 5
-   # pdbedit -P "maximum password age" -C 90
+systemctl restart rsyslog
+touch /var/log/samba-audit.log
+chmod 640 /var/log/samba-audit.log
 
-4. Enable SMB encryption:
+
+3. Enable SMB encryption:
    # vim /etc/samba/smb.conf
    
    [global]
@@ -315,61 +281,77 @@ PART E: CONFIGURE ADVANCED SECURITY
    # ... existing config ...
    smb encrypt = required
 
+testparm
+systemctl restart smb
+systemctl status smb --no-pager
+
+smbclient //20.192.251.114/finance -U finuser --client-protection=encrypt
+smbclient //20.192.251.114/hr -U hruser --client-protection=encrypt
+
+touch /srv/samba/finance/testfile
+rm /srv/samba/finance/testfile
+tail /var/log/samba-audit.log
+
 PART F: CONFIGURE USER MANAGEMENT
 ----------------------------------
 
-1. Create Samba users:
-   # useradd -M -s /sbin/nologin sambauser1
-   # smbpasswd -a sambauser1
-   # smbpasswd -e sambauser1
+1. Sanity check
+   pdbedit -L
+getent passwd finuser hruser ituser
 
 2. Create user management script:
    # vim /usr/local/bin/samba-user-mgmt.sh
    
    #!/bin/bash
-   
-   case $1 in
-       "add")
-           if [ -n "$2" ]; then
-               useradd -M -s /sbin/nologin $2
-               smbpasswd -a $2
-               echo "User $2 added to Samba"
-           fi
-           ;;
-       "delete")
-           if [ -n "$2" ]; then
-               smbpasswd -x $2
-               userdel $2
-               echo "User $2 removed from Samba"
-           fi
-           ;;
-       "disable")
-           if [ -n "$2" ]; then
-               smbpasswd -d $2
-               echo "User $2 disabled"
-           fi
-           ;;
-       "enable")
-           if [ -n "$2" ]; then
-               smbpasswd -e $2
-               echo "User $2 enabled"
-           fi
-           ;;
-       "list")
-           pdbedit -L
-           ;;
-       *)
-           echo "Usage: $0 {add|delete|disable|enable|list} [username]"
-           ;;
-   esac
-   
-   # chmod +x /usr/local/bin/samba-user-mgmt.sh
 
-3. Configure group mapping:
-   # net groupmap add ntgroup="Domain Admins" unixgroup=wheel type=domain
-   # net groupmap add ntgroup="Finance Users" unixgroup=finance type=domain
-   # net groupmap add ntgroup="HR Users" unixgroup=hr type=domain
-   # net groupmap add ntgroup="IT Users" unixgroup=it type=domain
+set -e
+
+ACTION="$1"
+USER="$2"
+
+case "$ACTION" in
+  add)
+    [ -z "$USER" ] && { echo "Username required"; exit 1; }
+    id "$USER" &>/dev/null || useradd -M -s /sbin/nologin "$USER"
+    smbpasswd -a "$USER"
+    smbpasswd -e "$USER"
+    echo "User $USER added and enabled"
+    ;;
+  delete)
+    [ -z "$USER" ] && { echo "Username required"; exit 1; }
+    smbpasswd -x "$USER"
+    userdel "$USER" || true
+    echo "User $USER deleted"
+    ;;
+  disable)
+    [ -z "$USER" ] && { echo "Username required"; exit 1; }
+    smbpasswd -d "$USER"
+    echo "User $USER disabled"
+    ;;
+  enable)
+    [ -z "$USER" ] && { echo "Username required"; exit 1; }
+    smbpasswd -e "$USER"
+    echo "User $USER enabled"
+    ;;
+  list)
+    pdbedit -L
+    ;;
+  *)
+    echo "Usage: $0 {add|delete|disable|enable|list} username"
+    exit 1
+    ;;
+esac
+
+chmod 700 /usr/local/bin/samba-user-mgmt.sh
+
+/usr/local/bin/samba-user-mgmt.sh list
+
+/usr/local/bin/samba-user-mgmt.sh disable ituser
+/usr/local/bin/samba-user-mgmt.sh enable ituser
+
+pdbedit -L
+systemctl restart smb
+systemctl status smb --no-pager
 
 PART G: CONFIGURE PERFORMANCE OPTIMIZATION
 -------------------------------------------
@@ -380,109 +362,111 @@ PART G: CONFIGURE PERFORMANCE OPTIMIZATION
    [global]
    # ... existing config ...
    
-   # Performance tuning
-   socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=131072 SO_SNDBUF=131072
+      # Performance tuning
    use sendfile = yes
    aio read size = 16384
    aio write size = 16384
-   
-   # Oplocks for better performance
+
+   # Opportunistic locking
    oplocks = yes
    level2 oplocks = yes
    kernel oplocks = no
-   
-   # Caching
-   getwd cache = yes
-   stat cache = yes
-   
-   # Reduce protocol overhead
-   max protocol = SMB3
-   min protocol = SMB2
+
+   # Protocol limits
+   server min protocol = SMB2
+   server max protocol = SMB3
+
+testparm
 
 2. Configure kernel parameters:
-   # vim /etc/sysctl.d/samba-tuning.conf
+   # vim /etc/sysctl.d/99-samba-tuning.conf
    
-   # Network optimization for Samba
-   net.core.rmem_max = 16777216
-   net.core.wmem_max = 16777216
-   net.ipv4.tcp_rmem = 4096 87380 16777216
-   net.ipv4.tcp_wmem = 4096 65536 16777216
-   net.core.netdev_max_backlog = 5000
-   
-   # sysctl -p /etc/sysctl.d/samba-tuning.conf
+   # Samba network tuning
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.core.netdev_max_backlog = 5000
 
-3. Configure disk I/O optimization:
-   # vim /etc/fstab
-   # Add noatime,nodiratime to Samba share mount points
-   /dev/sdb1 /srv/samba ext4 defaults,noatime,nodiratime 0 2
+   # sysctl -p /etc/sysctl.d/99-samba-tuning.conf
+sysctl net.core.rmem_max
+
+systemctl restart smb
+systemctl status smb --no-pager
+
+smbclient //20.192.251.114/finance -U finuser --client-protection=encrypt
+Inside smb: \>:
+
+text
+Copy code
+showconn
+exit
 
 PART H: CONFIGURE MONITORING AND LOGGING
 -----------------------------------------
-
-1. Configure comprehensive logging:
-   # vim /etc/samba/smb.conf
-   
-   [global]
-   # ... existing config ...
-   log level = 2 auth:3 winbind:2
-   max log size = 5000
-   log file = /var/log/samba/log.%m
-   
-   # Per-share logging
-   [finance]
-   # ... existing config ...
-   log level = 3
-
-2. Create monitoring script:
+1. Create monitoring script:
    # vim /usr/local/bin/samba-monitor.sh
    
    #!/bin/bash
-   LOGFILE="/var/log/samba-monitor.log"
-   
-   echo "=== Samba Monitor - $(date) ===" >> $LOGFILE
-   
-   # Check service status
-   systemctl is-active smb nmb >> $LOGFILE
-   
-   # Check connections
-   echo "Active connections:" >> $LOGFILE
-   smbstatus -b >> $LOGFILE
-   
-   # Check shares
-   echo "Share usage:" >> $LOGFILE
-   smbstatus -S >> $LOGFILE
-   
-   # Check locks
-   echo "File locks:" >> $LOGFILE
-   smbstatus -L >> $LOGFILE
-   
-   echo "---" >> $LOGFILE
-   
-   # chmod +x /usr/local/bin/samba-monitor.sh
+
+LOGFILE="/var/log/samba-monitor.log"
+
+{
+  echo "===== Samba Monitor: $(date) ====="
+  echo "--- Service status ---"
+  systemctl is-active smb
+  echo "--- Active Sessions ---"
+  smbstatus -b
+  echo "--- Share Usage ---"
+  smbstatus -S
+  echo "--- Locked Files ---"
+  smbstatus -L
+  echo
+} >> "$LOGFILE"
+
+chmod 700 /usr/local/bin/samba-monitor.sh
+
+/usr/local/bin/samba-monitor.sh
+
+tail -n 50 /var/log/samba-monitor.log
+
+smbclient //20.192.251.114/finance -U finuser --client-protection=encrypt
+Inside:
+
+ls
+exit
+
+/usr/local/bin/samba-monitor.sh
+tail -n 50 /var/log/samba-monitor.log
 
 3. Create performance monitoring:
    # vim /usr/local/bin/samba-performance.sh
    
    #!/bin/bash
-   LOGFILE="/var/log/samba-performance.log"
-   
-   echo "$(date): Samba Performance Metrics" >> $LOGFILE
-   
-   # Connection count
-   CONNECTIONS=$(smbstatus -b | grep -c "^[0-9]")
-   echo "Active connections: $CONNECTIONS" >> $LOGFILE
-   
-   # Share access count
-   SHARES=$(smbstatus -S | grep -c "^[a-zA-Z]")
-   echo "Active shares: $SHARES" >> $LOGFILE
-   
-   # Memory usage
-   MEMORY=$(ps aux | grep smbd | awk '{sum+=$6} END {print sum}')
-   echo "Memory usage (KB): $MEMORY" >> $LOGFILE
-   
-   echo "---" >> $LOGFILE
-   
-   # chmod +x /usr/local/bin/samba-performance.sh
+
+LOGFILE="/var/log/samba-performance.log"
+
+echo "===== Samba Performance: $(date) =====" >> "$LOGFILE"
+
+# Active connections
+CONN=$(smbstatus -b 2>/dev/null | awk 'NR>4 {print}' | wc -l)
+echo "Active connections: $CONN" >> "$LOGFILE"
+
+# Active shares
+SHARES=$(smbstatus -S 2>/dev/null | awk 'NR>4 {print}' | wc -l)
+echo "Active shares: $SHARES" >> "$LOGFILE"
+
+# smbd memory usage (KB)
+MEM=$(ps -o rss= -C smbd | awk '{sum+=$1} END {print sum}')
+echo "SMBD memory usage (KB): $MEM" >> "$LOGFILE"
+
+echo "---" >> "$LOGFILE"
+
+chmod 700 /usr/local/bin/samba-performance.sh
+
+/usr/local/bin/samba-performance.sh
+
+cat /var/log/samba-performance.log
 
 PART I: CONFIGURE BACKUP AND RECOVERY
 --------------------------------------
@@ -491,47 +475,62 @@ PART I: CONFIGURE BACKUP AND RECOVERY
    # vim /usr/local/bin/backup-samba-config.sh
    
    #!/bin/bash
-   BACKUP_DIR="/opt/samba-backups"
-   DATE=$(date +%Y%m%d_%H%M%S)
-   
-   mkdir -p $BACKUP_DIR
-   
-   # Backup configuration
-   cp /etc/samba/smb.conf $BACKUP_DIR/smb.conf.$DATE
-   
-   # Backup user database
-   pdbedit -e tdbsam:/tmp/samba-users.tdb
-   cp /tmp/samba-users.tdb $BACKUP_DIR/users.tdb.$DATE
-   rm /tmp/samba-users.tdb
-   
-   # Backup group mappings
-   net groupmap list > $BACKUP_DIR/groupmap.$DATE
-   
-   echo "Samba configuration backed up to $BACKUP_DIR"
-   
-   # chmod +x /usr/local/bin/backup-samba-config.sh
+set -e
+
+BACKUP_DIR="/opt/samba-backups"
+DATE="$(date +%Y%m%d_%H%M%S)"
+
+mkdir -p "$BACKUP_DIR"
+
+# smb.conf
+cp /etc/samba/smb.conf "$BACKUP_DIR/smb.conf.$DATE"
+
+# Samba users DB
+pdbedit -e tdbsam:/tmp/samba-users.tdb
+cp /tmp/samba-users.tdb "$BACKUP_DIR/users.tdb.$DATE"
+rm -f /tmp/samba-users.tdb
+
+# Group mappings
+net groupmap list > "$BACKUP_DIR/groupmap.$DATE"
+
+echo "Config backup completed: $BACKUP_DIR"
+
+chmod 700 /usr/local/bin/backup-samba-config.sh
+
+/usr/local/bin/backup-samba-config.sh
+ls -lh /opt/samba-backups
 
 2. Create share data backup:
    # vim /usr/local/bin/backup-samba-shares.sh
    
    #!/bin/bash
-   BACKUP_DIR="/opt/share-backups"
-   DATE=$(date +%Y%m%d)
-   
-   mkdir -p $BACKUP_DIR/$DATE
-   
-   # Backup important shares
-   rsync -av /srv/samba/finance/ $BACKUP_DIR/$DATE/finance/
-   rsync -av /srv/samba/hr/ $BACKUP_DIR/$DATE/hr/
-   rsync -av /srv/samba/it/ $BACKUP_DIR/$DATE/it/
-   
-   # Compress backup
-   tar czf $BACKUP_DIR/shares-$DATE.tar.gz -C $BACKUP_DIR $DATE
-   rm -rf $BACKUP_DIR/$DATE
-   
-   echo "Share data backed up to $BACKUP_DIR/shares-$DATE.tar.gz"
-   
-   # chmod +x /usr/local/bin/backup-samba-shares.sh
+set -e
+
+BACKUP_DIR="/opt/share-backups"
+DATE="$(date +%Y%m%d)"
+
+mkdir -p "$BACKUP_DIR/$DATE"
+
+rsync -a /srv/samba/finance/ "$BACKUP_DIR/$DATE/finance/"
+rsync -a /srv/samba/hr/ "$BACKUP_DIR/$DATE/hr/"
+rsync -a /srv/samba/it/ "$BACKUP_DIR/$DATE/it/"
+
+tar czf "$BACKUP_DIR/shares-$DATE.tar.gz" -C "$BACKUP_DIR" "$DATE"
+rm -rf "$BACKUP_DIR/$DATE"
+
+echo "Share backup created: $BACKUP_DIR/shares-$DATE.tar.gz"
+
+chmod 700 /usr/local/bin/backup-samba-shares.sh
+
+/usr/local/bin/backup-samba-shares.sh
+ls -lh /opt/share-backups
+
+cp /opt/samba-backups/smb.conf.TIMESTAMP /etc/samba/smb.conf
+systemctl restart smb
+
+pdbedit -i tdbsam:/opt/samba-backups/users.tdb.TIMESTAMP
+
+tar xzf /opt/share-backups/shares-YYYYMMDD.tar.gz -C /
 
 PART J: CONFIGURE SYSTEMD INTEGRATION
 --------------------------------------
@@ -540,33 +539,35 @@ PART J: CONFIGURE SYSTEMD INTEGRATION
    # vim /etc/systemd/system/samba-monitor.service
    
    [Unit]
-   Description=Samba Monitoring Service
-   After=smb.service nmb.service
-   
-   [Service]
-   Type=oneshot
-   ExecStart=/usr/local/bin/samba-monitor.sh
-   
-   [Install]
-   WantedBy=multi-user.target
+Description=Samba Monitoring Service
+After=smb.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/samba-monitor.sh
 
 2. Create timer for monitoring:
    # vim /etc/systemd/system/samba-monitor.timer
    
    [Unit]
-   Description=Run Samba Monitor every 5 minutes
-   Requires=samba-monitor.service
-   
-   [Timer]
-   OnCalendar=*:0/5
-   Persistent=true
-   
-   [Install]
-   WantedBy=timers.target
+Description=Run Samba Monitor every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
 
 3. Enable monitoring:
-   # systemctl enable samba-monitor.timer
-   # systemctl start samba-monitor.timer
+systemctl daemon-reexec
+systemctl daemon-reload
+systemctl enable --now samba-monitor.timer
+
+systemctl list-timers | grep samba-monitor
+
+systemctl start samba-monitor.service
+tail -n 40 /var/log/samba-monitor.log
 
 PART K: TESTING AND VALIDATION
 -------------------------------
@@ -576,21 +577,41 @@ PART K: TESTING AND VALIDATION
    # testparm -s
 
 2. Test share access:
-   # smbclient -L localhost -U%
-   # smbclient //localhost/public -U%
+   # smbclient //20.192.251.114/public -N
+
+REMOVE encryption from [global]
+Your [global] must NOT contain:
+server smb encrypt = required
+
+Enforce encryption ONLY on secure shares
+[finance]
+   server smb encrypt = required
+
+[hr]
+   server smb encrypt = required
+
+[it]
+   server smb encrypt = required
+
+Public share
+[public]
+   guest ok = yes
+   smb encrypt = off
+
+systemctl restart smb
+
 
 3. Test domain authentication:
-   # smbclient //localhost/finance -U domainuser
-   # kinit domainuser@COMPANY.LOCAL
+smbclient //20.192.251.114/finance -U finuser --client-protection=encrypt
+Inside:
 
-4. Test from Windows client:
-   # Map network drive: \\192.168.1.10\finance
-   # Access via UNC: \\sambaserver\public
+ls
+exit
 
-5. Test printing:
-   # smbclient //localhost/HPLaserJet -U printuser -c "print /etc/passwd"
+systemctl start samba-monitor.service
+tail -n 30 /var/log/samba-monitor.log
 
-6. Monitor connections:
+4. Monitor connections:
    # smbstatus
    # /usr/local/bin/samba-monitor.sh
 
