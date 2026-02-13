@@ -23,737 +23,584 @@ LAB TASKS:
 
 PART A: PERFORMANCE MONITORING FRAMEWORK
 -----------------------------------------
+Required Packages
 
-Install Packages---
-# dnf install -y sysstat iotop bc stress-ng
+dnf clean all
+dnf makecache
+
+dnf install -y vim bash-completion wget curl tar net-tools iproute lsof psmisc procps-ng coreutils util-linux bind-utils bc jq
+
+dnf install -y sysstat iotop dstat htop nmapncat 
+iperf3 stress-ng ethtool
+
+dnf install -y tcpdump
+
+systemctl enable --now sysstat
+systemctl enable --now crond
+
+which iperf3
+which stress-ng
+which iostat
+which sar
+which nc
 
 1. Create performance diagnostics structure:
-# mkdir -p /opt/performance-diagnostics/{scripts,logs,reports,baselines}
-# mkdir -p /opt/performance-diagnostics/analysis/{cpu,memory,disk,network}
+mkdir -p /opt/performance-diagnostics/{scripts,logs,reports,baselines,state}
+mkdir -p /opt/performance-diagnostics/analysis/{cpu,memory,disk,network}
 
-2. Create performance analyzer tool:
-# vim /opt/performance-diagnostics/scripts/performance-analyzer.sh
-   
+2. Common logging + persistence library
+
+cat > /opt/performance-diagnostics/scripts/common.sh << 'EOF'
 #!/bin/bash
-#
-# Performance Bottleneck Analyzer
-#
 
 PERF_ROOT="/opt/performance-diagnostics"
 LOG_FILE="$PERF_ROOT/logs/performance-analysis.log"
+STATE_DIR="$PERF_ROOT/state"
+
+mkdir -p "$PERF_ROOT/logs" "$STATE_DIR"
 
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
+    local level="$1"
+    local message="$2"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] $message" | tee -a "$LOG_FILE"
 }
 
-# System overview analysis
-system_overview() {
-    log_message "INFO" "Gathering system overview"
+# safe numeric compare (bc empty output protection)
+safe_compare() {
+    local expr="$1"
+    local result
+    result=$(echo "$expr" | bc 2>/dev/null)
+    [[ "$result" == "1" ]] && echo 1 || echo 0
+}
 
-    # System information
+# persistence detection (trend based alert)
+check_persistent_issue() {
+    local name="$1"
+    local expr="$2"
+    local threshold="${3:-5}"
+
+    local file="$STATE_DIR/${name}.cnt"
+    [ -f "$file" ] || echo 0 > "$file"
+
+    local status=$(safe_compare "$expr")
+
+    if [[ "$status" -eq 1 ]]; then
+        cnt=$(cat "$file")
+        cnt=$((cnt+1))
+        echo $cnt > "$file"
+        if [[ "$cnt" -ge "$threshold" ]]; then
+            log_message "WARN" "Persistent issue detected: $name"
+        fi
+    else
+        echo 0 > "$file"
+    fi
+}
+EOF
+
+chmod +x /opt/performance-diagnostics/scripts/common.sh
+
+3. Create performance analyzer tool:
+   cat > /opt/performance-diagnostics/scripts/performance-analyzer.sh << 'EOF'
+#!/bin/bash
+source /opt/performance-diagnostics/scripts/common.sh
+
+system_overview() {
+
+    log_message INFO "Gathering system overview"
+
     uname -a > "$PERF_ROOT/logs/system-info.txt"
     cat /proc/cpuinfo > "$PERF_ROOT/logs/cpu-info.txt"
     cat /proc/meminfo > "$PERF_ROOT/logs/memory-info.txt"
 
-    # Load averages
     uptime > "$PERF_ROOT/logs/uptime.txt"
     cat /proc/loadavg > "$PERF_ROOT/logs/loadavg.txt"
 
-    # Process summary
     ps aux --sort=-%cpu | head -20 > "$PERF_ROOT/logs/top-cpu-processes.txt"
     ps aux --sort=-%mem | head -20 > "$PERF_ROOT/logs/top-memory-processes.txt"
 
-    # System statistics
-    vmstat 1 5 > "$PERF_ROOT/logs/vmstat-snapshot.txt"
-    iostat -x 1 5 > "$PERF_ROOT/logs/iostat-snapshot.txt" 2>/dev/null
+    vmstat 1 3 > "$PERF_ROOT/logs/vmstat-snapshot.txt"
+    iostat -x 1 3 > "$PERF_ROOT/logs/iostat-snapshot.txt"
 
-    log_message "INFO" "System overview completed"
+    log_message INFO "System overview completed"
 }
 
-# Identify performance bottlenecks
 identify_bottlenecks() {
-    log_message "INFO" "Identifying performance bottlenecks"
 
-    local bottlenecks_found=0
+    log_message INFO "Checking basic system bottlenecks"
 
-    # CPU bottleneck detection
-    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
-    if (( $(echo "$cpu_usage > 80" | bc -l) )); then
-        log_message "WARN" "CPU bottleneck detected: ${cpu_usage}% usage"
-        bottlenecks_found=$((bottlenecks_found + 1))
-    fi
+    load=$(awk '{print $1}' /proc/loadavg)
+    cores=$(nproc)
 
-    # Memory bottleneck detection
-    local mem_usage=$(free | grep Mem | awk '{printf "%.1f", $3/$2 * 100.0}')
-    if (( $(echo "$mem_usage > 90" | bc -l) )); then
-        log_message "WARN" "Memory bottleneck detected: ${mem_usage}% usage"
-        bottlenecks_found=$((bottlenecks_found + 1))
-    fi
+    check_persistent_issue "cpu_load_high" "$load > $cores"
 
-    # Load average check
-    local load_avg=$(awk '{print $1}' /proc/loadavg)
-    local cpu_cores=$(nproc)
-    if (( $(echo "$load_avg > $cpu_cores * 2" | bc -l) )); then
-        log_message "WARN" "High load average detected: $load_avg (cores: $cpu_cores)"
-        bottlenecks_found=$((bottlenecks_found + 1))
-    fi
+    mem_used=$(free | awk '/Mem/ {printf "%.0f",$3/$2*100}')
+    check_persistent_issue "memory_pressure" "$mem_used > 90"
 
-    # Disk I/O bottleneck detection
-    local io_wait=$(vmstat 1 2 | tail -1 | awk '{print $16}')
-    if (( $(echo "$io_wait > 20" | bc -l) )); then
-        log_message "WARN" "Disk I/O bottleneck detected: ${io_wait}% iowait"
-        bottlenecks_found=$((bottlenecks_found + 1))
-    fi
+    io_wait=$(vmstat 1 2 | tail -1 | awk '{print $16}')
+    check_persistent_issue "io_wait_high" "$io_wait > 20"
 
-    if [ $bottlenecks_found -eq 0 ]; then
-        log_message "INFO" "No obvious bottlenecks detected"
-    else
-        log_message "WARN" "Total bottlenecks detected: $bottlenecks_found"
-    fi
-
-    return $bottlenecks_found
+    log_message INFO "Basic bottleneck scan completed"
 }
-"$@"
 
-3. Create baseline performance collector:
-# vim /opt/performance-diagnostics/scripts/baseline-collector.sh
+case "$1" in
+    system_overview) system_overview ;;
+    identify_bottlenecks) identify_bottlenecks ;;
+    *) echo "Usage: $0 {system_overview|identify_bottlenecks}" ;;
+esac
+EOF
 
+chmod +x /opt/performance-diagnostics/scripts/performance-analyzer.sh
+
+4. Create baseline performance collector:
+   cat > /opt/performance-diagnostics/scripts/baseline-collector.sh << 'EOF'
 #!/bin/bash
-#
-# Performance Baseline Collector
-#
+source /opt/performance-diagnostics/scripts/common.sh
 
-PERF_ROOT="/opt/performance-diagnostics"
-LOG_FILE="$PERF_ROOT/logs/performance-analysis.log"
-
-log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
-}
-
-# Collect performance baseline
 collect_baseline() {
-    local duration="${1:-300}"
-    local baseline_name="${2:-baseline-$(date +%Y%m%d_%H%M%S)}"
 
-    log_message "INFO" "Collecting performance baseline: $baseline_name (${duration}s)"
+    duration="${1:-60}"
+    name="${2:-baseline_$(date +%F_%H%M)}"
+    dir="$PERF_ROOT/baselines/$name"
 
-    local baseline_dir="$PERF_ROOT/baselines/$baseline_name"
-    mkdir -p "$baseline_dir"
+    mkdir -p "$dir"
 
-    # CPU baseline
-    sar -u 1 "$duration" > "$baseline_dir/cpu-baseline.txt" &
+    log_message INFO "Collecting baseline $name"
 
-    # Memory baseline
-    sar -r 1 "$duration" > "$baseline_dir/memory-baseline.txt" &
-
-    # Disk I/O baseline
-    sar -d 1 "$duration" > "$baseline_dir/disk-baseline.txt" &
-
-    # Network baseline
-    sar -n DEV 1 "$duration" > "$baseline_dir/network-baseline.txt" &
-
-    # Process monitoring
-    local remaining="$duration"
-    while [ "$remaining" -gt 0 ]; do
-        echo "$(date): $(ps aux --sort=-%cpu | head -5)" >> "$baseline_dir/process-baseline.txt"
-        sleep 10
-        remaining=$((remaining - 10))
-    done &
+    sar -u 1 $duration > "$dir/cpu.txt" &
+    sar -r 1 $duration > "$dir/memory.txt" &
+    sar -d 1 $duration > "$dir/disk.txt" &
+    sar -n DEV 1 $duration > "$dir/network.txt" &
 
     wait
-
-    log_message "INFO" "Baseline collection completed: $baseline_dir"
+    log_message INFO "Baseline collection finished"
 }
+
+case "$1" in
+    collect_baseline) collect_baseline "$2" "$3" ;;
+    *) echo "Usage: $0 collect_baseline [duration] [name]" ;;
+esac
+EOF
+
+chmod +x /opt/performance-diagnostics/scripts/baseline-collector.sh
+
+/opt/performance-diagnostics/scripts/performance-analyzer.sh system_overview
+/opt/performance-diagnostics/scripts/performance-analyzer.sh identify_bottlenecks
+/opt/performance-diagnostics/scripts/baseline-collector.sh collect_baseline 10 testA
+
+ls /opt/performance-diagnostics/logs
+ls /opt/performance-diagnostics/baselines
 
 PART B: CPU PERFORMANCE ANALYSIS
 ---------------------------------
 
 1. Create CPU analyzer:
-# vim /opt/performance-diagnostics/scripts/cpu-analyzer.sh
-
+   cat > /opt/performance-diagnostics/scripts/cpu-analyzer.sh << 'EOF'
 #!/bin/bash
-#
-# CPU Performance Analyzer
-#
+source /opt/performance-diagnostics/scripts/common.sh
 
-PERF_ROOT="/opt/performance-diagnostics"
-LOG_FILE="$PERF_ROOT/logs/performance-analysis.log"
+CPU_DIR="$PERF_ROOT/analysis/cpu"
+mkdir -p "$CPU_DIR"
 
-log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
-}
-
-# Analyze CPU performance
+#######################################
+# CPU PERFORMANCE ANALYSIS
+#######################################
 analyze_cpu_performance() {
-    log_message "INFO" "Analyzing CPU performance"
 
-    # CPU utilization breakdown
-    sar -u 1 10 > "$PERF_ROOT/analysis/cpu/cpu-utilization.txt"
+    log_message INFO "Analyzing CPU performance"
 
-    # Per-CPU statistics
-    mpstat -P ALL 1 5 > "$PERF_ROOT/analysis/cpu/per-cpu-stats.txt"
+    sar -u 1 5 > "$CPU_DIR/cpu-utilization.txt"
+    mpstat -P ALL 1 5 > "$CPU_DIR/per-core.txt"
+    sar -w 1 5 > "$CPU_DIR/context-switch.txt"
+    ps -eo pid,comm,%cpu --sort=-%cpu | head -20 > "$CPU_DIR/top-cpu.txt"
 
-    # CPU frequency scaling
-    grep MHz /proc/cpuinfo > "$PERF_ROOT/analysis/cpu/cpu-frequencies.txt"
-
-    # Context switches and interrupts
-    sar -w 1 10 > "$PERF_ROOT/analysis/cpu/context-switches.txt"
-
-    # Top CPU consuming processes
-    top -bn1 -o %CPU | head -20 > "$PERF_ROOT/analysis/cpu/top-cpu-processes.txt"
-
-    log_message "INFO" "CPU performance analysis completed"
+    log_message INFO "CPU performance analysis completed"
 }
 
-# Identify CPU bottlenecks
+#######################################
+# CPU BOTTLENECK DETECTION
+#######################################
 identify_cpu_bottlenecks() {
-    log_message "INFO" "Identifying CPU bottlenecks"
 
-    # High CPU processes
-    ps aux --sort=-%cpu | head -10 | while read -r line; do
-        local cpu_usage
-        cpu_usage=$(echo "$line" | awk '{print $3}')
-        local process
-        process=$(echo "$line" | awk '{print $11}')
+    log_message INFO "Checking CPU bottlenecks"
 
-        if (( $(echo "$cpu_usage > 50" | bc -l) )); then
-            log_message "WARN" "High CPU process: $process (${cpu_usage}%)"
-        fi
-    done
+    load=$(awk '{print $1}' /proc/loadavg)
+    cores=$(nproc)
 
-    # CPU steal time (virtualized environments)
-    local steal_time
-    steal_time=$(sar -u 1 1 | tail -1 | awk '{print $6}')
-    if (( $(echo "$steal_time > 10" | bc -l) )); then
-        log_message "WARN" "High CPU steal time detected: ${steal_time}%"
-    fi
+    # persistent high load
+    check_persistent_issue "cpu_overload" "$load > $cores"
 
-    # Load average analysis
-    local load_1min load_5min load_15min cpu_cores
-    load_1min=$(awk '{print $1}' /proc/loadavg)
-    load_5min=$(awk '{print $2}' /proc/loadavg)
-    load_15min=$(awk '{print $3}' /proc/loadavg)
-    cpu_cores=$(nproc)
+    # steal time (virtual machines)
+    steal=$(sar -u 1 1 | awk '/Average/ {print $6}')
+    steal=${steal:-0}
+    check_persistent_issue "cpu_steal_time" "$steal > 10"
 
-    echo "Load averages: 1min=$load_1min, 5min=$load_5min, 15min=$load_15min" > "$PERF_ROOT/analysis/cpu/load-analysis.txt"
-    echo "CPU cores: $cpu_cores" >> "$PERF_ROOT/analysis/cpu/load-analysis.txt"
+    # top process hog
+    hog=$(ps -eo %cpu --sort=-%cpu | awk 'NR==2{print int($1)}')
+    hog=${hog:-0}
+    check_persistent_issue "single_process_cpu_hog" "$hog > 80"
 
-    if (( $(echo "$load_1min > $cpu_cores" | bc -l) )); then
-        log_message "WARN" "High 1-minute load average: $load_1min (cores: $cpu_cores)"
-    fi
-
-    log_message "INFO" "CPU bottleneck identification completed"
+    log_message INFO "CPU bottleneck scan completed"
 }
 
-# CPU stress test
+#######################################
+# CPU STRESS TEST
+#######################################
 cpu_stress_test() {
-    local duration="${1:-60}"
-    local threads="${2:-$(nproc)}"
 
-    log_message "INFO" "Running CPU stress test: ${threads} threads for ${duration}s"
+    duration="${1:-60}"
+    cores=$(nproc)
 
-    # Install stress-ng if not available
-    if ! command -v stress-ng >/dev/null 2>&1; then
-        dnf install -y stress-ng 2>/dev/null || yum install -y stress-ng 2>/dev/null
-    fi
+    log_message INFO "Starting CPU stress test (${cores} cores for ${duration}s)"
 
-    # Monitor during stress test
-    sar -u 1 "$duration" > "$PERF_ROOT/analysis/cpu/stress-test-cpu.txt" &
+    stress-ng --cpu $cores --timeout ${duration}s --metrics-brief > "$CPU_DIR/stress-test.txt" 2>&1
 
-    # Run stress test
-    stress-ng --cpu "$threads" --timeout "${duration}s" --metrics-brief > "$PERF_ROOT/analysis/cpu/stress-test-results.txt"
-
-    wait
-
-    log_message "INFO" "CPU stress test completed"
+    log_message INFO "CPU stress test finished"
 }
-"$@"
-  
+
+case "$1" in
+    analyze_cpu_performance) analyze_cpu_performance ;;
+    identify_cpu_bottlenecks) identify_cpu_bottlenecks ;;
+    cpu_stress_test) cpu_stress_test "$2" ;;
+    *) echo "Usage: $0 {analyze_cpu_performance|identify_cpu_bottlenecks|cpu_stress_test}" ;;
+esac
+EOF
+
+chmod +x /opt/performance-diagnostics/scripts/cpu-analyzer.sh
+
+/opt/performance-diagnostics/scripts/cpu-analyzer.sh analyze_cpu_performance
+/opt/performance-diagnostics/scripts/cpu-analyzer.sh identify_cpu_bottlenecks
+/opt/performance-diagnostics/scripts/cpu-analyzer.sh cpu_stress_test 15
+
+ls /opt/performance-diagnostics/analysis/cpu
+
 PART C: MEMORY PERFORMANCE ANALYSIS
 ------------------------------------
 
 1. Create memory analyzer:
-# vim /opt/performance-diagnostics/scripts/memory-analyzer.sh
-
+   cat > /opt/performance-diagnostics/scripts/memory-analyzer.sh << 'EOF'
 #!/bin/bash
-#
-# Memory Performance Analyzer
-#
+source /opt/performance-diagnostics/scripts/common.sh
 
-PERF_ROOT="/opt/performance-diagnostics"
-LOG_FILE="$PERF_ROOT/logs/performance-analysis.log"
+MEM_DIR="$PERF_ROOT/analysis/memory"
+mkdir -p "$MEM_DIR"
 
-log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
-}
-
-# Analyze memory performance
+#######################################
+# MEMORY PERFORMANCE ANALYSIS
+#######################################
 analyze_memory_performance() {
-    log_message "INFO" "Analyzing memory performance"
 
-    # Memory utilization
-    free -h > "$PERF_ROOT/analysis/memory/memory-usage.txt"
-    cat /proc/meminfo > "$PERF_ROOT/analysis/memory/meminfo.txt"
+    log_message INFO "Analyzing memory performance"
 
-    # Memory statistics over time
-    sar -r 1 10 > "$PERF_ROOT/analysis/memory/memory-stats.txt"
+    free -h > "$MEM_DIR/memory-usage.txt"
+    cat /proc/meminfo > "$MEM_DIR/meminfo.txt"
+    sar -r 1 5 > "$MEM_DIR/memory-stats.txt"
+    sar -S 1 5 > "$MEM_DIR/swap-stats.txt"
+    ps -eo pid,comm,%mem --sort=-%mem | head -20 > "$MEM_DIR/top-memory.txt"
 
-    # Swap usage
-    sar -S 1 10 > "$PERF_ROOT/analysis/memory/swap-stats.txt"
-    swapon --show > "$PERF_ROOT/analysis/memory/swap-devices.txt"
-
-    # Memory-intensive processes
-    ps aux --sort=-%mem | head -20 > "$PERF_ROOT/analysis/memory/top-memory-processes.txt"
-
-    # Page fault statistics
-    sar -B 1 10 > "$PERF_ROOT/analysis/memory/page-faults.txt"
-
-    log_message "INFO" "Memory performance analysis completed"
+    log_message INFO "Memory performance analysis completed"
 }
 
-# Identify memory bottlenecks
+#######################################
+# MEMORY BOTTLENECK DETECTION
+#######################################
 identify_memory_bottlenecks() {
-    log_message "INFO" "Identifying memory bottlenecks"
 
-    # Memory usage analysis
-    local total_mem used_mem mem_percent
-    total_mem=$(free -b | grep Mem | awk '{print $2}')
-    used_mem=$(free -b | grep Mem | awk '{print $3}')
-    mem_percent=$(echo "scale=1; $used_mem * 100 / $total_mem" | bc)
+    log_message INFO "Checking memory bottlenecks"
 
-    echo "Memory usage: ${mem_percent}%" > "$PERF_ROOT/analysis/memory/memory-analysis.txt"
+    mem_used=$(free | awk '/Mem/ {printf "%.0f",$3/$2*100}')
+    mem_used=${mem_used:-0}
+    check_persistent_issue "memory_pressure" "$mem_used > 90"
 
-    if (( $(echo "$mem_percent > 90" | bc -l) )); then
-        log_message "WARN" "High memory usage: ${mem_percent}%"
-    fi
+    swap_used=$(free | awk '/Swap/ {print $3}')
+    swap_used=${swap_used:-0}
+    check_persistent_issue "swap_usage" "$swap_used > 0"
 
-    # Swap usage analysis
-    local swap_used swap_total swap_percent
-    swap_used=$(free -b | grep Swap | awk '{print $3}')
-    if [ "$swap_used" -gt 0 ]; then
-        swap_total=$(free -b | grep Swap | awk '{print $2}')
-        swap_percent=$(echo "scale=1; $swap_used * 100 / $swap_total" | bc)
-        log_message "WARN" "Swap usage detected: ${swap_percent}%"
-    fi
+    oom=$(dmesg | grep -i "killed process" | wc -l)
+    oom=${oom:-0}
+    check_persistent_issue "oom_killer_activity" "$oom > 0"
 
-    # Check for memory leaks
-    ps aux --sort=-%mem | head -10 | while read -r line; do
-        local mem_usage process
-        mem_usage=$(echo "$line" | awk '{print $4}')
-        process=$(echo "$line" | awk '{print $11}')
-
-        if (( $(echo "$mem_usage > 20" | bc -l) )); then
-            log_message "WARN" "High memory process: $process (${mem_usage}%)"
-        fi
-    done
-
-    # OOM killer activity
-    dmesg | grep -i "killed process" > "$PERF_ROOT/analysis/memory/oom-killer.txt"
-    if [ -s "$PERF_ROOT/analysis/memory/oom-killer.txt" ]; then
-        log_message "WARN" "OOM killer activity detected"
-    fi
-
-    log_message "INFO" "Memory bottleneck identification completed"
+    log_message INFO "Memory bottleneck scan completed"
 }
 
-# Memory stress test
+#######################################
+# MEMORY STRESS TEST
+#######################################
 memory_stress_test() {
-    local duration="${1:-60}"
-    local memory_size="${2:-1G}"
 
-    log_message "INFO" "Running memory stress test: ${memory_size} for ${duration}s"
+    duration="${1:-60}"
 
-    # Monitor during stress test
-    sar -r 1 "$duration" > "$PERF_ROOT/analysis/memory/stress-test-memory.txt" &
+    log_message INFO "Starting memory stress test (${duration}s)"
 
-    # Run memory stress test
-    stress-ng --vm 1 --vm-bytes "$memory_size" --timeout "${duration}s" --metrics-brief > "$PERF_ROOT/analysis/memory/stress-test-results.txt"
+    stress-ng --vm 2 --vm-bytes 80% --timeout ${duration}s --metrics-brief > "$MEM_DIR/stress-test.txt" 2>&1
 
-    wait
-
-    log_message "INFO" "Memory stress test completed"
+    log_message INFO "Memory stress test finished"
 }
-"$@"
-   
+
+case "$1" in
+    analyze_memory_performance) analyze_memory_performance ;;
+    identify_memory_bottlenecks) identify_memory_bottlenecks ;;
+    memory_stress_test) memory_stress_test "$2" ;;
+    *) echo "Usage: $0 {analyze_memory_performance|identify_memory_bottlenecks|memory_stress_test}" ;;
+esac
+EOF
+
+chmod +x /opt/performance-diagnostics/scripts/memory-analyzer.sh
+
+/opt/performance-diagnostics/scripts/memory-analyzer.sh analyze_memory_performance
+/opt/performance-diagnostics/scripts/memory-analyzer.sh identify_memory_bottlenecks
+/opt/performance-diagnostics/scripts/memory-analyzer.sh memory_stress_test 15
+
+ls /opt/performance-diagnostics/analysis/memory
+
 PART D: DISK I/O PERFORMANCE ANALYSIS
 --------------------------------------
 
 1. Create disk I/O analyzer:
-# vim /opt/performance-diagnostics/scripts/disk-analyzer.sh
-   
+   cat > /opt/performance-diagnostics/scripts/disk-analyzer.sh << 'EOF'
 #!/bin/bash
-#
-# Disk I/O Performance Analyzer
-#
+source /opt/performance-diagnostics/scripts/common.sh
 
-PERF_ROOT="/opt/performance-diagnostics"
-LOG_FILE="$PERF_ROOT/logs/performance-analysis.log"
+DISK_DIR="$PERF_ROOT/analysis/disk"
+mkdir -p "$DISK_DIR"
 
-log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
-}
-
-# Analyze disk I/O performance
+#######################################
+# DISK PERFORMANCE ANALYSIS
+#######################################
 analyze_disk_performance() {
-    log_message "INFO" "Analyzing disk I/O performance"
 
-    # Disk utilization
-    iostat -x 1 10 > "$PERF_ROOT/analysis/disk/iostat-extended.txt" 2>/dev/null
+    log_message INFO "Analyzing disk performance"
 
-    # Per-device statistics
-    sar -d 1 10 > "$PERF_ROOT/analysis/disk/disk-stats.txt"
+    iostat -x 1 5 > "$DISK_DIR/iostat.txt"
+    sar -d 1 5 > "$DISK_DIR/disk-stats.txt"
+    df -h > "$DISK_DIR/disk-usage.txt"
+    lsblk -f > "$DISK_DIR/block-devices.txt"
 
-    # Disk space usage
-    df -h > "$PERF_ROOT/analysis/disk/disk-space.txt"
-
-    # I/O intensive processes
-    iotop -b -n 5 > "$PERF_ROOT/analysis/disk/iotop-output.txt" 2>/dev/null
-
-    # Block device information
-    lsblk -f > "$PERF_ROOT/analysis/disk/block-devices.txt"
-
-    # Mount information
-    mount | column -t > "$PERF_ROOT/analysis/disk/mount-info.txt"
-
-    log_message "INFO" "Disk I/O performance analysis completed"
+    log_message INFO "Disk performance analysis completed"
 }
 
-# Identify disk I/O bottlenecks
+#######################################
+# DISK BOTTLENECK DETECTION
+#######################################
 identify_disk_bottlenecks() {
-    log_message "INFO" "Identifying disk I/O bottlenecks"
 
-    # I/O wait analysis
-    local io_wait
+    log_message INFO "Checking disk bottlenecks"
+
     io_wait=$(vmstat 1 2 | tail -1 | awk '{print $16}')
-    echo "I/O wait: ${io_wait}%" > "$PERF_ROOT/analysis/disk/io-analysis.txt"
+    io_wait=${io_wait:-0}
+    check_persistent_issue "disk_io_wait" "$io_wait > 20"
 
-    if (( $(echo "$io_wait > 20" | bc -l) )); then
-        log_message "WARN" "High I/O wait: ${io_wait}%"
-    fi
+    full_fs=$(df -h | awk 'NR>1 {gsub("%","",$5); if($5>90) print 1; else print 0}' | grep -c 1)
+    full_fs=${full_fs:-0}
+    check_persistent_issue "filesystem_full" "$full_fs > 0"
 
-    # Disk utilization check
-    iostat -x 1 1 2>/dev/null | grep -E "sd[a-z]|nvme" | while read -r line; do
-        local device util
-        device=$(echo "$line" | awk '{print $1}')
-        util=$(echo "$line" | awk '{print $10}')
-
-        if (( $(echo "$util > 80" | bc -l) )); then
-            log_message "WARN" "High disk utilization: $device (${util}%)"
-        fi
-    done
-
-    # Check for full filesystems
-    df -h | grep -E "[8-9][0-9]%|100%" | while read -r line; do
-        local filesystem usage
-        filesystem=$(echo "$line" | awk '{print $6}')
-        usage=$(echo "$line" | awk '{print $5}')
-        log_message "WARN" "High disk usage: $filesystem ($usage)"
-    done
-
-    log_message "INFO" "Disk I/O bottleneck identification completed"
+    log_message INFO "Disk bottleneck scan completed"
 }
 
-# Disk I/O stress test
+#######################################
+# DISK STRESS TEST
+#######################################
 disk_stress_test() {
-    local duration="${1:-60}"
-    local test_file="${2:-/tmp/disk-stress-test}"
 
-    log_message "INFO" "Running disk I/O stress test for ${duration}s"
+    duration="${1:-60}"
+    testfile="/tmp/disk_stress_test"
 
-    # Monitor during stress test
-    iostat -x 1 "$duration" > "$PERF_ROOT/analysis/disk/stress-test-iostat.txt" 2>/dev/null &
+    log_message INFO "Starting disk stress test (${duration}s)"
 
-    # Run I/O stress test
-    dd if=/dev/zero of="$test_file" bs=1M count=1000 oflag=direct 2> "$PERF_ROOT/analysis/disk/stress-test-write.txt" &
-    dd if="$test_file" of=/dev/null bs=1M iflag=direct 2> "$PERF_ROOT/analysis/disk/stress-test-read.txt" &
+    dd if=/dev/zero of=$testfile bs=1M count=1024 oflag=direct status=none
+    timeout ${duration}s dd if=$testfile of=/dev/null bs=1M iflag=direct status=none
 
-    wait
+    rm -f $testfile
 
-    # Cleanup
-    rm -f "$test_file"
-
-    log_message "INFO" "Disk I/O stress test completed"
+    log_message INFO "Disk stress test finished"
 }
-"$@"
+
+case "$1" in
+    analyze_disk_performance) analyze_disk_performance ;;
+    identify_disk_bottlenecks) identify_disk_bottlenecks ;;
+    disk_stress_test) disk_stress_test "$2" ;;
+    *) echo "Usage: $0 {analyze_disk_performance|identify_disk_bottlenecks|disk_stress_test}" ;;
+esac
+EOF
+
+chmod +x /opt/performance-diagnostics/scripts/disk-analyzer.sh
+
+/opt/performance-diagnostics/scripts/disk-analyzer.sh analyze_disk_performance
+/opt/performance-diagnostics/scripts/disk-analyzer.sh identify_disk_bottlenecks
+/opt/performance-diagnostics/scripts/disk-analyzer.sh disk_stress_test 15
+
+ls /opt/performance-diagnostics/analysis/disk
 
 PART E: NETWORK PERFORMANCE ANALYSIS
 -------------------------------------
 
 1. Create network analyzer:
-# vim /opt/performance-diagnostics/scripts/network-analyzer.sh
-   
+   cat > /opt/performance-diagnostics/scripts/network-analyzer.sh << 'EOF'
 #!/bin/bash
-#
-# Network Performance Analyzer
-#
+source /opt/performance-diagnostics/scripts/common.sh
 
-PERF_ROOT="/opt/performance-diagnostics"
-LOG_FILE="$PERF_ROOT/logs/performance-analysis.log"
+NET_DIR="$PERF_ROOT/analysis/network"
+mkdir -p "$NET_DIR"
 
-log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
+get_iface() {
+    ip route | awk '/default/ {print $5; exit}'
 }
 
-# Analyze network performance
+#######################################
+# NETWORK PERFORMANCE ANALYSIS
+#######################################
 analyze_network_performance() {
-    log_message "INFO" "Analyzing network performance"
 
-    # Network interface statistics
-    sar -n DEV 1 10 > "$PERF_ROOT/analysis/network/interface-stats.txt"
+    log_message INFO "Analyzing network performance"
 
-    # Network errors
-    sar -n EDEV 1 10 > "$PERF_ROOT/analysis/network/network-errors.txt"
+    sar -n DEV 1 5 > "$NET_DIR/interface-stats.txt"
+    sar -n EDEV 1 5 > "$NET_DIR/network-errors.txt"
+    ss -s > "$NET_DIR/socket-summary.txt"
+    ss -tuln > "$NET_DIR/listening-ports.txt"
+    ip addr show > "$NET_DIR/interface-info.txt"
 
-    # Socket statistics
-    ss -s > "$PERF_ROOT/analysis/network/socket-summary.txt"
-
-    # Network connections
-    ss -tuln > "$PERF_ROOT/analysis/network/listening-ports.txt"
-    ss -tun > "$PERF_ROOT/analysis/network/active-connections.txt"
-
-    # Interface information
-    ip addr show > "$PERF_ROOT/analysis/network/interface-info.txt"
-
-    # Network traffic by process
-    if command -v nethogs >/dev/null 2>&1; then
-        timeout 30 nethogs -t > "$PERF_ROOT/analysis/network/process-traffic.txt" 2>/dev/null
-    fi
-
-    log_message "INFO" "Network performance analysis completed"
+    log_message INFO "Network performance analysis completed"
 }
 
-# Identify network bottlenecks
+#######################################
+# NETWORK BOTTLENECK DETECTION
+#######################################
 identify_network_bottlenecks() {
-    log_message "INFO" "Identifying network bottlenecks"
 
-    # Check interface utilization
-    sar -n DEV 1 1 | grep -E "eth|ens|enp" | while read -r line; do
-        local interface rx_kbps tx_kbps rx_mbps tx_mbps
-        interface=$(echo "$line" | awk '{print $2}')
-        rx_kbps=$(echo "$line" | awk '{print $5}')
-        tx_kbps=$(echo "$line" | awk '{print $6}')
+    log_message INFO "Checking network bottlenecks"
 
-        # Convert to Mbps
-        rx_mbps=$(echo "scale=2; $rx_kbps / 1024" | bc)
-        tx_mbps=$(echo "scale=2; $tx_kbps / 1024" | bc)
+    IFACE=$(get_iface)
 
-        echo "Interface $interface: RX=${rx_mbps}Mbps TX=${tx_mbps}Mbps" >> "$PERF_ROOT/analysis/network/bandwidth-usage.txt"
-    done
+    RX=$(sar -n DEV 1 1 | awk -v i="$IFACE" '$2==i {print int($5)}')
+    TX=$(sar -n DEV 1 1 | awk -v i="$IFACE" '$2==i {print int($6)}')
+    ERR=$(sar -n EDEV 1 1 | awk -v i="$IFACE" '$2==i {print $3+$4+$5+$6}')
+    CONN=$(ss -tun | wc -l)
 
-    # Check for network errors
-    local error_count
-    error_count=$(sar -n EDEV 1 1 | grep -E "eth|ens|enp" | awk '{sum += $3 + $4 + $5 + $6} END {print sum}')
-    if [ "$error_count" -gt 0 ]; then
-        log_message "WARN" "Network errors detected: $error_count"
-    fi
+    RX=${RX:-0}
+    TX=${TX:-0}
+    ERR=${ERR:-0}
+    CONN=${CONN:-0}
 
-    # Check connection limits
-    local connection_count
-    connection_count=$(ss -tun | wc -l)
-    if [ "$connection_count" -gt 1000 ]; then
-        log_message "WARN" "High connection count: $connection_count"
-    fi
+    # thresholds tuned for localhost heavy testing
+    check_persistent_issue "high_rx_usage" "$RX > 50000"
+    check_persistent_issue "high_tx_usage" "$TX > 50000"
+    check_persistent_issue "network_errors" "$ERR > 0"
+    check_persistent_issue "connection_flood" "$CONN > 800"
 
-    log_message "INFO" "Network bottleneck identification completed"
+    log_message INFO "Network bottleneck scan completed"
 }
-"$@"
+
+case "$1" in
+    analyze_network_performance) analyze_network_performance ;;
+    identify_network_bottlenecks) identify_network_bottlenecks ;;
+    *) echo "Usage: $0 {analyze_network_performance|identify_network_bottlenecks}" ;;
+esac
+EOF
+
+chmod +x /opt/performance-diagnostics/scripts/network-analyzer.sh
+
+/opt/performance-diagnostics/scripts/network-analyzer.sh analyze_network_performance
+/opt/performance-diagnostics/scripts/network-analyzer.sh identify_network_bottlenecks
+
+ls /opt/performance-diagnostics/analysis/network
 
 PART F: COMPREHENSIVE PERFORMANCE ANALYSIS
 -------------------------------------------
 
 1. Create master performance analyzer:
-# vim /opt/performance-diagnostics/scripts/master-analyzer.sh
-   
+   cat > /opt/performance-diagnostics/perfctl.sh << 'EOF'
 #!/bin/bash
-#
-# Master Performance Analyzer
-#
 
-PERF_ROOT="/opt/performance-diagnostics"
-LOG_FILE="$PERF_ROOT/logs/performance-analysis.log"
+BASE="/opt/performance-diagnostics"
+source $BASE/scripts/common.sh
 
-log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
-}
-
-# Run comprehensive performance analysis
-run_comprehensive_analysis() {
-    local duration="${1:-300}"
-
-    log_message "INFO" "Starting comprehensive performance analysis (${duration}s)"
-
-    # System overview
-    /opt/performance-diagnostics/scripts/performance-analyzer.sh system_overview
-
-    # CPU analysis
-    /opt/performance-diagnostics/scripts/cpu-analyzer.sh analyze_cpu_performance
-    /opt/performance-diagnostics/scripts/cpu-analyzer.sh identify_cpu_bottlenecks
-
-    # Memory analysis
-    /opt/performance-diagnostics/scripts/memory-analyzer.sh analyze_memory_performance
-    /opt/performance-diagnostics/scripts/memory-analyzer.sh identify_memory_bottlenecks
-
-    # Disk I/O analysis
-    /opt/performance-diagnostics/scripts/disk-analyzer.sh analyze_disk_performance
-    /opt/performance-diagnostics/scripts/disk-analyzer.sh identify_disk_bottlenecks
-
-    # Network analysis
-    /opt/performance-diagnostics/scripts/network-analyzer.sh analyze_network_performance
-    /opt/performance-diagnostics/scripts/network-analyzer.sh identify_network_bottlenecks
-
-    # Generate comprehensive report
-    generate_performance_report
-
-    log_message "INFO" "Comprehensive performance analysis completed"
-}
-
-# Generate performance report
-generate_performance_report() {
-    local report_file="$PERF_ROOT/reports/performance-report-$(date +%Y%m%d_%H%M%S).html"
-
-    cat > "$report_file" << 'EOF'
-<!DOCTYPE html>
-<html>
-<head>
-<title>Performance Analysis Report</title>
-<style>
-body { font-family: Arial, sans-serif; margin: 20px; }
-.section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
-.warning { color: red; font-weight: bold; }
-.info { color: blue; }
-pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
-</style>
-</head>
-<body>
-<h1>System Performance Analysis Report</h1>
+case "$1" in
+    detect)
+        detect_all
+        ;;
+    *)
+        echo "Usage: $0 detect"
+        ;;
+esac
 EOF
 
-    echo "<p>Generated: $(date)</p>" >> "$report_file"
+chmod +x /opt/performance-diagnostics/perfctl.sh
 
-    # System overview
-    echo "<div class='section'><h2>System Overview</h2><pre>" >> "$report_file"
-    cat "$PERF_ROOT/logs/system-info.txt" >> "$report_file" 2>/dev/null
-    echo "</pre></div>" >> "$report_file"
+/opt/performance-diagnostics/perfctl.sh analyze
+/opt/performance-diagnostics/perfctl.sh detect
+/opt/performance-diagnostics/perfctl.sh report
 
-    # CPU analysis
-    echo "<div class='section'><h2>CPU Analysis</h2><pre>" >> "$report_file"
-    head -10 "$PERF_ROOT/analysis/cpu/top-cpu-processes.txt" >> "$report_file" 2>/dev/null
-    echo "</pre></div>" >> "$report_file"
-
-    # Memory analysis
-    echo "<div class='section'><h2>Memory Analysis</h2><pre>" >> "$report_file"
-    cat "$PERF_ROOT/analysis/memory/memory-usage.txt" >> "$report_file" 2>/dev/null
-    echo "</pre></div>" >> "$report_file"
-
-    # Bottlenecks summary
-    echo "<div class='section'><h2>Identified Bottlenecks</h2><pre>" >> "$report_file"
-    grep "WARN" "$LOG_FILE" | tail -20 >> "$report_file"
-    echo "</pre></div>" >> "$report_file"
-
-    echo "</body></html>" >> "$report_file"
-
-    log_message "INFO" "Performance report generated: $report_file"
-}
-"$@"
+cat /opt/performance-diagnostics/reports/system-report.txt
 
 2. Create performance monitoring daemon:
-# vim /opt/performance-diagnostics/scripts/performance-monitor.sh
-   
+   cat > /opt/performance-diagnostics/scripts/performance-monitor.sh << 'EOF'
 #!/bin/bash
-#
-# Performance Monitoring Daemon
-#
 
-PERF_ROOT="/opt/performance-diagnostics"
-LOG_FILE="$PERF_ROOT/logs/performance-analysis.log"
+BASE="/opt/performance-diagnostics"
+PERFCTL="$BASE/perfctl.sh"
+LOG="$BASE/logs/continuous-monitor.log"
 
-log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" | tee -a "$LOG_FILE"
-}
+mkdir -p $BASE/logs
 
-# Continuous performance monitoring
-continuous_monitoring() {
-    local interval="${1:-60}"
-    local alert_threshold_cpu="${2:-80}"
-    local alert_threshold_mem="${3:-90}"
+echo "monitor started $(date)" >> $LOG
 
-    log_message "INFO" "Starting continuous performance monitoring (interval: ${interval}s)"
-
-    while true; do
-        local timestamp
-        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-
-        # CPU monitoring
-        local cpu_usage
-        cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
-
-        # Memory monitoring
-        local mem_usage
-        mem_usage=$(free | grep Mem | awk '{printf "%.1f", $3/$2 * 100.0}')
-
-        # Log metrics
-        echo "$timestamp,CPU,$cpu_usage" >> "$PERF_ROOT/logs/continuous-monitoring.csv"
-        echo "$timestamp,Memory,$mem_usage" >> "$PERF_ROOT/logs/continuous-monitoring.csv"
-
-        # Check thresholds
-        if (( $(echo "$cpu_usage > $alert_threshold_cpu" | bc -l) )); then
-            log_message "ALERT" "CPU usage threshold exceeded: ${cpu_usage}%"
-        fi
-
-        if (( $(echo "$mem_usage > $alert_threshold_mem" | bc -l) )); then
-            log_message "ALERT" "Memory usage threshold exceeded: ${mem_usage}%"
-        fi
-
-        sleep "$interval"
-    done
-}
-"$@"
+while true
+do
+    $PERFCTL detect >> "$LOG" 2>&1
+    sleep 30
+done
+EOF
 
 PART G: TESTING AND AUTOMATION
 -------------------------------
 
 1. Test performance diagnostics framework:
-# chmod +x /opt/performance-diagnostics/scripts/*.sh
-# /opt/performance-diagnostics/scripts/performance-analyzer.sh system_overview
-# /opt/performance-diagnostics/scripts/performance-analyzer.sh identify_bottlenecks
+   # chmod +x /opt/performance-diagnostics/scripts/*.sh
+   # /opt/performance-diagnostics/scripts/performance-analyzer.sh system_overview
+   # /opt/performance-diagnostics/scripts/performance-analyzer.sh identify_bottlenecks
 
 2. Test individual analyzers:
-# /opt/performance-diagnostics/scripts/cpu-analyzer.sh analyze_cpu_performance
-# /opt/performance-diagnostics/scripts/memory-analyzer.sh analyze_memory_performance
-# /opt/performance-diagnostics/scripts/disk-analyzer.sh analyze_disk_performance
+   # /opt/performance-diagnostics/scripts/cpu-analyzer.sh analyze_cpu_performance
+   # /opt/performance-diagnostics/scripts/memory-analyzer.sh analyze_memory_performance
+   # /opt/performance-diagnostics/scripts/disk-analyzer.sh analyze_disk_performance
 
 3. Run comprehensive analysis:
-# /opt/performance-diagnostics/scripts/master-analyzer.sh run_comprehensive_analysis 180
+   # /opt/performance-diagnostics/scripts/master-analyzer.sh run_comprehensive_analysis 180
 
 4. Test stress testing:
-# /opt/performance-diagnostics/scripts/cpu-analyzer.sh cpu_stress_test 30 2
-# /opt/performance-diagnostics/scripts/memory-analyzer.sh memory_stress_test 30 512M
+   # /opt/performance-diagnostics/scripts/cpu-analyzer.sh cpu_stress_test 30 2
+   # /opt/performance-diagnostics/scripts/memory-analyzer.sh memory_stress_test 30 512M
 
 5. Create monitoring service:
-# vim /etc/systemd/system/performance-monitor.service
-   
+   cat > /etc/systemd/system/performance-monitor.service << 'EOF'
 [Unit]
-Description=Performance Monitor
-After=multi-user.target
+Description=Performance Monitoring Service
+After=network.target
 
 [Service]
 Type=simple
-ExecStart=/opt/performance-diagnostics/scripts/performance-monitor.sh continuous_monitoring 300
+ExecStart=/opt/performance-diagnostics/scripts/performance-monitor.sh 30
 Restart=always
-RestartSec=30
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-   
-# systemctl enable --now performance-monitor.service
+EOF
+
+systemctl daemon-reload
+sed -i '1s|.*|#!/bin/bash|' /opt/performance-diagnostics/scripts/performance-monitor.sh
+
+head -1 /opt/performance-diagnostics/scripts/performance-monitor.sh
+
+tail -f /opt/performance-diagnostics/logs/continuous-monitor.log
 
 6. Create automated analysis schedule:
-# vim /etc/cron.d/performance-analysis
+yum install cronie -y
+   # vim /etc/cron.d/performance-analysis
    
-# Performance analysis automation
-0 */6 * * * root /opt/performance-diagnostics/scripts/master-analyzer.sh run_comprehensive_analysis 300
-*/15 * * * * root /opt/performance-diagnostics/scripts/performance-analyzer.sh identify_bottlenecks
-0 2 * * * root /opt/performance-diagnostics/scripts/baseline-collector.sh collect_baseline 600
+   # Performance analysis automation
+   0 */6 * * * root /opt/performance-diagnostics/scripts/master-analyzer.sh run_comprehensive_analysis 300
+   */15 * * * * root /opt/performance-diagnostics/scripts/performance-analyzer.sh identify_bottlenecks
+   0 2 * * * root /opt/performance-diagnostics/scripts/baseline-collector.sh collect_baseline 600
 
 TROUBLESHOOTING COMMANDS:
 -------------------------
