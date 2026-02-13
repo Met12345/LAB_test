@@ -23,9 +23,13 @@ PART A: UNDERSTAND MYSQL PRIVILEGE SYSTEM
 ------------------------------------------
 
 1. Examine current user structure:
+# yum install mariadb-server mariadb -y
+   # systemctl enable mariadb --now
+systemctl status mariadb --no-pager
+# mysql_secure_installation
    # mysql -u root -p
    
-   MariaDB> SELECT User, Host, authentication_string FROM mysql.user;
+   MariaDB> SELECT User, Host, plugin FROM mysql.user;
    MariaDB> DESCRIBE mysql.user;
    MariaDB> SHOW GRANTS FOR 'root'@'localhost';
 
@@ -47,226 +51,362 @@ PART B: CREATE APPLICATION USERS
    # mysql -u root -p
    
    # Read-only user for reporting
-   MariaDB> CREATE USER 'webapp_readonly'@'192.168.1.%' 
-   IDENTIFIED BY 'ReadOnly123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'webapp_readonly'@'20.192.193.109'
+IDENTIFIED BY 'ReadOnly123!';
    
    # Application user with limited write access
-   MariaDB> CREATE USER 'webapp_app'@'192.168.1.%' 
-   IDENTIFIED BY 'AppUser123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'webapp_app'@'20.192.193.109'
+IDENTIFIED BY 'AppUser123!';
    
    # Administrative user for maintenance
-   MariaDB> CREATE USER 'webapp_admin'@'localhost' 
-   IDENTIFIED BY 'AdminUser123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'webapp_admin'@'localhost'
+IDENTIFIED BY 'AdminUser123!';
    
    # Backup user
-   MariaDB> CREATE USER 'webapp_backup'@'localhost' 
-   IDENTIFIED BY 'BackupUser123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'webapp_backup'@'localhost'
+IDENTIFIED BY 'BackupUser123!';
 
 2. Create users for different environments:
    # Development environment users
-   MariaDB> CREATE USER 'dev_user'@'192.168.1.%' 
-   IDENTIFIED BY 'DevUser123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'dev_user'@'20.192.193.109'
+IDENTIFIED BY 'DevUser123!';
    
    # Testing environment users
-   MariaDB> CREATE USER 'test_user'@'192.168.1.%' 
-   IDENTIFIED BY 'TestUser123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'test_user'@'20.192.193.109'
+IDENTIFIED BY 'TestUser123!';
    
    # Production monitoring user
-   MariaDB> CREATE USER 'monitor_user'@'localhost' 
-   IDENTIFIED BY 'MonitorUser123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'monitor_user'@'localhost'
+IDENTIFIED BY 'MonitorUser123!';
 
 3. Create service-specific users:
    # API service user
-   MariaDB> CREATE USER 'api_service'@'192.168.1.%' 
-   IDENTIFIED BY 'ApiService123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'api_service'@'20.192.193.109'
+IDENTIFIED BY 'ApiService123!';
    
    # Batch processing user
-   MariaDB> CREATE USER 'batch_processor'@'localhost' 
-   IDENTIFIED BY 'BatchProc123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'batch_processor'@'localhost'
+IDENTIFIED BY 'BatchProc123!';
    
    # Analytics user
-   MariaDB> CREATE USER 'analytics_user'@'192.168.1.%' 
-   IDENTIFIED BY 'Analytics123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'analytics_user'@'20.192.193.109'
+IDENTIFIED BY 'Analytics123!';
+
+SELECT User, Host FROM mysql.user
+WHERE User IN (
+ 'webapp_readonly','webapp_app','webapp_admin','webapp_backup',
+ 'dev_user','test_user','monitor_user',
+ 'api_service','batch_processor','analytics_user'
+)
+ORDER BY User, Host;
 
 PART C: CONFIGURE DATABASE-LEVEL PRIVILEGES
 --------------------------------------------
 
 1. Grant database-level privileges:
+mysql -u root -p
+CREATE DATABASE IF NOT EXISTS webapp_prod;
+CREATE DATABASE IF NOT EXISTS webapp_dev;
+CREATE DATABASE IF NOT EXISTS webapp_test;
+
    # Read-only access to production database
-   MariaDB> GRANT SELECT ON webapp_prod.* TO 'webapp_readonly'@'192.168.1.%';
+   MariaDB> GRANT SELECT ON webapp_prod.* 
+TO 'webapp_readonly'@'20.192.193.109';
    
    # Application user privileges
-   MariaDB> GRANT SELECT, INSERT, UPDATE, DELETE ON webapp_prod.* 
-   TO 'webapp_app'@'192.168.1.%';
+   MariaDB> GRANT SELECT, INSERT, UPDATE, DELETE 
+ON webapp_prod.* 
+TO 'webapp_app'@'20.192.193.109';
    
    # Admin user full privileges
-   MariaDB> GRANT ALL PRIVILEGES ON webapp_prod.* TO 'webapp_admin'@'localhost';
-   MariaDB> GRANT ALL PRIVILEGES ON webapp_dev.* TO 'webapp_admin'@'localhost';
-   MariaDB> GRANT ALL PRIVILEGES ON webapp_test.* TO 'webapp_admin'@'localhost';
+   GRANT ALL PRIVILEGES ON webapp_prod.* 
+TO 'webapp_admin'@'localhost';
+
+GRANT ALL PRIVILEGES ON webapp_dev.* 
+TO 'webapp_admin'@'localhost';
+
+GRANT ALL PRIVILEGES ON webapp_test.* 
+TO 'webapp_admin'@'localhost';
 
 2. Grant environment-specific privileges:
    # Development environment
-   MariaDB> GRANT ALL PRIVILEGES ON webapp_dev.* TO 'dev_user'@'192.168.1.%';
+   MariaDB> GRANT ALL PRIVILEGES ON webapp_dev.* 
+TO 'dev_user'@'20.192.193.109';
    
    # Testing environment
-   MariaDB> GRANT SELECT, INSERT, UPDATE, DELETE ON webapp_test.* 
-   TO 'test_user'@'192.168.1.%';
+   MariaDB> GRANT SELECT, INSERT, UPDATE, DELETE 
+ON webapp_test.* 
+TO 'test_user'@'20.192.193.109';
    
    # Analytics access
-   MariaDB> GRANT SELECT ON webapp_prod.* TO 'analytics_user'@'192.168.1.%';
-   MariaDB> GRANT SELECT ON webapp_prod.orders TO 'analytics_user'@'192.168.1.%';
-   MariaDB> GRANT SELECT ON webapp_prod.products TO 'analytics_user'@'192.168.1.%';
+   MariaDB> GRANT SELECT ON webapp_prod.* 
+TO 'analytics_user'@'20.192.193.109';
 
 3. Grant backup privileges:
    MariaDB> GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER 
    ON *.* TO 'webapp_backup'@'localhost';
    
    # Monitoring privileges
-   MariaDB> GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'monitor_user'@'localhost';
-   MariaDB> GRANT SELECT ON performance_schema.* TO 'monitor_user'@'localhost';
-   MariaDB> GRANT SELECT ON information_schema.* TO 'monitor_user'@'localhost';
+   GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER
+ON *.* 
+TO 'webapp_backup'@'localhost';
+
+GRANT PROCESS, REPLICATION CLIENT 
+ON *.* 
+TO 'monitor_user'@'localhost';
+
+FLUSH PRIVILEGES;
+SHOW GRANTS FOR 'webapp_readonly'@'20.192.193.109';
+SHOW GRANTS FOR 'webapp_app'@'20.192.193.109';
+SHOW GRANTS FOR 'webapp_admin'@'localhost';
+SHOW GRANTS FOR 'analytics_user'@'20.192.193.109';
 
 PART D: CONFIGURE TABLE-LEVEL PRIVILEGES
 -----------------------------------------
+STEP D1 — Root login
+mysql -u root -p
 
-1. Create tables with different access levels:
-   MariaDB> USE webapp_prod;
-   
-   MariaDB> CREATE TABLE public_data (
-       id INT AUTO_INCREMENT PRIMARY KEY,
-       title VARCHAR(100),
-       content TEXT,
-       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-   );
-   
-   MariaDB> CREATE TABLE sensitive_data (
-       id INT AUTO_INCREMENT PRIMARY KEY,
-       user_id INT,
-       personal_info TEXT,
-       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-   );
-   
-   MariaDB> CREATE TABLE financial_data (
-       id INT AUTO_INCREMENT PRIMARY KEY,
-       user_id INT,
-       transaction_amount DECIMAL(10,2),
-       account_number VARCHAR(20),
-       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-   );
+STEP D2 — Production DB select karo
+USE webapp_prod;
 
-2. Grant table-specific privileges:
-   # API service can only access public data
-   MariaDB> GRANT SELECT, INSERT, UPDATE ON webapp_prod.public_data 
-   TO 'api_service'@'192.168.1.%';
-   
-   # Batch processor needs access to specific tables
-   MariaDB> GRANT SELECT, INSERT, UPDATE ON webapp_prod.orders 
-   TO 'batch_processor'@'localhost';
-   MariaDB> GRANT SELECT, UPDATE ON webapp_prod.products 
-   TO 'batch_processor'@'localhost';
-   
-   # Analytics user gets read access to specific tables
-   MariaDB> GRANT SELECT ON webapp_prod.public_data TO 'analytics_user'@'192.168.1.%';
-   MariaDB> GRANT SELECT ON webapp_prod.orders TO 'analytics_user'@'192.168.1.%';
+STEP D3 — REQUIRED TABLES CREATE KARO
+CREATE TABLE IF NOT EXISTS public_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(100),
+    content TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-3. Restrict access to sensitive tables:
-   # Only admin can access financial data
-   MariaDB> GRANT SELECT, INSERT, UPDATE, DELETE ON webapp_prod.financial_data 
-   TO 'webapp_admin'@'localhost';
-   
-   # Limited access to sensitive data
-   MariaDB> GRANT SELECT ON webapp_prod.sensitive_data TO 'webapp_admin'@'localhost';
+CREATE TABLE IF NOT EXISTS sensitive_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    personal_info TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS financial_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    transaction_amount DECIMAL(10,2),
+    account_number VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50),
+    email VARCHAR(100),
+    password_hash VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    amount DECIMAL(10,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS products (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100),
+    price DECIMAL(10,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+STEP D4 — API SERVICE (PUBLIC DATA ONLY)
+GRANT SELECT, INSERT, UPDATE
+ON webapp_prod.public_data
+TO 'api_service'@'20.192.193.109';
+
+STEP D5 — BATCH PROCESSOR (SPECIFIC TABLES)
+GRANT SELECT, INSERT, UPDATE
+ON webapp_prod.orders
+TO 'batch_processor'@'localhost';
+
+GRANT SELECT, UPDATE
+ON webapp_prod.products
+TO 'batch_processor'@'localhost';
+
+STEP D6 — ANALYTICS USER (READ-ONLY SELECTED TABLES)
+GRANT SELECT
+ON webapp_prod.public_data
+TO 'analytics_user'@'20.192.193.109';
+
+GRANT SELECT
+ON webapp_prod.orders
+TO 'analytics_user'@'20.192.193.109';
+
+GRANT SELECT
+ON webapp_prod.products
+TO 'analytics_user'@'20.192.193.109';
+
+STEP D7 — SENSITIVE TABLE ACCESS (ADMIN ONLY)
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON webapp_prod.financial_data
+TO 'webapp_admin'@'localhost';
+
+GRANT SELECT
+ON webapp_prod.sensitive_data
+TO 'webapp_admin'@'localhost';
+
+STEP D8 — APPLY CHANGES
+FLUSH PRIVILEGES;
+
+STEP D9 — VERIFICATION (MANDATORY)
+SHOW GRANTS FOR 'api_service'@'20.192.193.109';
+SHOW GRANTS FOR 'batch_processor'@'localhost';
+SHOW GRANTS FOR 'analytics_user'@'20.192.193.109';
+SHOW GRANTS FOR 'webapp_admin'@'localhost';
 
 PART E: CONFIGURE COLUMN-LEVEL PRIVILEGES
 ------------------------------------------
 
 1. Create user with column-specific access:
-   MariaDB> CREATE USER 'limited_user'@'192.168.1.%' 
-   IDENTIFIED BY 'LimitedUser123!';
+mysql -u root -p
+   MariaDB> CREATE USER IF NOT EXISTS 'limited_user'@'20.192.193.109'
+IDENTIFIED BY 'LimitedUser123!';
    
    # Grant access to specific columns only
-   MariaDB> GRANT SELECT (id, username, email), UPDATE (email) 
-   ON webapp_prod.users TO 'limited_user'@'192.168.1.%';
+   MariaDB> GRANT SELECT (id, username, email),
+      UPDATE (email)
+ON webapp_prod.users
+TO 'limited_user'@'20.192.193.109';
    
    # Grant insert on specific columns
-   MariaDB> GRANT INSERT (username, email, password_hash) 
-   ON webapp_prod.users TO 'limited_user'@'192.168.1.%';
+   MariaDB> GRANT INSERT (username, email, password_hash)
+ON webapp_prod.users
+TO 'limited_user'@'20.192.193.109';
 
 2. Create customer service user:
-   MariaDB> CREATE USER 'customer_service'@'192.168.1.%' 
-   IDENTIFIED BY 'CustomerSvc123!';
+   MariaDB> CREATE USER IF NOT EXISTS 'customer_service'@'20.192.193.109'
+IDENTIFIED BY 'CustomerSvc123!';
    
    # Limited access to customer data
-   MariaDB> GRANT SELECT (id, username, email, created_at) 
-   ON webapp_prod.users TO 'customer_service'@'192.168.1.%';
-   MariaDB> GRANT UPDATE (email) ON webapp_prod.users 
-   TO 'customer_service'@'192.168.1.%';
+   GRANT SELECT (id, username, email, created_at)
+ON webapp_prod.users
+TO 'customer_service'@'20.192.193.109';
+
+GRANT UPDATE (email)
+ON webapp_prod.users
+TO 'customer_service'@'20.192.193.109';
+
+FLUSH PRIVILEGES;
+SHOW GRANTS FOR 'limited_user'@'20.192.193.109';
+SHOW GRANTS FOR 'customer_service'@'20.192.193.109';
 
 PART F: IMPLEMENT ROLE-BASED ACCESS CONTROL
 --------------------------------------------
 
 1. Create roles for different functions:
-   MariaDB> CREATE ROLE 'read_only_role';
-   MariaDB> CREATE ROLE 'data_entry_role';
-   MariaDB> CREATE ROLE 'admin_role';
-   MariaDB> CREATE ROLE 'backup_role';
-   MariaDB> CREATE ROLE 'monitor_role';
+   CREATE ROLE IF NOT EXISTS 'read_only_role';
+CREATE ROLE IF NOT EXISTS 'data_entry_role';
+CREATE ROLE IF NOT EXISTS 'admin_role';
+CREATE ROLE IF NOT EXISTS 'backup_role';
+CREATE ROLE IF NOT EXISTS 'monitor_role';
 
 2. Assign privileges to roles:
    # Read-only role
-   MariaDB> GRANT SELECT ON webapp_prod.* TO 'read_only_role';
+   MariaDB> GRANT SELECT
+ON webapp_prod.*
+TO 'read_only_role';
    
    # Data entry role
-   MariaDB> GRANT SELECT, INSERT, UPDATE ON webapp_prod.* TO 'data_entry_role';
+   MariaDB> GRANT SELECT, INSERT, UPDATE
+ON webapp_prod.*
+TO 'data_entry_role';
    
    # Admin role
-   MariaDB> GRANT ALL PRIVILEGES ON webapp_prod.* TO 'admin_role';
-   MariaDB> GRANT ALL PRIVILEGES ON webapp_dev.* TO 'admin_role';
-   MariaDB> GRANT ALL PRIVILEGES ON webapp_test.* TO 'admin_role';
+  GRANT ALL PRIVILEGES
+ON webapp_prod.*
+TO 'admin_role';
+
+GRANT ALL PRIVILEGES
+ON webapp_dev.*
+TO 'admin_role';
+
+GRANT ALL PRIVILEGES
+ON webapp_test.*
+TO 'admin_role';
    
    # Backup role
-   MariaDB> GRANT SELECT, LOCK TABLES, SHOW VIEW ON *.* TO 'backup_role';
+   MariaDB> GRANT SELECT, LOCK TABLES, SHOW VIEW
+ON *.*
+TO 'backup_role';
    
    # Monitor role
    MariaDB> GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'monitor_role';
    MariaDB> GRANT SELECT ON performance_schema.* TO 'monitor_role';
 
 3. Assign roles to users:
-   MariaDB> GRANT 'read_only_role' TO 'webapp_readonly'@'192.168.1.%';
-   MariaDB> GRANT 'data_entry_role' TO 'webapp_app'@'192.168.1.%';
-   MariaDB> GRANT 'admin_role' TO 'webapp_admin'@'localhost';
-   MariaDB> GRANT 'backup_role' TO 'webapp_backup'@'localhost';
-   MariaDB> GRANT 'monitor_role' TO 'monitor_user'@'localhost';
+   GRANT 'read_only_role'
+TO 'webapp_readonly'@'20.192.193.109';
+
+GRANT 'data_entry_role'
+TO 'webapp_app'@'20.192.193.109';
+
+GRANT 'admin_role'
+TO 'webapp_admin'@'localhost';
+
+GRANT 'backup_role'
+TO 'webapp_backup'@'localhost';
+
+GRANT 'monitor_role'
+TO 'monitor_user'@'localhost';
 
 4. Set default roles:
-   MariaDB> SET DEFAULT ROLE 'read_only_role' FOR 'webapp_readonly'@'192.168.1.%';
-   MariaDB> SET DEFAULT ROLE 'data_entry_role' FOR 'webapp_app'@'192.168.1.%';
-   MariaDB> SET DEFAULT ROLE 'admin_role' FOR 'webapp_admin'@'localhost';
+   SET DEFAULT ROLE 'read_only_role'
+FOR 'webapp_readonly'@'20.192.193.109';
+
+SET DEFAULT ROLE 'data_entry_role'
+FOR 'webapp_app'@'20.192.193.109';
+
+SET DEFAULT ROLE 'admin_role'
+FOR 'webapp_admin'@'localhost';
+
+FLUSH PRIVILEGES;
+SHOW GRANTS FOR 'webapp_readonly'@'20.192.193.109';
+SHOW GRANTS FOR 'webapp_app'@'20.192.193.109';
+SHOW GRANTS FOR 'webapp_admin'@'localhost';
 
 PART G: CONFIGURE USER ACCOUNT POLICIES
 ----------------------------------------
 
 1. Set password expiration policies:
-   MariaDB> ALTER USER 'webapp_app'@'192.168.1.%' PASSWORD EXPIRE INTERVAL 90 DAY;
-   MariaDB> ALTER USER 'webapp_admin'@'localhost' PASSWORD EXPIRE INTERVAL 60 DAY;
-   MariaDB> ALTER USER 'dev_user'@'192.168.1.%' PASSWORD EXPIRE INTERVAL 180 DAY;
+mysql -u root -p
+
+  ALTER USER 'webapp_app'@'20.192.193.109' PASSWORD EXPIRE;
+ALTER USER 'webapp_admin'@'localhost' PASSWORD EXPIRE;
+ALTER USER 'dev_user'@'20.192.193.109' PASSWORD EXPIRE;
+
 
 2. Configure account locking:
-   MariaDB> CREATE USER 'temp_user'@'192.168.1.%' 
-   IDENTIFIED BY 'TempUser123!' ACCOUNT LOCK;
+   MariaDB> CREATE USER IF NOT EXISTS 'temp_user'@'20.192.193.109'
+IDENTIFIED BY 'TempUser123!'
+ACCOUNT LOCK;
    
    # Unlock when needed
-   MariaDB> ALTER USER 'temp_user'@'192.168.1.%' ACCOUNT UNLOCK;
+   MariaDB> ALTER USER 'temp_user'@'20.192.193.109' ACCOUNT UNLOCK;
 
 3. Set connection limits:
-   MariaDB> ALTER USER 'webapp_app'@'192.168.1.%' 
-   WITH MAX_CONNECTIONS_PER_HOUR 1000 
-   MAX_QUERIES_PER_HOUR 10000 
-   MAX_USER_CONNECTIONS 10;
+   MariaDB> ALTER USER 'webapp_app'@'20.192.193.109'
+WITH
+MAX_CONNECTIONS_PER_HOUR 1000
+MAX_QUERIES_PER_HOUR 10000
+MAX_USER_CONNECTIONS 10;
 
 4. Configure SSL requirements:
-   MariaDB> ALTER USER 'webapp_admin'@'localhost' REQUIRE SSL;
-   MariaDB> ALTER USER 'webapp_backup'@'localhost' REQUIRE X509;
+   ALTER USER 'webapp_admin'@'localhost' REQUIRE SSL;
+ALTER USER 'webapp_backup'@'localhost' REQUIRE SSL;
+
+FLUSH PRIVILEGES;
+SELECT User, Host,
+       password_expired,
+       max_user_connections
+FROM mysql.user
+WHERE User IN (
+ 'webapp_app','webapp_admin','dev_user','temp_user'
+);
 
 PART H: CREATE USER MANAGEMENT SCRIPTS
 ---------------------------------------
@@ -275,31 +415,34 @@ PART H: CREATE USER MANAGEMENT SCRIPTS
    # vim /usr/local/bin/create-db-user.sh
    
    #!/bin/bash
-   # Database user creation script
-   
-   USERNAME="$1"
-   HOST="$2"
-   PASSWORD="$3"
-   ROLE="$4"
-   
-   if [ $# -ne 4 ]; then
-       echo "Usage: $0 <username> <host> <password> <role>"
-       echo "Roles: readonly, dataentry, admin, backup, monitor"
-       exit 1
-   fi
-   
-   mysql -u root -p -e "
-   CREATE USER '$USERNAME'@'$HOST' IDENTIFIED BY '$PASSWORD';
-   GRANT '${ROLE}_role' TO '$USERNAME'@'$HOST';
-   SET DEFAULT ROLE '${ROLE}_role' FOR '$USERNAME'@'$HOST';
-   FLUSH PRIVILEGES;
-   "
-   
-   if [ $? -eq 0 ]; then
-       echo "User $USERNAME@$HOST created successfully with $ROLE role"
-   else
-       echo "Failed to create user $USERNAME@$HOST"
-   fi
+# MariaDB user creation with role assignment
+
+USERNAME="$1"
+HOST="$2"
+PASSWORD="$3"
+ROLE="$4"
+
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 <username> <host> <password> <role>"
+    echo "Roles: read_only, data_entry, admin, backup, monitor"
+    exit 1
+fi
+
+mysql -u root -p <<EOF
+CREATE USER IF NOT EXISTS '$USERNAME'@'$HOST'
+IDENTIFIED BY '$PASSWORD';
+
+GRANT '${ROLE}_role' TO '$USERNAME'@'$HOST';
+SET DEFAULT ROLE '${ROLE}_role' FOR '$USERNAME'@'$HOST';
+
+FLUSH PRIVILEGES;
+EOF
+
+if [ $? -eq 0 ]; then
+    echo "User $USERNAME@$HOST created with role ${ROLE}_role"
+else
+    echo "User creation failed"
+fi
    
    # chmod +x /usr/local/bin/create-db-user.sh
 
@@ -307,133 +450,147 @@ PART H: CREATE USER MANAGEMENT SCRIPTS
    # vim /usr/local/bin/audit-db-privileges.sh
    
    #!/bin/bash
-   # Database privilege audit script
-   
-   echo "=== Database User Privilege Audit ==="
-   echo "Date: $(date)"
-   echo
-   
-   mysql -u root -p -e "
-   SELECT 
-       CONCAT(User, '@', Host) as 'User Account',
-       authentication_string as 'Has Password',
-       ssl_type as 'SSL Requirement',
-       max_connections as 'Max Connections'
-   FROM mysql.user 
-   WHERE User != '' 
-   ORDER BY User, Host;
-   "
-   
-   echo
-   echo "=== Database Privileges Summary ==="
-   mysql -u root -p -e "
-   SELECT 
-       CONCAT(User, '@', Host) as 'User Account',
-       Db as 'Database',
-       CONCAT(
-           IF(Select_priv='Y','SELECT ',''),
-           IF(Insert_priv='Y','INSERT ',''),
-           IF(Update_priv='Y','UPDATE ',''),
-           IF(Delete_priv='Y','DELETE ',''),
-           IF(Create_priv='Y','CREATE ',''),
-           IF(Drop_priv='Y','DROP ','')
-       ) as 'Privileges'
-   FROM mysql.db 
-   WHERE User != '' 
-   ORDER BY User, Db;
-   "
-   
-   echo
-   echo "=== Role Assignments ==="
-   mysql -u root -p -e "
-   SELECT 
-       CONCAT(User, '@', Host) as 'User Account',
-       Role as 'Assigned Role'
-   FROM mysql.roles_mapping 
-   ORDER BY User, Role;
-   "
-   
+# MariaDB privilege audit script
+
+echo "=== Database User Audit ==="
+echo "Date: $(date)"
+echo
+
+mysql -u root -p <<EOF
+SELECT
+  CONCAT(User,'@',Host) AS user_account,
+  plugin,
+  password_expired,
+  max_user_connections
+FROM mysql.user
+WHERE User != ''
+ORDER BY User, Host;
+EOF
+
+echo
+echo "=== Database Privileges ==="
+
+mysql -u root -p <<EOF
+SELECT
+  CONCAT(User,'@',Host) AS user_account,
+  Db,
+  CONCAT(
+    IF(Select_priv='Y','SELECT ',''),
+    IF(Insert_priv='Y','INSERT ',''),
+    IF(Update_priv='Y','UPDATE ',''),
+    IF(Delete_priv='Y','DELETE ','')
+  ) AS privileges
+FROM mysql.db
+WHERE User != ''
+ORDER BY User, Db;
+EOF
+
+echo
+echo "=== Role Assignments ==="
+
+mysql -u root -p <<EOF
+SELECT
+  CONCAT(User,'@',Host) AS user_account,
+  Role
+FROM mysql.roles_mapping
+ORDER BY User, Role;
+EOF
+
    # chmod +x /usr/local/bin/audit-db-privileges.sh
 
 3. Create user cleanup script:
    # vim /usr/local/bin/cleanup-db-users.sh
    
    #!/bin/bash
-   # Database user cleanup script
-   
-   echo "=== Database User Cleanup ==="
-   
-   # Find users with expired passwords
-   echo "Users with expired passwords:"
-   mysql -u root -p -e "
-   SELECT 
-       CONCAT(User, '@', Host) as 'User Account',
-       password_expired as 'Password Expired'
-   FROM mysql.user 
-   WHERE password_expired = 'Y';
-   "
-   
-   # Find locked accounts
-   echo
-   echo "Locked user accounts:"
-   mysql -u root -p -e "
-   SELECT 
-       CONCAT(User, '@', Host) as 'User Account',
-       account_locked as 'Account Locked'
-   FROM mysql.user 
-   WHERE account_locked = 'Y';
-   "
-   
-   # Find unused users (no recent connections)
-   echo
-   echo "Users with no recent activity (check manually):"
-   mysql -u root -p -e "
-   SELECT User, Host, 
-          IFNULL(last_login, 'Never') as 'Last Login'
-   FROM mysql.user 
-   LEFT JOIN (
-       SELECT user, host, MAX(connect_time) as last_login
-       FROM information_schema.processlist 
-       GROUP BY user, host
-   ) p ON mysql.user.User = p.user AND mysql.user.Host = p.host
-   WHERE User != 'root' AND User != '';
-   "
-   
+# MariaDB user cleanup audit
+
+echo "=== Expired Password Users ==="
+
+mysql -u root -p <<EOF
+SELECT
+  CONCAT(User,'@',Host) AS user_account,
+  password_expired
+FROM mysql.user
+WHERE password_expired='Y';
+EOF
+
+echo
+echo "=== Locked Accounts (manual check) ==="
+echo "NOTE: MariaDB does not expose lock state via column"
+
+echo
+echo "=== Non-root Users ==="
+
+mysql -u root -p <<EOF
+SELECT User, Host
+FROM mysql.user
+WHERE User NOT IN ('root','mysql')
+ORDER BY User;
+EOF
+
    # chmod +x /usr/local/bin/cleanup-db-users.sh
 
 PART I: TEST USER PRIVILEGES
 -----------------------------
 
 1. Test read-only user:
-   # mysql -u webapp_readonly -p -h 192.168.1.10 webapp_prod
+   # mysql -u webapp_readonly -p -h 20.192.193.109 webapp_prod
    MariaDB> SELECT COUNT(*) FROM users;
    MariaDB> INSERT INTO users (username, email, password_hash) 
    VALUES ('test', 'test@test.com', 'hash');  # Should fail
    MariaDB> EXIT;
 
 2. Test application user:
-   # mysql -u webapp_app -p -h 192.168.1.10 webapp_prod
-   MariaDB> SELECT * FROM users LIMIT 5;
-   MariaDB> INSERT INTO users (username, email, password_hash) 
-   VALUES ('newuser', 'new@test.com', SHA2('password', 256));
-   MariaDB> UPDATE users SET email = 'updated@test.com' WHERE username = 'newuser';
-   MariaDB> DELETE FROM users WHERE username = 'newuser';
-   MariaDB> EXIT;
+mysql -u root -p
+
+ALTER USER 'webapp_app'@'20.192.193.109'
+IDENTIFIED BY 'AppUser123!';
+
+FLUSH PRIVILEGES;
+EXIT;
+
+   # mysql -u webapp_app -p -h 20.192.193.109 webapp_prod
+
+  SELECT * FROM users LIMIT 5;
+
+INSERT INTO users (username, email, password_hash)
+VALUES ('newuser', 'new@test.com', SHA2('password',256));
+
+UPDATE users
+SET email='updated@test.com'
+WHERE username='newuser';
+
+DELETE FROM users
+WHERE username='newuser';
+;
 
 3. Test column-level privileges:
-   # mysql -u limited_user -p -h 192.168.1.10 webapp_prod
+   # mysql -u limited_user -p -h 20.192.193.109 webapp_prod
    MariaDB> SELECT id, username, email FROM users LIMIT 5;
    MariaDB> SELECT password_hash FROM users LIMIT 1;  # Should fail
    MariaDB> UPDATE users SET email = 'new@email.com' WHERE id = 1;
    MariaDB> EXIT;
 
 4. Test role-based access:
-   # mysql -u webapp_admin -p webapp_prod
-   MariaDB> SET ROLE 'admin_role';
-   MariaDB> SHOW GRANTS;
-   MariaDB> CREATE TABLE test_table (id INT, name VARCHAR(50));
-   MariaDB> DROP TABLE test_table;
-   MariaDB> EXIT;
+mysql -u root -p
+
+ALTER USER 'webapp_admin'@'localhost' REQUIRE NONE;
+FLUSH PRIVILEGES;
+EXIT;
+;
+
+mysql -u webapp_admin -p webapp_prod
+
+SET ROLE 'admin_role';
+SHOW GRANTS;
+
+CREATE TABLE test_table (
+  id INT,
+  name VARCHAR(50)
+);
+
+DROP TABLE test_table;
+EXIT;
 
 PART J: MONITOR USER ACTIVITY
 ------------------------------
@@ -442,76 +599,76 @@ PART J: MONITOR USER ACTIVITY
    # vim /usr/local/bin/monitor-db-users.sh
    
    #!/bin/bash
-   # Monitor database user activity
-   
-   echo "=== Database User Activity Monitor ==="
-   echo "Date: $(date)"
-   echo
-   
-   echo "Current active connections:"
-   mysql -u root -p -e "
-   SELECT 
-       USER as 'User',
-       HOST as 'Host',
-       DB as 'Database',
-       COMMAND as 'Command',
-       TIME as 'Time (sec)',
-       STATE as 'State'
-   FROM information_schema.PROCESSLIST 
-   WHERE USER != 'system user' 
-   ORDER BY TIME DESC;
-   "
-   
-   echo
-   echo "Connection statistics by user:"
-   mysql -u root -p -e "
-   SELECT 
-       USER as 'User',
-       COUNT(*) as 'Connections'
-   FROM information_schema.PROCESSLIST 
-   WHERE USER != 'system user' 
-   GROUP BY USER 
-   ORDER BY Connections DESC;
-   "
-   
-   echo
-   echo "Recent failed login attempts:"
-   grep "Access denied" /var/log/mariadb/mariadb.log | tail -10
+# MariaDB user activity monitor
+
+echo "=== Database User Activity Monitor ==="
+echo "Date: $(date)"
+echo
+
+echo "Active connections:"
+mysql -u root -p <<EOF
+SELECT
+  USER AS user,
+  HOST AS host,
+  DB AS database_name,
+  COMMAND,
+  TIME,
+  STATE
+FROM information_schema.PROCESSLIST
+WHERE USER IS NOT NULL
+ORDER BY TIME DESC;
+EOF
+
+echo
+echo "Connections per user:"
+mysql -u root -p <<EOF
+SELECT
+  USER AS user,
+  COUNT(*) AS connections
+FROM information_schema.PROCESSLIST
+WHERE USER IS NOT NULL
+GROUP BY USER
+ORDER BY connections DESC;
+EOF
    
    # chmod +x /usr/local/bin/monitor-db-users.sh
+/usr/local/bin/monitor-db-users.sh
 
 2. Schedule user monitoring:
+yum install cronie -y
    # crontab -e
    # Add: */30 * * * * /usr/local/bin/monitor-db-users.sh > /var/log/db-user-activity.log
+crontab -l
 
 3. Create user privilege report:
    # vim /usr/local/bin/user-privilege-report.sh
    
    #!/bin/bash
-   # Generate user privilege report
-   
-   REPORT_FILE="/var/log/db-privilege-report-$(date +%Y%m%d).txt"
-   
-   {
-       echo "=== Database User Privilege Report ==="
-       echo "Generated: $(date)"
-       echo "========================================"
-       echo
-       
-       /usr/local/bin/audit-db-privileges.sh
-       
-       echo
-       echo "=== Security Recommendations ==="
-       echo "1. Review users with excessive privileges"
-       echo "2. Check for users with expired passwords"
-       echo "3. Verify SSL requirements for sensitive accounts"
-       echo "4. Monitor for unused accounts"
-       
-   } > "$REPORT_FILE"
-   
-   echo "Report generated: $REPORT_FILE"
+# Generate database privilege report
+
+REPORT_FILE="/var/log/db-privilege-report-$(date +%Y%m%d).txt"
+
+{
+  echo "=== Database User Privilege Report ==="
+  echo "Generated: $(date)"
+  echo "====================================="
+  echo
+
+  /usr/local/bin/audit-db-privileges.sh
+
+  echo
+  echo "=== Security Review Notes ==="
+  echo "1. Review users with excessive privileges"
+  echo "2. Verify expired passwords"
+  echo "3. Remove unused accounts"
+} > "$REPORT_FILE"
+
+echo "Report generated: $REPORT_FILE"
    
    # chmod +x /usr/local/bin/user-privilege-report.sh
+/usr/local/bin/user-privilege-report.sh
+ls -l /var/log/db-privilege-report-*.txt
+cat /var/log/db-privilege-report-*.txt
 
 PART K: FLUSH PRIVILEGES AND VALIDATE
 --------------------------------------
@@ -521,11 +678,18 @@ PART K: FLUSH PRIVILEGES AND VALIDATE
    MariaDB> FLUSH PRIVILEGES;
    MariaDB> EXIT;
 
+mysql -u root -p -e "SELECT User, Host FROM mysql.user ORDER BY User, Host;"
+
+mysql -u root -p -e "SHOW GRANTS FOR 'webapp_readonly'@'20.192.193.109';"
+mysql -u root -p -e "SHOW GRANTS FOR 'webapp_app'@'20.192.193.109';"
+mysql -u root -p -e "SHOW GRANTS FOR 'limited_user'@'20.192.193.109';"
+mysql -u root -p -e "SHOW GRANTS FOR 'webapp_admin'@'localhost';"
+
 2. Validate user creation:
    # /usr/local/bin/audit-db-privileges.sh
 
 3. Test user management script:
-   # /usr/local/bin/create-db-user.sh testuser 192.168.1.% TestPass123! readonly
+   # mysql -u root -p -e "DROP USER 'testuser'@'20.192.193.109'; FLUSH PRIVILEGES;"
 
 4. Monitor user activity:
    # /usr/local/bin/monitor-db-users.sh
