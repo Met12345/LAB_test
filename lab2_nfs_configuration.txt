@@ -47,8 +47,8 @@ PART A: CONFIGURE NFS SERVER (server1)
    
    #install firewall 
    
-   yum install firewalld
-   systemctl enable --now firewalld
+   #yum install firewalld -y
+   #systemctl enable --now firewalld
 
 
    # firewall-cmd --permanent --add-service=nfs
