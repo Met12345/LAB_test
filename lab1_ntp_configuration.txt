@@ -17,6 +17,11 @@ EQUIPMENT NEEDED:
 - 2 RHEL systems (server1: 20.192.192.160, server2: 20.192.234.41)
 - Internet connectivity for external time sources
 
+NOTE: 
+- NTP uses UDP port 123.
+- In AWS, Security Group must allow UDP 123 between client and server.
+- Without this rule, synchronization fails and ^? appears instead of ^*.
+
 LAB TASKS:
 
 PART A: CONFIGURE NTP SERVER (server1)
@@ -24,7 +29,7 @@ PART A: CONFIGURE NTP SERVER (server1)
 
 1. Install NTP service:
    # yum install chrony -y
-   # systemctl enable chronyd
+   # systemctl enable- --now chronyd
 
 2. Configure NTP sxerver (/etc/chrony.conf):
    #install yum 
@@ -54,7 +59,7 @@ PART A: CONFIGURE NTP SERVER (server1)
    # firewall-cmd --list-ports
 
 4. Start and verify NTP service:
-   # systemctl start chronyd
+   # systemctl restart chronyd
    # systemctl status chronyd
    # chronyc sources -v
    # ss -lunp | grep :123
@@ -65,7 +70,7 @@ PART B: CONFIGURE NTP CLIENT (server2)
 
 1. Install NTP client:
    # yum install chrony -y
-   # systemctl enable chronyd
+   # systemctl enable --now chronyd
 
 2. Configure NTP client (/etc/ntp.conf):
    #install yum 
@@ -89,7 +94,7 @@ PART B: CONFIGURE NTP CLIENT (server2)
 
 
 5. Start NTP service:
-   # systemctl start chronyd
+   # systemctl restart chronyd
    # systemctl status chronyd
 
 6. Force time synchronization:
