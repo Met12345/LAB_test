@@ -124,11 +124,15 @@ PART C: TESTING AND VERIFICATION
 PART D: ADVANCED CONFIGURATION
 -------------------------------
 
-1. Configure NFS with Kerberos security in server 1:
+1.  Create Secure Directory in Server1
+   # mkdir -p /shared/secure
+   # chmod 755 /shared/secure
+
+2. Configure NFS with Kerberos security in server 1:
    # vim /etc/exports
    /shared/secure 20.192.248.146(rw,sync,sec=krb5p)  (Use server2 ip )
 
-2. Set up AutoFS for automatic mounting server 2:
+3. Set up AutoFS for automatic mounting server 2:
    # yum install autofs -y
    # vim /etc/auto.master
    /mnt/auto /etc/auto.nfs --timeout=60
