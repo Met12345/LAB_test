@@ -80,7 +80,6 @@ PART B: CONFIGURE NTP CLIENT (server2)
    
    Replace server lines with:
    server 20.192.192.160 iburst prefer  (User Server 1 Ip )
-   server 0.rhel.pool.ntp.org iburst
 
 4. Configure firewall:
  
