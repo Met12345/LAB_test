@@ -31,7 +31,9 @@ PART A: INSTALL AND CONFIGURE SAMBA SERVER
    # mkdir -p /srv/samba/private
    # mkdir -p /srv/samba/group-share
 
-3. Set directory permissions:
+3. Set directory Owenrship&permissions:
+   # chown -R root:sambagroup /srv/samba/group-share
+   # chown -R sambauser1:sambauser1 /srv/samba/private
    # chmod 755 /srv/samba/public
    # chmod 750 /srv/samba/private
    # chmod 770 /srv/samba/group-share
@@ -150,12 +152,7 @@ PART D: CLIENT CONFIGURATION AND TESTING
    # mkdir -p /mnt/samba-private
    # mkdir -p /mnt/samba-group
 
-   # chown -R nobody:nobody /srv/samba/public
-   # chown -R sambauser1:sambauser1 /srv/samba/private
-   # chown -R :sambagroup /srv/samba/group-share
-
-
-
+   
 3. Test Samba connectivity:
    # smbclient -L 20.192.233.129
    # smbclient -L 20.192.233.129 -U sambauser1
