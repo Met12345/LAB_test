@@ -64,7 +64,7 @@ PART B: CONFIGURE SAMBA SHARES
 
 2. Configure main Samba settings (/etc/samba/smb.conf):
    # install vim 
-   # yum install vim 
+   # yum install vim -y
    # vim /etc/samba/smb.conf
    
    [global]
@@ -124,9 +124,8 @@ PART B: CONFIGURE SAMBA SHARES
 PART C: CONFIGURE FIREWALL AND START SERVICES
 ----------------------------------------------
    # install firewall 
-   # yum install firewalld
-   # systemctl start firewalld
-   # systemctl enable firewalld
+   # yum install firewalld 
+   # systemctl enable firewalld --now
    
 1. Configure firewall:
    # firewall-cmd --permanent --add-service=samba
@@ -144,7 +143,7 @@ PART D: CLIENT CONFIGURATION AND TESTING
 -----------------------------------------
 
 1. Install CIFS utilities on client:
-   # yum install cifs-utils -y
+   # yum install cifs-utils samba-client -y
 
 2. Create mount points:
    # mkdir -p /mnt/samba-public
@@ -163,7 +162,7 @@ PART D: CLIENT CONFIGURATION AND TESTING
 
 
 4. Mount shares manually:
-   # mount -t cifs //20.192.211.221/public /mnt/samba-public -o username=guest,password=
+   # mount -t cifs //20.192.211.221/public /mnt/samba-public -o username=guest
    # mount -t cifs //20.192.211.221/private /mnt/samba-private -o username=sambauser1
    # mount -t cifs //20.192.211.221/group-share /mnt/samba-group -o username=sambauser1
 
@@ -178,6 +177,8 @@ domain=WORKGROUP
 6. Add to /etc/fstab:
    # vim /etc/fstab
    //20.192.211.221/private /mnt/samba-private cifs credentials=/etc/samba/credentials,uid=1000,gid=1000 0 0
+
+   //20.192.226.151/private   /mnt/samba-private   cifs   credentials=/etc/samba/credentials,_netdev,vers=3.0   0 0
 
 PART E: TESTING AND VERIFICATION
 ---------------------------------
