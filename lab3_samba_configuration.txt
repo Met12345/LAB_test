@@ -40,8 +40,8 @@ PART A: INSTALL AND CONFIGURE SAMBA SERVER
    # useradd -s /sbin/nologin sambauser1
    # useradd -s /sbin/nologin sambauser2
    # groupadd sambagroup
-   # usermod -G sambagroup sambauser1
-   # usermod -G sambagroup sambauser2
+   # usermod -aG sambagroup sambauser1
+   # usermod -aG sambagroup sambauser2
 
 5. Set Samba passwords:
    # smbpasswd -a sambauser1
