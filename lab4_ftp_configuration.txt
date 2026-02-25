@@ -30,8 +30,8 @@ PART A: INSTALL AND BASIC CONFIGURATION
    # cp /etc/vsftpd/vsftpd.conf /etc/vsftpd/vsftpd.conf.backup
 
 3. Create FTP users:
-   # useradd -s /sbin/nologin ftpuser1
-   # useradd -s /sbin/nologin ftpuser2
+   # usermod -s /bin/bash ftpuser1
+   # usermod -s /bin/bash ftpuser1
    # passwd ftpuser1
    # passwd ftpuser2
 
@@ -125,9 +125,13 @@ PART D: ADVANCED SECURITY CONFIGURATION
 ----------------------------------------
 
 1. Configure SSL/TLS encryption:
-   # openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-     -keyout /etc/ssl/private/vsftpd.key \
-     -out /etc/ssl/certs/vsftpd.crt
+   # mkdir -p /etc/ssl/private
+   # mkdir -p /etc/ssl/certs
+   # chmod 700 /etc/ssl/private
+   # openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/vsftpd.key -out /etc/ssl/certs/vsftpd.crt
+   # chmod 600 /etc/ssl/private/vsftpd.key
+   # chmod 644 /etc/ssl/certs/vsftpd.crt
+   # restorecon -Rv /etc/ssl
    
    # vim /etc/vsftpd/vsftpd.conf
    # Add SSL settings
