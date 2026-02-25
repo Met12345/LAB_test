@@ -50,6 +50,7 @@ PART A: INSTALL AND CONFIGURE SAMBA SERVER
    # smbpasswd -e sambauser2
 
 6. Configure SELinux for Samba:
+   # yum install policycoreutils-python-utils -y
    # setsebool -P samba_enable_home_dirs on
    # setsebool -P samba_export_all_rw on
    # semanage fcontext -a -t samba_share_t "/srv/samba(/.*)?"
