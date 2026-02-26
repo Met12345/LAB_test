@@ -62,7 +62,6 @@ PART B: CONFIGURE VSFTPD MAIN SETTINGS
    anon_upload_enable=YES
    anon_mkdir_write_enable=YES
    anon_root=/var/ftp
-   anon_upload_enable=YES
    anon_world_readable_only=NO
    allow_writeable_chroot=YES
 
@@ -83,7 +82,7 @@ PART B: CONFIGURE VSFTPD MAIN SETTINGS
    listen_ipv6=NO
    
    # User restrictions
-   userlist_enable=NO      (This Line )
+   userlist_enable=NO    (This Line )
    userlist_deny=NO
    userlist_file=/etc/vsftpd/user_list
    
