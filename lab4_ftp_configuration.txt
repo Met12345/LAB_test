@@ -30,8 +30,9 @@ PART A: INSTALL AND BASIC CONFIGURATION
    # cp /etc/vsftpd/vsftpd.conf /etc/vsftpd/vsftpd.conf.backup
 
 3. Create FTP users:
-   # usermod -s /bin/bash ftpuser1
-   # usermod -s /bin/bash ftpuser1
+   # echo "/sbin/nologin" >> /etc/shells
+   # usermod -s /sbin/nologin ftpuser1
+   # usermod -s /sbin/nologin ftpuser2
    # passwd ftpuser1
    # passwd ftpuser2
 
