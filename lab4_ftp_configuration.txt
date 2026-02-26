@@ -124,6 +124,7 @@ PART C: CONFIGURE USER ACCESS CONTROLS
 
 2. Create allowed users list:
    # FIXED: Correct filename with underscore (user_list not userlist)
+   # echo "anonymous" > /etc/vsftpd/user_list
    # echo "ftpuser1" > /etc/vsftpd/user_list
    # echo "ftpuser2" >> /etc/vsftpd/user_list
    
