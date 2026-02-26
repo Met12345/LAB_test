@@ -56,9 +56,6 @@ options {
     statistics-file "/var/named/data/named_stats.txt";
     memstatistics-file "/var/named/data/named_mem_stats.txt";
        
-    allow-query { localhost; 20.192.195.205; };
-    allow-query-cache { localhost; 20.192.195.205; };
-       
     recursion yes;
     #dnssec-enable yes;# bcz in RHEL 8+/BIND 9.11+ dnssec-enable is deprecated,DNSSEC automatically handle
     dnssec-validation yes;
